@@ -53,5 +53,10 @@ Function GitConfigure {
     if (-not (git config --global user.email)) {
         git config --global user.email "Mark@IntelliTect.com"
     }
+
+    # Confiure Misc. Diff Tools
+    git config difftool.debug-powershell.cmd 'powershell -noprofile -command { Write-Output \"REMOTE=''$REMOTE'' LOCAL=''$LOCAL''\"}'
+    git config difftool.debug-cmd.exe.cmd 'cmd.exe /C \"ECHO REMOTE=''$REMOTE'' LOCAL=''$LOCAL''\"}'
+    git config difftool.vscode.cmd 'code --wait --new-window --diff \"$LOCAL\" \"$REMOTE\"'
 }
 GitConfigure
