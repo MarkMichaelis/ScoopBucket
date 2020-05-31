@@ -2,8 +2,17 @@
 # TODO: Generalize
 $UserBucket = "MarkMichaelis"
 
-$currentScoopDirectory = "$env:SCOOP\apps\scoop\current\"
-. "$currentScoopDirectory\libexec\scoop-search.ps1" > $null
+if(!$env:SCOOP -and (test-path "$env:ProgramData\scoop\apps\scoop\current")) {
+    $env:SCOOP = "$env:ProgramData\scoop"
+}
+
+if($env:SCOOP) {
+    $currentScoopDirectory = "$env:SCOOP\apps\scoop\current\"
+    . "$currentScoopDirectory\libexec\scoop-search.ps1" > $null
+}
+else {
+    Write-Warning '$env:SCOOP not found.'
+}
 
 Function Test-Command {
     [CmdletBinding()]
