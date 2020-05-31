@@ -2,7 +2,7 @@
 . "$PSScriptRoot\Utils.ps1"
 
 
-Function Invoke-GitIntegrationWithBeyondCompare {
+Function Invoke-GitConfigBeyondCompare {
     Write-Warning "Integration with Beyond Compare is not working below."
     $beyondComparePath = "${env:ProgramFiles}\Beyond Compare 4\BComp.exe"
     if ( (Test-Path $beyondComparePath) -AND (Get-Command git -ErrorAction Ignore) ) {
@@ -35,4 +35,4 @@ Function Invoke-GitIntegrationWithBeyondCompare {
     }
     #>
 }
-Invoke-GitIntegrationWithBeyondCompare
+Invoke-GitConfigBeyondCompare

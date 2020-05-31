@@ -1,6 +1,7 @@
 
 . "$PSScriptRoot\Utils.ps1"
-. "$PSScriptRoot\GitIntegrationWithBeyondCompare.ps1"
+. "$PSScriptRoot\GitConfigBeyondCompare.ps1" # Runs Invoke-GitConfigBeyondCompare
+. "$PSScriptRoot\GitConfigVisualStudio.ps1" # Runs Invoke-GitConfigVisualStudio
 
 Function GitConfigure {
     Write-Host "Running $($MyInvocation.MyCommand.Name)..."
@@ -23,9 +24,7 @@ Function GitConfigure {
 
     choco install poshgit -y # -force -allowclobber
     #Import-Module (Get-Childitem $env:PSModulePath.Split(';') posh-git.psm1 -Recurse -ErrorAction Ignore).FullName
-
-    Invoke-GitIntegrationWithBeyondCompare
-
+    
     git config --global color.ui 'auto'
     git config --global push.default 'simple'
     git config --global color.status.untracked "red normal bold"
@@ -58,5 +57,6 @@ Function GitConfigure {
     git config difftool.debug-powershell.cmd 'powershell -noprofile -command { Write-Output \"REMOTE=''$REMOTE'' LOCAL=''$LOCAL''\"}'
     git config difftool.debug-cmd.exe.cmd 'cmd.exe /C \"ECHO REMOTE=''$REMOTE'' LOCAL=''$LOCAL''\"}'
     git config difftool.vscode.cmd 'code --wait --new-window --diff \"$LOCAL\" \"$REMOTE\"'
+
 }
 GitConfigure
