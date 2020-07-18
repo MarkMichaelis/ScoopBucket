@@ -1,8 +1,9 @@
 {
     "$schema": "https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json",
-    "version": "1.0.000",
+    "version": "1.0.0001",
     "url": ["https://creativecloud.adobe.com/apps/all/desktop?action=install&source=apps&productId=lightroom-classic#"],
     "installer": {
-        "args": " /s /v'/qb'"
+        "file": "Lightroom_Classic_Set-Up.exe",
+        "args": "/s /v'/qb'"
     }
 }
