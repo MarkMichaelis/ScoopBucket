@@ -4,6 +4,6 @@
     "url": ["https://creativecloud.adobe.com/apps/all/desktop?action=install&source=apps&productId=lightroom-classic##/Lightroom_Classic_Set-Up.exe"],
     "installer": {
         "file": "Lightroom_Classic_Set-Up.exe",
-        "args": "/s", "/v\"/qb\""
+        "args": ["/s", "/v\"/qb\""]
     }
 }
