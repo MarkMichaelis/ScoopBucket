@@ -7,4 +7,3 @@ powercfg /change hibernate-timeout-dc 60
 powercfg /change monitor-timeout-ac 10
 powercfg /change standby-timeout-ac 0
 powercfg /change hibernate-timeout-ac 0
-
