@@ -1,6 +1,6 @@
 ﻿{
     "$schema": "https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json",
-    "version": "1.0.000",
+    "version": "1.0.001",
     "url": ["https://github.com/dropbox/dbxcli/releases/download/v3.0.0/dbxcli-windows-amd64.exe"],
     "homepage": "https://github.com/dropbox/dbxcli",
     "description": "Dropbox command line interface",
@@ -8,5 +8,5 @@
         "url": "https://github.com/dropbox/dbxcli/releases/download/",
         "re": ">v\\d+\\.\\d+\\.\\d+\\dbxcli-windows-amd64.exe"
     },
-    "bin": ["dbxcli-windows-amd64.exe", "dbxcli" ]
+    "bin": ["dbxcli", "dbxcli-windows-amd64.exe"]
 }
