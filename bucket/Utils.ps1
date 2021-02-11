@@ -7,8 +7,8 @@ if(!$env:SCOOP -and (test-path "$env:ProgramData\scoop\apps\scoop\current")) {
 }
 
 if($env:SCOOP) {
-    $currentScoopDirectory = "$env:SCOOP\apps\scoop\current\"
-    . "$currentScoopDirectory\libexec\scoop-search.ps1" > $null
+    $currentScoopDirectory = "$env:SCOOP\apps\scoop\current"
+    . (Join-Path $currentScoopDirectory 'libexec\scoop-search.ps1') > $null
 }
 else {
     Write-Warning '$env:SCOOP not found.'
