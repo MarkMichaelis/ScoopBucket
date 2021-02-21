@@ -22,9 +22,12 @@ Function GitConfigure {
         #/NoAutoCrlf"    <# This setting only affects new installs, it will not override an existing .gitconfig. This will ensure 'Checkout as is, commit as is' #>
     }
 
-    choco install poshgit -y # -force -allowclobber
+    Install-Module posh-git -y -Scope -AllUsers -force -allowclobber  # Both Posh-Git and IntelliTect.Git support Get-GitBranch. 
+                                                                      # IntelliTect.Git will get priority if it appears first in the PSModulePath
+                                                                      # or it is installed after Pscx (if not using source code)
     #Import-Module (Get-Childitem $env:PSModulePath.Split(';') posh-git.psm1 -Recurse -ErrorAction Ignore).FullName
-    
+    Add-PoshGitToProfile -AllHosts -AllUsers -StartSshAgent
+
     git config --global color.ui 'auto'
     git config --global push.default 'simple'
     git config --global color.status.untracked "red normal bold"
