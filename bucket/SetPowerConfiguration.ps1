@@ -1,3 +1,5 @@
+Write-Host 'Setting Power Configuration...'
+
 # Battery
 powercfg /change monitor-timeout-dc 5
 powercfg /change standby-timeout-dc 10
