@@ -1,11 +1,11 @@
 ﻿{
     "$schema": "https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json",
-    "version": "1.04.00",
+    "version": "1.04.01",
     "url": "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/SetPowerConfiguration.ps1",
     "depends" :[
         "EnableHybernate"
     ],
     "installer": {
-        "file": "SetPowerConfiguration.ps1"
+        "script": "& \"$dir\\SetPowerConfiguration.ps1\""
     }
 }
