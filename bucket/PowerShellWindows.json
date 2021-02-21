@@ -6,6 +6,6 @@
         "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/PowerShell.ps1"
     ],
     "installer": {
-        "script": "PowerShell -Command { .\\PowerShell.ps1 }"
+        "script": "PowerShell -Command { $PSScriptRoot\\PowerShell.ps1 }"
     }
 }
