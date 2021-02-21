@@ -1,11 +1,11 @@
 ﻿{
     "$schema": "https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json",
-    "version": "1.01.000",
+    "version": "1.01.001",
     "url": [
         "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/Utils.ps1",
         "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/PowerShell.ps1"
     ],
     "installer": {
-        "script": "PowerShell -Command { $PSScriptRoot\\PowerShell.ps1 }"
+        "script": "PowerShell -Command { dir;$PSScriptRoot\\PowerShell.ps1 }"
     }
 }
