@@ -8,6 +8,6 @@
         "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/GitConfigure.ps1"
     ],
     "installer": {
-        "file": "GitConfigure.ps1"
+        "script": "& \"$dir\\GitConfigure.ps1\""
     }
 }

@@ -2,6 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json",
   "homepage": "https://github.com/MarkMichaelis/ScoopBucket",
   "description": "Setups my personal scoop bucket.",
+  "url": "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/blank",
   "notes": "Of course, this script is placed in the MarkMichaelis bucket so you it presents a chicken and egg problem.",
   "version": "1.0.0",
   "installer": {
@@ -11,6 +12,5 @@
   },
   "uninstaller": {
     "script": ["scoop bucket rm LocalRepo"]
-  },
-  "url": "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/blank"
+  }
 }
