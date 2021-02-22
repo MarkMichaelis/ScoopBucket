@@ -1,12 +1,14 @@
 ﻿{
     "$schema": "https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json",
-    "version": "1.01.003",
+    "version": "1.02.000",
     "url": [
         "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/Utils.ps1",
         "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/PowerShell.ps1"
     ],
     "installer": {
-        "script": 
-            "PowerShell -Command { dir; }"
+        "script": [
+            "choco install PowerShell",
+            "PowerShell.exe -File \"$dir\\PowerShell.ps1\""
+        ]
     }
 }

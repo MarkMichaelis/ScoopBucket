@@ -2,7 +2,7 @@
 Write-Host 'Installing and configuring PowerShell...'
 . "$PSScriptRoot\Utils.ps1"
 
-Update-Help
+Update-Help -ErrorAction Ignore
 if((Get-PSRepository PSGallery).InstallationPolicy -ne 'Trusted') {
     Set-PSRepository -Name PSGallery -InstallationPolicy 'Trusted'
 }
