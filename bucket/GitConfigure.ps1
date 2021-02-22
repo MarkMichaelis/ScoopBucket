@@ -45,7 +45,8 @@ Function GitConfigure {
     choco install gitextensions -y
     choco install gitkraken -y
 
-    scoop install hub
+    scoop install gh
+    # scoop install hub # gh is a more recent standalone CLI (while hub is a proxy to git)
 
     # TODO: Check if already configured.
     # TODO: Remove hard coding if the information.
