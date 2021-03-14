@@ -62,5 +62,6 @@ Function GitConfigure {
     git config difftool.debug-cmd.exe.cmd 'cmd.exe /C \"ECHO REMOTE=''$REMOTE'' LOCAL=''$LOCAL''\"}'
     git config difftool.vscode.cmd 'code --wait --new-window --diff \"$LOCAL\" \"$REMOTE\"'
 
+    Set-Service -StartupType Manual ssh-agent
 }
 GitConfigure
