@@ -44,4 +44,5 @@ Add-ScoopBucket -Name 'MarkMichaelis' -Url 'https://github.com/MarkMichaelis/Sco
 
 'McAfeeUninstall', 'OSBasePackages' | ForEach-Object {
   Write-Host "Installing $_..."
+  scoop install $_
 }
