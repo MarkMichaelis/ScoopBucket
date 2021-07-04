@@ -10,7 +10,8 @@ Install-Module PowershellGet -Repository PSGallery  # Updated to allow support f
 Install-Module Pscx -AllowClobber -AllowPrerelease  # Both Pscx and IntelliTect.File support Edit-File. 
                                                     # IntelliTect.File will get priority once if it appears first in the PSModulePath
                                                     # or it is installed after Pscx (if not using source code)
-
+Install-Module ZLocation -Repository PSGallery
+Install-Module PSReadLine -Force   # Update the version of PSReadline
 scoop install Pester
 
 
