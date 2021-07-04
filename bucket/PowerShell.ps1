@@ -12,7 +12,7 @@ Install-Module Pscx -AllowClobber -AllowPrerelease  # Both Pscx and IntelliTect.
                                                     # or it is installed after Pscx (if not using source code)
 Install-Module ZLocation -Repository PSGallery
 Install-Module PSReadLine -Force   # Update the version of PSReadline
-scoop install Pester
+choco install Pester
 
 
 
