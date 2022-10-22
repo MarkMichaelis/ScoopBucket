@@ -12,7 +12,7 @@ if (-not (Get-Command choco -ErrorAction Ignore)) {
 if (-not (Get-Command scoop -ErrorAction Ignore)) {
   $env:SCOOP = "$env:ProgramData\scoop"
   [environment]::SetEnvironmentVariable('SCOOP', $env:SCOOP, 'Machine')
-  Invoke-WebRequest -UseBasicParsing get.scoop.sh | Invoke-Expression
+  Invoke-Expression "& {$(Invoke-RestMethod get.scoop.sh)} -RunAsAdmin"
 }
 
 
@@ -42,7 +42,7 @@ function Add-ScoopBucket {
 }
 Add-ScoopBucket -Name 'MarkMichaelis' -Url 'https://github.com/MarkMichaelis/ScoopBucket'
 
-'McAfeeUninstall', 'OSBasePackages' | ForEach-Object {
+<#'McAfeeUninstall',#> 'OSBasePackages' | ForEach-Object {
   Write-Host "Installing $_..."
   scoop install $_
 }

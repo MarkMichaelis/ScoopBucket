@@ -8,7 +8,7 @@ Write-Host 'Installing and configuring OSBasePackages...'
 }
 
 #hub - GitHub CLI
-'hub', 'dotnet', 'VisualStudio2019Enterprise' | ForEach-Object { 
+'gh', 'dotnet', 'VisualStudio2019Enterprise' | ForEach-Object { 
     Write-Host "Installing $_..."
     scoop install -g $_
 }
