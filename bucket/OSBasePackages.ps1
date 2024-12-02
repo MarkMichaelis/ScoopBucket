@@ -17,7 +17,7 @@ $OSPackages = @{
     'fzf'=([PSCustomObject]@{ WingetName='fzf'; WinGetID='junegunn.fzf';  })  # Needs PowerShell install of PSFzf module. See https://github.com/kelleyma49/PSFzf
 }
 
-$OSPackages | `
+$OSPackages.VAlues | `
     ForEach-Object { 
         Write-Host "Installing $($_.WingetName)..."
         Winget install --id $_.WingetID
