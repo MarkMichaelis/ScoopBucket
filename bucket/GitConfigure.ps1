@@ -43,9 +43,12 @@ Function GitConfigure {
     choco install git-credential-manager-for-windows -y
 
     choco install gitextensions -y
-    choco install gitkraken -y
 
-    scoop install gh
+    # Using Chocolatey package because it is a is a system-wide install into C:\Program Files and creates a shim automatically. Also, Scoop and Winget both install on a per-user basis. (Also both scoop and chocolatey create shims, scoop creates them in the user profile and chocolatey creates them in a system location.)
+    choco install gitkraken -y
+    winget install --scope machine GitKraken.cli # enables the gk command line tool for GitKraken.
+
+    winget install --scope machine GitHub.cli
     # scoop install hub # gh is a more recent standalone CLI (while hub is a proxy to git)
 
     # TODO: Check if already configured.
