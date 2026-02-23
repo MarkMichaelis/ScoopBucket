@@ -29,3 +29,23 @@ $WingetPackages.Values | `
         winget install --scope machine --id $_.WinGetID
     }
 
+# Microsoft Store apps (installed via winget --source msstore)
+$MicrosoftStorePackages = @{
+    'ChatGPT'=([PSCustomObject]@{ WingetName='ChatGPT'; WinGetID='9NT1R1C2HH7J'; })
+    'VPNUnlimited'=([PSCustomObject]@{ WingetName='VPN Unlimited'; WinGetID='9NRQBLR605RG'; })
+    'Grammarly'=([PSCustomObject]@{ WingetName='Grammarly'; WinGetID='XPDDXX9QW8N9D7'; })
+    'WhatsApp'=([PSCustomObject]@{ WingetName='WhatsApp'; WinGetID='9NKSQGP7F2NH'; })
+}
+
+$MicrosoftStorePackages.Values | `
+    ForEach-Object { 
+        Write-Host "Installing $($_.WingetName)..."
+        winget install --source msstore --id $_.WinGetID --accept-package-agreements --accept-source-agreements
+    }
+
+# Readwise Reader (sideloaded MSIX, not available in winget or Microsoft Store)
+Write-Host "Installing Readwise Reader..."
+Invoke-WebRequest -Uri 'https://readwise.io/read/download_latest/desktop/windows' -OutFile "$env:TEMP\ReadwiseReader.msix"
+Add-AppxPackage -Path "$env:TEMP\ReadwiseReader.msix"
+Remove-Item "$env:TEMP\ReadwiseReader.msix" -ErrorAction Ignore
+
