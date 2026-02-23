@@ -71,6 +71,7 @@ jobs:
         run: |
           gh label create "install-failure" --description "Automated: package install failed in CI" --color "d73a4a" --force
           gh label create "automated" --description "Created by CI workflow" --color "0075ca" --force
+          gh label create "verification-failure" --description "Automated: post-install verification failed" --color "e4e669" --force
 
       - name: File issues for failures
         if: always() && steps.test.outputs.has_failures == 'true'
