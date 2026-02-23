@@ -15,6 +15,10 @@ $OSPackages = @{
     'bat'=([PSCustomObject]@{ WingetName='bat'; WinGetID='sharkdp.bat';  }) # Supports Git integration which has not knowingly been configured.
     'BurntSushi.ripgrep.MSVC'=([PSCustomObject]@{ WingetName='Ripgrep'; WinGetID='BurntSushi.ripgrep.MSVC';  }) 
     'fzf'=([PSCustomObject]@{ WingetName='fzf'; WinGetID='junegunn.fzf';  })  # Needs PowerShell install of PSFzf module. See https://github.com/kelleyma49/PSFzf
+    'WindowsTerminal'=([PSCustomObject]@{ WingetName='Windows Terminal'; WinGetID='Microsoft.WindowsTerminal';  })
+    'FFmpeg'=([PSCustomObject]@{ WingetName='FFmpeg'; WinGetID='Gyan.FFmpeg';  })
+    'eSpeak-NG'=([PSCustomObject]@{ WingetName='eSpeak NG'; WinGetID='eSpeak-NG.eSpeak-NG';  })
+    'SoX'=([PSCustomObject]@{ WingetName='SoX'; WinGetID='ChrisBagwell.SoX';  })
 }
 
 $OSPackages.VAlues | `
