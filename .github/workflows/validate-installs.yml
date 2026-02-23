@@ -45,6 +45,18 @@ jobs:
             [Environment]::SetEnvironmentVariable('SCOOP', $env:SCOOP, 'Machine')
             Invoke-Expression "& {$(Invoke-RestMethod get.scoop.sh)} -RunAsAdmin"
           }
+          # Ensure scoop shims are on PATH for this and all subsequent steps
+          $scoopShims = Join-Path $env:ProgramData 'scoop\shims'
+          if ($env:Path -notlike "*$scoopShims*") {
+            $env:Path = "$scoopShims;$env:Path"
+          }
+          # Persist for subsequent steps via GITHUB_PATH
+          if ($env:GITHUB_PATH) {
+            $scoopShims | Out-File -FilePath $env:GITHUB_PATH -Append
+          }
+          # Verify scoop is now available
+          Write-Host "Scoop location: $(Get-Command scoop -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)"
+          scoop --version
 
       - name: Install Git & add Scoop buckets
         shell: pwsh
@@ -132,6 +144,48 @@ jobs:
           "@
 
             Write-Host "Creating issue for: $($pkg.Name)"
+            gh issue create --title $title --body $body --label "install-failure" --label "automated"
+          }
+
+      - name: File issue for workflow-level failure
+        if: failure() && steps.test.outputs.has_failures != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $runUrl = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          $title = "[CI] Workflow failure: validate-installs (${{ github.sha }})"
+
+          # Check for existing open issue to avoid duplicates
+          $existing = gh issue list --search "in:title `"[CI] Workflow failure: validate-installs`"" --state open --json number --jq '.[].number' 2>$null
+          if ($existing) {
+            $commentBody = @"
+          ### Re-occurrence on $(Get-Date -Format 'yyyy-MM-dd')
+
+          The workflow failed again in [run]($runUrl).
+          Commit: ``${{ github.sha }}``
+          "@
+            gh issue comment $existing.Split("`n")[0].Trim() --body $commentBody
+          } else {
+            $body = @"
+          ## Workflow-Level Failure
+
+          The **validate-installs** workflow failed before individual package results could be recorded.
+          This typically means a prerequisite tool (scoop, choco, git, etc.) was not available or a
+          setup step crashed.
+
+          | Field | Value |
+          |---|---|
+          | **Workflow Run** | [View Run]($runUrl) |
+          | **Commit** | ``${{ github.sha }}`` |
+          | **Branch** | ``${{ github.ref_name }}`` |
+          | **Triggered by** | ``${{ github.actor }}`` |
+
+          Please check the workflow logs for the root cause.
+
+          ---
+          *This issue was automatically created by the CI validation workflow.*
+          "@
             gh issue create --title $title --body $body --label "install-failure" --label "automated"
           }
 

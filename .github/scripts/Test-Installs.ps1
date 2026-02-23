@@ -554,6 +554,108 @@ foreach ($group in $grouped) {
 }
 
 # ============================================================================
+# Post-Install Verification — scope & location checks
+# ============================================================================
+Write-Host "`n========== Post-Install Verification ==========" -ForegroundColor Cyan
+
+function Test-Verification {
+    param(
+        [string]$Name,
+        [string]$Description,
+        [scriptblock]$Test
+    )
+    try {
+        $result = & $Test
+        if ($result) {
+            Add-Result -Name $Name -PackageId $Name -InstallerType 'verification' `
+                -SourceScript 'Test-Installs.ps1' -Command $Description -Status 'pass'
+        } else {
+            Add-Result -Name $Name -PackageId $Name -InstallerType 'verification' `
+                -SourceScript 'Test-Installs.ps1' -Command $Description -Status 'fail' `
+                -ErrorOutput "Verification returned false: $Description"
+        }
+    } catch {
+        Add-Result -Name $Name -PackageId $Name -InstallerType 'verification' `
+            -SourceScript 'Test-Installs.ps1' -Command $Description -Status 'fail' `
+            -ExitCode -1 -ErrorOutput $_.Exception.Message
+    }
+}
+
+# --- Scoop global installs (derived from discovered packages) ---
+$scoopPackages = @($packages | Where-Object InstallerType -eq 'scoop')
+if ($scoopPackages.Count -gt 0) {
+    Write-Host "Verifying scoop packages are installed globally..." -ForegroundColor Gray
+    $scoopGlobalAppsPath = Join-Path $env:ProgramData 'scoop\apps'
+    foreach ($pkg in $scoopPackages) {
+        Test-Verification -Name "scoop-global:$($pkg.Name)" `
+            -Description "Scoop package '$($pkg.Name)' should be installed globally under $scoopGlobalAppsPath" `
+            -Test ([scriptblock]::Create("Test-Path (Join-Path '$scoopGlobalAppsPath' '$($pkg.Name)')"))
+    }
+}
+
+# --- Winget machine-scope installs (spot-check via registry HKLM) ---
+$wingetMachinePackages = @($packages | Where-Object { $_.InstallerType -eq 'winget' -and $_.Scope -eq 'machine' })
+if ($wingetMachinePackages.Count -gt 0) {
+    Write-Host "Verifying winget machine-scope installs via registry (spot-check)..." -ForegroundColor Gray
+    # Spot-check up to 5 winget machine-scope packages
+    $spotCheck = $wingetMachinePackages | Select-Object -First 5
+    foreach ($pkg in $spotCheck) {
+        $searchName = $pkg.Name
+        Test-Verification -Name "winget-machine:$searchName" `
+            -Description "Winget package '$searchName' should appear under HKLM (machine-wide install)" `
+            -Test ([scriptblock]::Create(@"
+                `$found = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+                    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+                    Where-Object { `$_.DisplayName -like '*$searchName*' }
+                `$null -ne `$found
+"@))
+    }
+}
+
+# --- PowerShell modules installed to AllUsers (derived from discovered packages) ---
+$psModulePackages = @($packages | Where-Object InstallerType -eq 'ps-module')
+if ($psModulePackages.Count -gt 0) {
+    Write-Host "Verifying PowerShell modules are installed to AllUsers scope..." -ForegroundColor Gray
+    foreach ($pkg in $psModulePackages) {
+        $modName = $pkg.Name
+        Test-Verification -Name "ps-module-scope:$modName" `
+            -Description "Module '$modName' should be installed under Program Files (AllUsers scope)" `
+            -Test ([scriptblock]::Create(@"
+                `$mod = Get-Module -ListAvailable -Name '$modName' -ErrorAction SilentlyContinue | Select-Object -First 1
+                if (-not `$mod) { return `$false }
+                `$mod.ModuleBase -like "`$env:ProgramFiles*"
+"@))
+    }
+}
+
+# --- Chocolatey environment variables persisted at Machine scope ---
+Write-Host "Verifying Chocolatey environment variables are set at Machine scope..." -ForegroundColor Gray
+$chocoEnvVars = @(
+    @{ Name='ChocolateyAllowEmptyChecksums';       Expected='True' }
+    @{ Name='ChocolateyAllowEmptyChecksumsSecure'; Expected='True' }
+    @{ Name='ChocolateyToolsLocation';             Expected=$null }  # just check it's non-empty
+)
+foreach ($ev in $chocoEnvVars) {
+    Test-Verification -Name "env-machine:$($ev.Name)" `
+        -Description "Environment variable '$($ev.Name)' should be set at Machine scope" `
+        -Test {
+            $val = [Environment]::GetEnvironmentVariable($ev.Name, 'Machine')
+            if ($null -eq $val -or $val -eq '') { return $false }
+            if ($null -ne $ev.Expected) { return $val -eq $ev.Expected }
+            return $true
+        }
+}
+
+# --- MarkMichaelis bucket is present ---
+Write-Host "Verifying MarkMichaelis scoop bucket is present..." -ForegroundColor Gray
+Test-Verification -Name "scoop-bucket:MarkMichaelis" `
+    -Description "Scoop bucket 'MarkMichaelis' should be present in bucket list" `
+    -Test {
+        $buckets = scoop bucket list 2>&1 | Out-String
+        $buckets -match 'MarkMichaelis'
+    }
+
+# ============================================================================
 # Results Summary
 # ============================================================================
 
