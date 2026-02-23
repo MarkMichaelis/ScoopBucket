@@ -408,6 +408,10 @@ Describe 'Get-PackagesFromScript — real bucket scripts' {
             ($pkgs | Where-Object PackageId -eq 'Gyan.FFmpeg') | Should -Not -BeNullOrEmpty
         }
 
+        It 'should find Google Cloud SDK' {
+            ($pkgs | Where-Object PackageId -eq 'Google.CloudSDK') | Should -Not -BeNullOrEmpty
+        }
+
         It 'should have machine scope' {
             $pkgs | ForEach-Object { $_.Scope | Should -Be 'machine' }
         }

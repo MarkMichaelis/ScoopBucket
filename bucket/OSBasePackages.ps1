@@ -17,6 +17,7 @@ $OSPackages = @{
     'BurntSushi.ripgrep.MSVC'=([PSCustomObject]@{ WingetName='Ripgrep'; WinGetID='BurntSushi.ripgrep.MSVC';  }) 
     'fzf'=([PSCustomObject]@{ WingetName='fzf'; WinGetID='junegunn.fzf';  })  # Needs PowerShell install of PSFzf module. See https://github.com/kelleyma49/PSFzf
     'FFmpeg'=([PSCustomObject]@{ WingetName='FFmpeg'; WinGetID='Gyan.FFmpeg';  })
+    'Google Cloud SDK'=([PSCustomObject]@{ WingetName='Google Cloud SDK'; WinGetID='Google.CloudSDK';  })
 }
 
 $OSPackages.VAlues | `

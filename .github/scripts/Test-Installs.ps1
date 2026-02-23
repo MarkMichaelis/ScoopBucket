@@ -669,7 +669,7 @@ $total    = $script:Results.Count
 Write-Host "Total: $total | Passed: $passed | Failed: $failed | Untested: $untested"
 
 # Write JSON results file
-$resultsPath = Join-Path (if ($env:GITHUB_WORKSPACE) { $env:GITHUB_WORKSPACE } else { $repoRoot }) 'test-results.json'
+$resultsPath = Join-Path $repoRoot 'test-results.json'
 $script:Results | ConvertTo-Json -Depth 5 | Set-Content -Path $resultsPath -Encoding UTF8
 Write-Host "Results written to: $resultsPath"
 
