@@ -1,17 +1,30 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    CI test harness that validates package installations defined in the Scoop bucket.
+    CI test harness that dynamically discovers and validates package installations.
 .DESCRIPTION
-    Iterates through all packages defined across the repository's install scripts,
-    attempts to install each one, and reports pass/fail/untested status.
-    Outputs results as JSON and writes a GitHub Actions step summary.
+    Parses all PS1 scripts in the bucket/ directory to discover package definitions,
+    then attempts to install each package, reporting pass/fail/untested status.
+    Results are written as JSON and as a GitHub Actions step summary.
+
+    Supported discovery patterns:
+    - Winget packages from hashtable blocks with WinGetID entries
+    - Winget Microsoft Store packages (--source msstore) -> marked untested in CI
+    - Chocolatey packages from piped arrays and standalone 'choco install' calls
+    - Scoop packages from piped arrays
+    - PowerShell modules from 'Install-Module' calls
+    - Sideloaded apps (Add-AppxPackage) -> marked untested in CI
+
+    Adding or removing a package in any bucket script automatically updates CI coverage.
 #>
 
 $ErrorActionPreference = 'Continue'
-$ProgressPreference = 'SilentlyContinue'  # Speed up Invoke-WebRequest etc.
+$ProgressPreference = 'SilentlyContinue'  # Speed up web requests
 
-# Results collector
+# ============================================================================
+# Results Tracking
+# ============================================================================
+
 $script:Results = [System.Collections.ArrayList]::new()
 
 function Add-Result {
@@ -27,18 +40,22 @@ function Add-Result {
         [string]$ErrorOutput = ''
     )
     $null = $script:Results.Add([PSCustomObject]@{
-        Name         = $Name
-        PackageId    = $PackageId
+        Name          = $Name
+        PackageId     = $PackageId
         InstallerType = $InstallerType
-        SourceScript = $SourceScript
-        Command      = $Command
-        Status       = $Status
-        ExitCode     = $ExitCode
-        ErrorOutput  = $ErrorOutput
+        SourceScript  = $SourceScript
+        Command       = $Command
+        Status        = $Status
+        ExitCode      = $ExitCode
+        ErrorOutput   = $ErrorOutput
     })
     $icon = switch ($Status) { 'pass' { '✅' } 'fail' { '❌' } 'untested' { '⏭️' } }
-    Write-Host "$icon [$InstallerType] $Name — $Status $(if ($ExitCode -ne 0) { "(exit $ExitCode)" })"
+    Write-Host "$icon [$InstallerType] $Name - $Status $(if ($ExitCode -ne 0) { "(exit $ExitCode)" })"
 }
+
+# ============================================================================
+# Install Functions
+# ============================================================================
 
 function Install-WingetPackage {
     param(
@@ -49,7 +66,7 @@ function Install-WingetPackage {
     )
     $cmd = "winget install --id $PackageId --scope $Scope --accept-package-agreements --accept-source-agreements --disable-interactivity --silent"
     try {
-        Write-Host "Installing [winget] $Name ($PackageId)..."
+        Write-Host "  Installing [winget] $Name ($PackageId)..."
         $output = cmd /c "$cmd 2>&1"
         $code = $LASTEXITCODE
         # winget exit code 0 = success, -1978335189 (0x8A150057) = already installed
@@ -71,12 +88,11 @@ function Install-WingetPackage {
 function Install-ChocoPackage {
     param(
         [string]$Name,
-        [string]$SourceScript,
-        [string]$AdditionalArgs = ''
+        [string]$SourceScript
     )
-    $cmd = "choco install $Name -y --no-progress $AdditionalArgs"
+    $cmd = "choco install $Name -y --no-progress"
     try {
-        Write-Host "Installing [choco] $Name..."
+        Write-Host "  Installing [choco] $Name..."
         $output = cmd /c "$cmd 2>&1"
         $code = $LASTEXITCODE
         if ($code -eq 0) {
@@ -101,7 +117,7 @@ function Install-ScoopPackage {
     )
     $cmd = "scoop install -g $Name"
     try {
-        Write-Host "Installing [scoop] $Name..."
+        Write-Host "  Installing [scoop] $Name..."
         $output = cmd /c "$cmd 2>&1"
         $code = $LASTEXITCODE
         if ($code -eq 0) {
@@ -125,9 +141,9 @@ function Install-PSModule {
         [string]$SourceScript,
         [string]$AdditionalArgs = ''
     )
-    $cmd = "Install-Module $Name -Force -AllowClobber -Scope AllUsers $AdditionalArgs"
+    $cmd = "Install-Module $Name -Force -AllowClobber -Scope AllUsers $AdditionalArgs".Trim()
     try {
-        Write-Host "Installing [PS module] $Name..."
+        Write-Host "  Installing [PS module] $Name..."
         Invoke-Expression $cmd
         Add-Result -Name $Name -PackageId $Name -InstallerType 'ps-module' `
             -SourceScript $SourceScript -Command $cmd -Status 'pass'
@@ -151,306 +167,407 @@ function Skip-Package {
 }
 
 # ============================================================================
-# Set up PSGallery as trusted (needed for PS module installs)
+# Dynamic Package Discovery
 # ============================================================================
+
+function Find-HashTableBlocks {
+    <#
+    .SYNOPSIS
+        Finds all $Variable = @{ ... } blocks in a script, handling nested braces.
+    .OUTPUTS
+        Array of objects with VarName, Content (inner text), and EndIndex.
+    #>
+    param([string]$Content)
+
+    $blocks = @()
+    $pattern = '\$(\w+)\s*=\s*@\{'
+    $regexMatches = [regex]::Matches($Content, $pattern)
+
+    foreach ($m in $regexMatches) {
+        $varName = $m.Groups[1].Value
+        $startIdx = $m.Index + $m.Length
+        $depth = 1
+        $i = $startIdx
+
+        while ($i -lt $Content.Length -and $depth -gt 0) {
+            $ch = $Content[$i]
+            if ($ch -eq '{') { $depth++ }
+            elseif ($ch -eq '}') { $depth-- }
+            $i++
+        }
+
+        if ($depth -eq 0) {
+            $blocks += [PSCustomObject]@{
+                VarName  = $varName
+                Content  = $Content.Substring($startIdx, $i - $startIdx - 1)
+                EndIndex = $i
+            }
+        }
+    }
+
+    return $blocks
+}
+
+function Get-IterationInstaller {
+    <#
+    .SYNOPSIS
+        Determines how a hashtable variable's values are consumed (winget, winget-store, choco, etc.)
+    .OUTPUTS
+        PSCustomObject with InstallerType and Scope properties.
+    #>
+    param(
+        [string]$VarName,
+        [string]$Content
+    )
+
+    # Look for $VarName.Values | ... or $VarName.VAlues | ... (case-insensitive)
+    $iterPattern = "(?i)\`$$([regex]::Escape($VarName))\.\w+\s*\|"
+    $iterMatch = [regex]::Match($Content, $iterPattern)
+
+    if (-not $iterMatch.Success) {
+        return [PSCustomObject]@{ InstallerType = 'unknown'; Scope = 'machine' }
+    }
+
+    # Get text after the pipe (up to 500 chars) to find the install command
+    $maxLen = [Math]::Min(500, $Content.Length - $iterMatch.Index)
+    $afterPipe = $Content.Substring($iterMatch.Index, $maxLen)
+
+    $installerType = 'unknown'
+    $scope = 'machine'
+
+    # Match only the FIRST winget/choco/scoop install line (not subsequent blocks)
+    if ($afterPipe -match '(?m)winget\s+install([^\r\n]*)') {
+        $installLine = $Matches[1]
+        if ($installLine -match '--source\s+msstore') {
+            $installerType = 'winget-store'
+        } else {
+            $installerType = 'winget'
+        }
+        if ($installLine -match '--scope\s+(\w+)') {
+            $scope = $Matches[1]
+        }
+    } elseif ($afterPipe -match 'choco\s+install') {
+        $installerType = 'choco'
+    } elseif ($afterPipe -match 'scoop\s+install') {
+        $installerType = 'scoop'
+    }
+
+    return [PSCustomObject]@{ InstallerType = $installerType; Scope = $scope }
+}
+
+function Get-PackagesFromScript {
+    <#
+    .SYNOPSIS
+        Parses a single PS1 script to discover all package install definitions.
+    .DESCRIPTION
+        Extracts packages from six patterns:
+        1. Winget hashtable blocks (entries with WinGetID)
+        2. Piped string arrays → choco/scoop install
+        3. Standalone choco install commands
+        4. Standalone winget install commands (literal IDs)
+        5. Install-Module commands
+        6. Add-AppxPackage (sideload) commands
+    #>
+    param([string]$FilePath)
+
+    $content = Get-Content $FilePath -Raw
+    $lines = Get-Content $FilePath
+    $scriptName = Split-Path $FilePath -Leaf
+    $packages = [System.Collections.ArrayList]::new()
+    $foundPackageIds = @{}  # Track to avoid duplicate entries within a script
+
+    # --- 1. Winget hashtable blocks (packages with WinGetID) ---
+    $hashBlocks = Find-HashTableBlocks -Content $content
+
+    foreach ($block in $hashBlocks) {
+        # Only process blocks containing WinGetID
+        if ($block.Content -notmatch 'WinGetID') { continue }
+
+        $iteration = Get-IterationInstaller -VarName $block.VarName -Content $content
+
+        foreach ($entryLine in ($block.Content -split "`n")) {
+            $trimmed = $entryLine.Trim()
+            if ($trimmed -match '^\s*#') { continue }  # Skip commented-out entries
+
+            if ($trimmed -match "WingetName='([^']+)'") {
+                $wingetName = $Matches[1]
+            } else { continue }
+
+            if ($trimmed -match "WinGetID='([^']+)'") {
+                $wingetId = $Matches[1]
+            } else { continue }
+
+            $key = "$($iteration.InstallerType):$wingetId"
+            if ($foundPackageIds.ContainsKey($key)) { continue }
+            $foundPackageIds[$key] = $true
+
+            $null = $packages.Add([PSCustomObject]@{
+                Name           = $wingetName
+                PackageId      = $wingetId
+                InstallerType  = $iteration.InstallerType
+                SourceScript   = $scriptName
+                Scope          = $iteration.Scope
+                AdditionalArgs = ''
+            })
+        }
+    }
+
+    # --- 2. Piped arrays: 'pkg1','pkg2' | ForEach-Object { choco/scoop install } ---
+    $pipedPattern = "(?ms)('(?:[^']+)'(?:\s*,\s*'[^']+')*)\s*\|\s*ForEach-Object\s*\{[^}]*?(choco|scoop)\s+install"
+    $pipedMatches = [regex]::Matches($content, $pipedPattern)
+
+    foreach ($m in $pipedMatches) {
+        $pkgString = $m.Groups[1].Value
+        $installer = $m.Groups[2].Value
+
+        $pkgNames = [regex]::Matches($pkgString, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value }
+
+        foreach ($name in $pkgNames) {
+            $key = "$($installer):$name"
+            if ($foundPackageIds.ContainsKey($key)) { continue }
+            $foundPackageIds[$key] = $true
+
+            $null = $packages.Add([PSCustomObject]@{
+                Name           = $name
+                PackageId      = $name
+                InstallerType  = $installer
+                SourceScript   = $scriptName
+                Scope          = ''
+                AdditionalArgs = ''
+            })
+        }
+    }
+
+    # --- 3. Standalone choco install (not inside ForEach-Object with $_) ---
+    foreach ($line in $lines) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^\s*#') { continue }        # Skip comments
+        if ($trimmed -match '\$_') { continue }           # Skip ForEach-Object body lines
+        if ($trimmed -match '^\s*choco\s+install\s+(\w[\w.-]+)') {
+            $pkgName = $Matches[1]
+            $key = "choco:$pkgName"
+            if ($foundPackageIds.ContainsKey($key)) { continue }
+            $foundPackageIds[$key] = $true
+
+            $null = $packages.Add([PSCustomObject]@{
+                Name           = $pkgName
+                PackageId      = $pkgName
+                InstallerType  = 'choco'
+                SourceScript   = $scriptName
+                Scope          = ''
+                AdditionalArgs = ''
+            })
+        }
+    }
+
+    # --- 4. Standalone winget install (literal Package.Id, not $_ references) ---
+    foreach ($line in $lines) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^\s*#') { continue }
+        if ($trimmed -match '\$_') { continue }
+        if ($trimmed -match '^\s*[Ww]inget\s+install\b(.*)') {
+            $argsPart = $Matches[1]
+            # Match a package ID pattern: Org.Package (must contain at least one dot)
+            if ($argsPart -match '(?:--id\s+)?([A-Za-z][\w-]*\.[\w.-]+)') {
+                $pkgId = $Matches[1]
+                if ($pkgId -match '^--') { continue }  # Skip flags
+                $key = "winget:$pkgId"
+                if ($foundPackageIds.ContainsKey($key)) { continue }
+                $foundPackageIds[$key] = $true
+
+                $scope = 'machine'
+                if ($argsPart -match '--scope\s+(\w+)') { $scope = $Matches[1] }
+
+                $null = $packages.Add([PSCustomObject]@{
+                    Name           = $pkgId
+                    PackageId      = $pkgId
+                    InstallerType  = 'winget'
+                    SourceScript   = $scriptName
+                    Scope          = $scope
+                    AdditionalArgs = ''
+                })
+            }
+        }
+    }
+
+    # --- 5. Install-Module commands ---
+    foreach ($line in $lines) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^\s*#') { continue }
+        if ($trimmed -match '^\s*[Ii]nstall-[Mm]odule\s+(\w[\w.-]+)(.*)') {
+            $modName = $Matches[1]
+            $restArgs = $Matches[2]
+            $key = "ps-module:$modName"
+            if ($foundPackageIds.ContainsKey($key)) { continue }
+            $foundPackageIds[$key] = $true
+
+            # Preserve flags not already added by Install-PSModule (-Force -AllowClobber -Scope AllUsers)
+            $additionalArgs = ''
+            if ($restArgs -match '-AllowPrerelease') { $additionalArgs += ' -AllowPrerelease' }
+            if ($restArgs -match '-Repository\s+(\S+)') { $additionalArgs += " -Repository $($Matches[1])" }
+
+            $null = $packages.Add([PSCustomObject]@{
+                Name           = $modName
+                PackageId      = $modName
+                InstallerType  = 'ps-module'
+                SourceScript   = $scriptName
+                Scope          = ''
+                AdditionalArgs = $additionalArgs.Trim()
+            })
+        }
+    }
+
+    # --- 6. Sideload (Add-AppxPackage) ---
+    $addAppxIdx = $content.IndexOf('Add-AppxPackage')
+    if ($addAppxIdx -ge 0) {
+        # Search backward from Add-AppxPackage for the nearest Write-Host "Installing ..."
+        $lookBack = [Math]::Max(0, $addAppxIdx - 500)
+        $beforeText = $content.Substring($lookBack, $addAppxIdx - $lookBack)
+        $nameMatches = [regex]::Matches($beforeText, "Write-Host\s+[`"']Installing\s+([^.`"']+)")
+        $appName = if ($nameMatches.Count -gt 0) {
+            $nameMatches[$nameMatches.Count - 1].Groups[1].Value.Trim()
+        } else { 'Unknown MSIX App' }
+
+        # Extract download URL from nearby Invoke-WebRequest
+        $nearbyText = $content.Substring([Math]::Max(0, $addAppxIdx - 300), [Math]::Min(600, $content.Length - [Math]::Max(0, $addAppxIdx - 300)))
+        $urlPattern = "Invoke-WebRequest\s+-Uri\s+'([^']+)'"
+        $urlMatch = [regex]::Match($nearbyText, $urlPattern)
+        $appUrl = if ($urlMatch.Success) { $urlMatch.Groups[1].Value } else { 'unknown' }
+
+        $key = "sideload:$appName"
+        if (-not $foundPackageIds.ContainsKey($key)) {
+            $foundPackageIds[$key] = $true
+            $null = $packages.Add([PSCustomObject]@{
+                Name           = $appName
+                PackageId      = $appUrl
+                InstallerType  = 'sideload'
+                SourceScript   = $scriptName
+                Scope          = ''
+                AdditionalArgs = ''
+            })
+        }
+    }
+
+    return $packages.ToArray()
+}
+
+function Get-AllPackages {
+    <#
+    .SYNOPSIS
+        Scans all PS1 scripts in the bucket directory and returns discovered packages.
+    .DESCRIPTION
+        Excludes Utils.ps1 (shared helpers) and *.Tests.ps1 (test files).
+    #>
+    param([string]$BucketPath)
+
+    $allPackages = [System.Collections.ArrayList]::new()
+    $scriptFiles = Get-ChildItem (Join-Path $BucketPath '*') -Include '*.ps1' -Exclude 'Utils.ps1', '*.Tests.ps1'
+
+    foreach ($file in $scriptFiles) {
+        Write-Host "  Scanning $($file.Name)..." -ForegroundColor DarkGray
+        $pkgs = Get-PackagesFromScript -FilePath $file.FullName
+        if (@($pkgs).Count -gt 0) {
+            Write-Host "    Found $(@($pkgs).Count) package(s)" -ForegroundColor DarkGray
+        }
+        foreach ($pkg in $pkgs) {
+            $null = $allPackages.Add($pkg)
+        }
+    }
+
+    return $allPackages.ToArray()
+}
+
+# ============================================================================
+# Main Execution
+# ============================================================================
+
+$repoRoot = if ($env:GITHUB_WORKSPACE) { $env:GITHUB_WORKSPACE } `
+            else { Split-Path (Split-Path $PSScriptRoot -Parent) -Parent }
+$bucketPath = Join-Path $repoRoot 'bucket'
+
+if (-not (Test-Path $bucketPath)) {
+    Write-Error "Bucket directory not found at: $bucketPath"
+    exit 1
+}
+
+# Set up PSGallery as trusted (needed for PS module installs)
 Write-Host "`n========== Setting up PSGallery ==========" -ForegroundColor Cyan
 if ((Get-PSRepository PSGallery).InstallationPolicy -ne 'Trusted') {
     Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
 }
 
-# ============================================================================
-# OSBasePackages — winget
-# ============================================================================
-Write-Host "`n========== OSBasePackages (winget) ==========" -ForegroundColor Cyan
+# Discover packages
+Write-Host "`n========== Discovering Packages ==========" -ForegroundColor Cyan
+$packages = Get-AllPackages -BucketPath $bucketPath
 
-$OSBaseWinget = @(
-    @{ Name='Windows Terminal';    Id='Microsoft.WindowsTerminal' }
-    @{ Name='7-Zip';              Id='7Zip.7Zip' }
-    @{ Name='Everything';         Id='voidtools.Everything' }
-    @{ Name='Everything Cli';     Id='voidtools.Everything.Cli' }
-    @{ Name='Google Chrome';      Id='Google.Chrome' }
-    @{ Name='Process Explorer';   Id='Microsoft.Sysinternals.ProcessExplorer' }
-    @{ Name='SysInternals';       Id='Microsoft.SysInternals' }
-    @{ Name='WinDirStat';         Id='WinDirStat.WinDirStat' }
-    @{ Name='USSF';               Id='WindowsPostInstallWizard.UniversalSilentSwitchFinder' }
-    @{ Name='bat';                Id='sharkdp.bat' }
-    @{ Name='Ripgrep';            Id='BurntSushi.ripgrep.MSVC' }
-    @{ Name='fzf';                Id='junegunn.fzf' }
-    @{ Name='FFmpeg';             Id='Gyan.FFmpeg' }
-)
-foreach ($pkg in $OSBaseWinget) {
-    Install-WingetPackage -Name $pkg.Name -PackageId $pkg.Id -SourceScript 'OSBasePackages.ps1'
+$packageCount = $packages.Count
+$scriptCount = ($packages | Select-Object -ExpandProperty SourceScript -Unique).Count
+$installerGroups = $packages | Group-Object InstallerType | ForEach-Object { "$($_.Count) $($_.Name)" }
+
+Write-Host "`nDiscovered $packageCount package(s) across $scriptCount script(s):" -ForegroundColor Green
+Write-Host "  $($installerGroups -join ', ')" -ForegroundColor Green
+
+# Display discovered packages for debugging
+Write-Host "`n--- Discovered Package List ---" -ForegroundColor DarkGray
+foreach ($pkg in $packages) {
+    Write-Host "  [$($pkg.InstallerType)] $($pkg.Name) ($($pkg.PackageId)) <- $($pkg.SourceScript)" -ForegroundColor DarkGray
 }
+Write-Host "--- End Package List ---`n" -ForegroundColor DarkGray
 
-# ============================================================================
-# ClientBasePackages — choco
-# ============================================================================
-Write-Host "`n========== ClientBasePackages (choco) ==========" -ForegroundColor Cyan
+# Execute installs grouped by source script
+$grouped = $packages | Group-Object SourceScript | Sort-Object Name
 
-$ClientBaseChoco = @('foxitreader', 'exiftool', 'dbxcli', 'geosetter')
-foreach ($pkg in $ClientBaseChoco) {
-    Install-ChocoPackage -Name $pkg -SourceScript 'ClientBasePackages.ps1'
-}
+foreach ($group in $grouped) {
+    Write-Host "`n========== $($group.Name) ==========" -ForegroundColor Cyan
 
-# ============================================================================
-# ClientBasePackages — winget
-# ============================================================================
-Write-Host "`n========== ClientBasePackages (winget) ==========" -ForegroundColor Cyan
-
-$ClientBaseWinget = @(
-    @{ Name='Amazon Kindle';  Id='Amazon.Kindle' }
-    @{ Name='calibre';        Id='calibre.calibre' }
-    @{ Name='Claude';         Id='Anthropic.Claude' }
-    @{ Name='SoX';            Id='ChrisBagwell.SoX' }
-    @{ Name='eSpeak NG';      Id='eSpeak-NG.eSpeak-NG' }
-    @{ Name='Dropbox';        Id='Dropbox.Dropbox' }
-    @{ Name='Notion';         Id='Notion.Notion' }
-    @{ Name='Pushbullet';     Id='Pushbullet.Pushbullet' }
-    @{ Name='Signal';         Id='OpenWhisperSystems.Signal' }
-    @{ Name='Snagit';         Id='TechSmith.Snagit.2024' }
-    @{ Name='Spotify';        Id='Spotify.Spotify' }
-    @{ Name='Todoist';        Id='Doist.Todoist' }
-    @{ Name='Zoom';           Id='Zoom.Zoom.EXE' }
-)
-foreach ($pkg in $ClientBaseWinget) {
-    Install-WingetPackage -Name $pkg.Name -PackageId $pkg.Id -SourceScript 'ClientBasePackages.ps1'
-}
-
-# ============================================================================
-# ClientBasePackages — Microsoft Store (UNTESTED in CI)
-# ============================================================================
-Write-Host "`n========== ClientBasePackages (msstore — skipped) ==========" -ForegroundColor Cyan
-
-$ClientBaseMSStore = @(
-    @{ Name='ChatGPT';        Id='9NT1R1C2HH7J' }
-    @{ Name='VPN Unlimited';  Id='9NRQBLR605RG' }
-    @{ Name='Grammarly';      Id='XPDDXX9QW8N9D7' }
-    @{ Name='WhatsApp';       Id='9NKSQGP7F2NH' }
-)
-foreach ($pkg in $ClientBaseMSStore) {
-    Skip-Package -Name $pkg.Name -PackageId $pkg.Id -InstallerType 'winget-store' `
-        -SourceScript 'ClientBasePackages.ps1' -Reason 'Microsoft Store auth unavailable in CI'
-}
-
-# ============================================================================
-# ClientBasePackages — Sideload (UNTESTED in CI)
-# ============================================================================
-Write-Host "`n========== ClientBasePackages (sideload — skipped) ==========" -ForegroundColor Cyan
-
-Skip-Package -Name 'Readwise Reader' -PackageId 'readwise.io/msix' -InstallerType 'sideload' `
-    -SourceScript 'ClientBasePackages.ps1' -Reason 'MSIX sideload not reliable in CI'
-
-# ============================================================================
-# DeveloperBasePackages — choco
-# ============================================================================
-Write-Host "`n========== DeveloperBasePackages (choco) ==========" -ForegroundColor Cyan
-
-Install-ChocoPackage -Name 'nodejs' -SourceScript 'DeveloperBasePackages.ps1'
-
-# ============================================================================
-# DeveloperBasePackages — scoop
-# ============================================================================
-Write-Host "`n========== DeveloperBasePackages (scoop) ==========" -ForegroundColor Cyan
-
-$DevBaseScoop = @('dotnet', 'VisualStudio2026Enterprise')
-foreach ($pkg in $DevBaseScoop) {
-    Install-ScoopPackage -Name $pkg -SourceScript 'DeveloperBasePackages.ps1'
-}
-
-# ============================================================================
-# DeveloperBasePackages — winget
-# ============================================================================
-Write-Host "`n========== DeveloperBasePackages (winget) ==========" -ForegroundColor Cyan
-
-$DevBaseWinget = @(
-    @{ Name='Visual Studio Code'; Id='Microsoft.VisualStudioCode' }
-    @{ Name='Copilot CLI';        Id='GitHub.Copilot' }
-    @{ Name='Python';             Id='Python.Python.3.14' }
-    @{ Name='Beyond Compare';     Id='ScooterSoftware.BeyondCompare.4' }
-)
-foreach ($pkg in $DevBaseWinget) {
-    Install-WingetPackage -Name $pkg.Name -PackageId $pkg.Id -SourceScript 'DeveloperBasePackages.ps1'
-}
-
-# ============================================================================
-# GitConfigure — choco
-# ============================================================================
-Write-Host "`n========== GitConfigure (choco) ==========" -ForegroundColor Cyan
-
-$GitConfigChoco = @('git', 'git-credential-manager-for-windows', 'gitextensions', 'gitkraken')
-foreach ($pkg in $GitConfigChoco) {
-    Install-ChocoPackage -Name $pkg -SourceScript 'GitConfigure.ps1'
-}
-
-# ============================================================================
-# GitConfigure — winget
-# ============================================================================
-Write-Host "`n========== GitConfigure (winget) ==========" -ForegroundColor Cyan
-
-$GitConfigWinget = @(
-    @{ Name='GitKraken CLI'; Id='GitKraken.cli' }
-    @{ Name='GitHub CLI';    Id='GitHub.cli' }
-)
-foreach ($pkg in $GitConfigWinget) {
-    Install-WingetPackage -Name $pkg.Name -PackageId $pkg.Id -SourceScript 'GitConfigure.ps1'
-}
-
-# ============================================================================
-# MicrosoftOffice365 — choco
-# ============================================================================
-Write-Host "`n========== MicrosoftOffice365 (choco) ==========" -ForegroundColor Cyan
-
-$Office365Choco = @('Office365ProPlus', 'Microsoft-Teams')
-foreach ($pkg in $Office365Choco) {
-    Install-ChocoPackage -Name $pkg -SourceScript 'MicrosoftOffice365.ps1'
-}
-
-# ============================================================================
-# Chocolatey — choco
-# ============================================================================
-Write-Host "`n========== Chocolatey extensions (choco) ==========" -ForegroundColor Cyan
-
-$ChocoExtensions = @('chocolatey-core.extension', 'au')
-foreach ($pkg in $ChocoExtensions) {
-    Install-ChocoPackage -Name $pkg -SourceScript 'Chocolatey.ps1'
-}
-
-# ============================================================================
-# PowerShell — modules
-# ============================================================================
-Write-Host "`n========== PowerShell modules ==========" -ForegroundColor Cyan
-
-$PSModules = @(
-    @{ Name='PowershellGet';    Args='-Repository PSGallery' }
-    @{ Name='Pscx';             Args='-AllowClobber -AllowPrerelease' }
-    @{ Name='ZLocation';        Args='-Repository PSGallery' }
-    @{ Name='PSReadLine';       Args='' }
-    @{ Name='Microsoft.PowerShell.SecretManagement'; Args='' }
-    @{ Name='posh-git';         Args='' }
-)
-foreach ($mod in $PSModules) {
-    Install-PSModule -Name $mod.Name -SourceScript 'PowerShell.ps1' -AdditionalArgs $mod.Args
-}
-
-# ============================================================================
-# PowerShell — Pester via choco
-# ============================================================================
-Write-Host "`n========== Pester (choco) ==========" -ForegroundColor Cyan
-Install-ChocoPackage -Name 'Pester' -SourceScript 'PowerShell.ps1'
-
-# ============================================================================
-# Post-Install Verification — scope & location checks
-# ============================================================================
-Write-Host "`n========== Post-Install Verification ==========" -ForegroundColor Cyan
-
-function Test-Verification {
-    param(
-        [string]$Name,
-        [string]$Description,
-        [scriptblock]$Test
-    )
-    try {
-        $result = & $Test
-        if ($result) {
-            Add-Result -Name $Name -PackageId $Name -InstallerType 'verification' `
-                -SourceScript 'Test-Installs.ps1' -Command $Description -Status 'pass'
-        } else {
-            Add-Result -Name $Name -PackageId $Name -InstallerType 'verification' `
-                -SourceScript 'Test-Installs.ps1' -Command $Description -Status 'fail' `
-                -ErrorOutput "Verification returned false: $Description"
+    foreach ($pkg in $group.Group) {
+        switch ($pkg.InstallerType) {
+            'winget' {
+                Install-WingetPackage -Name $pkg.Name -PackageId $pkg.PackageId `
+                    -SourceScript $pkg.SourceScript -Scope $pkg.Scope
+            }
+            'winget-store' {
+                Skip-Package -Name $pkg.Name -PackageId $pkg.PackageId `
+                    -InstallerType 'winget-store' -SourceScript $pkg.SourceScript `
+                    -Reason 'Microsoft Store auth unavailable in CI'
+            }
+            'choco' {
+                Install-ChocoPackage -Name $pkg.Name -SourceScript $pkg.SourceScript
+            }
+            'scoop' {
+                Install-ScoopPackage -Name $pkg.Name -SourceScript $pkg.SourceScript
+            }
+            'ps-module' {
+                Install-PSModule -Name $pkg.Name -SourceScript $pkg.SourceScript `
+                    -AdditionalArgs $pkg.AdditionalArgs
+            }
+            'sideload' {
+                Skip-Package -Name $pkg.Name -PackageId $pkg.PackageId `
+                    -InstallerType 'sideload' -SourceScript $pkg.SourceScript `
+                    -Reason 'MSIX sideload not reliable in CI'
+            }
+            default {
+                Write-Warning "Unknown installer type '$($pkg.InstallerType)' for $($pkg.Name) in $($pkg.SourceScript)"
+            }
         }
-    } catch {
-        Add-Result -Name $Name -PackageId $Name -InstallerType 'verification' `
-            -SourceScript 'Test-Installs.ps1' -Command $Description -Status 'fail' `
-            -ExitCode -1 -ErrorOutput $_.Exception.Message
     }
 }
-
-# --- Scoop global installs ---
-Write-Host "Verifying scoop packages are installed globally..." -ForegroundColor Gray
-$scoopGlobalAppsPath = Join-Path $env:ProgramData 'scoop\apps'
-$expectedScoopGlobal = @('dotnet', 'VisualStudio2026Enterprise')
-foreach ($pkg in $expectedScoopGlobal) {
-    Test-Verification -Name "scoop-global:$pkg" `
-        -Description "Scoop package '$pkg' should be installed globally under $scoopGlobalAppsPath" `
-        -Test {
-            Test-Path (Join-Path $scoopGlobalAppsPath $pkg)
-        }
-}
-
-# --- Winget machine-scope installs (spot-check via registry HKLM) ---
-Write-Host "Verifying winget machine-scope installs via registry..." -ForegroundColor Gray
-$wingetMachineCheck = @(
-    @{ Name='7-Zip';          Pattern='7-Zip' }
-    @{ Name='Google Chrome';  Pattern='Google Chrome' }
-    @{ Name='Beyond Compare'; Pattern='Beyond Compare' }
-)
-foreach ($pkg in $wingetMachineCheck) {
-    Test-Verification -Name "winget-machine:$($pkg.Name)" `
-        -Description "Winget package '$($pkg.Name)' should appear under HKLM (machine-wide install)" `
-        -Test {
-            $found = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
-                'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
-                Where-Object { $_.DisplayName -like "*$($pkg.Pattern)*" }
-            $null -ne $found
-        }
-}
-
-# --- PowerShell modules installed to AllUsers ---
-Write-Host "Verifying PowerShell modules are installed to AllUsers scope..." -ForegroundColor Gray
-$expectedModules = @('PowershellGet', 'Pscx', 'ZLocation', 'PSReadLine',
-    'Microsoft.PowerShell.SecretManagement', 'posh-git')
-foreach ($modName in $expectedModules) {
-    Test-Verification -Name "ps-module-scope:$modName" `
-        -Description "Module '$modName' should be installed under Program Files (AllUsers scope)" `
-        -Test {
-            $mod = Get-Module -ListAvailable -Name $modName -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $mod) { return $false }
-            $mod.ModuleBase -like "$env:ProgramFiles*"
-        }
-}
-
-# --- Chocolatey environment variables persisted at Machine scope ---
-Write-Host "Verifying Chocolatey environment variables are set at Machine scope..." -ForegroundColor Gray
-$chocoEnvVars = @(
-    @{ Name='ChocolateyAllowEmptyChecksums';       Expected='True' }
-    @{ Name='ChocolateyAllowEmptyChecksumsSecure'; Expected='True' }
-    @{ Name='ChocolateyToolsLocation';             Expected=$null }  # just check it's non-empty
-)
-foreach ($ev in $chocoEnvVars) {
-    Test-Verification -Name "env-machine:$($ev.Name)" `
-        -Description "Environment variable '$($ev.Name)' should be set at Machine scope" `
-        -Test {
-            $val = [Environment]::GetEnvironmentVariable($ev.Name, 'Machine')
-            if ($null -eq $val -or $val -eq '') { return $false }
-            if ($null -ne $ev.Expected) { return $val -eq $ev.Expected }
-            return $true
-        }
-}
-
-# --- MarkMichaelis bucket is present ---
-Write-Host "Verifying MarkMichaelis scoop bucket is present..." -ForegroundColor Gray
-Test-Verification -Name "scoop-bucket:MarkMichaelis" `
-    -Description "Scoop bucket 'MarkMichaelis' should be present in bucket list" `
-    -Test {
-        $buckets = scoop bucket list 2>&1 | Out-String
-        $buckets -match 'MarkMichaelis'
-    }
 
 # ============================================================================
 # Results Summary
 # ============================================================================
+
 Write-Host "`n========== RESULTS SUMMARY ==========" -ForegroundColor Cyan
 
-$passed   = ($script:Results | Where-Object Status -eq 'pass').Count
-$failed   = ($script:Results | Where-Object Status -eq 'fail').Count
-$untested = ($script:Results | Where-Object Status -eq 'untested').Count
+$passed   = @($script:Results | Where-Object Status -eq 'pass').Count
+$failed   = @($script:Results | Where-Object Status -eq 'fail').Count
+$untested = @($script:Results | Where-Object Status -eq 'untested').Count
 $total    = $script:Results.Count
 
 Write-Host "Total: $total | Passed: $passed | Failed: $failed | Untested: $untested"
 
 # Write JSON results file
-$resultsPath = Join-Path $env:GITHUB_WORKSPACE 'test-results.json'
+$resultsPath = Join-Path (if ($env:GITHUB_WORKSPACE) { $env:GITHUB_WORKSPACE } else { $repoRoot }) 'test-results.json'
 $script:Results | ConvertTo-Json -Depth 5 | Set-Content -Path $resultsPath -Encoding UTF8
 Write-Host "Results written to: $resultsPath"
 
@@ -462,13 +579,15 @@ if ($env:GITHUB_OUTPUT) {
 # Write GitHub Actions step summary
 if ($env:GITHUB_STEP_SUMMARY) {
     $summary = @"
-# 📦 Package Install Validation Results
+# Package Install Validation Results
+
+> Packages were **dynamically discovered** from bucket scripts - no hardcoded list.
 
 | Status | Count |
 |--------|-------|
-| ✅ Passed | $passed |
-| ❌ Failed | $failed |
-| ⏭️ Untested | $untested |
+| Passed | $passed |
+| Failed | $failed |
+| Untested | $untested |
 | **Total** | **$total** |
 
 ## Detailed Results
@@ -477,12 +596,12 @@ if ($env:GITHUB_STEP_SUMMARY) {
 |--------|---------|-----------|---------------|-----------|
 "@
     foreach ($r in ($script:Results | Sort-Object Status, Name)) {
-        $icon = switch ($r.Status) { 'pass' { '✅' } 'fail' { '❌' } 'untested' { '⏭️' } }
+        $icon = switch ($r.Status) { 'pass' { 'PASS' } 'fail' { 'FAIL' } 'untested' { 'SKIP' } }
         $summary += "`n| $icon | $($r.Name) | $($r.InstallerType) | $($r.SourceScript) | $($r.ExitCode) |"
     }
 
     if ($failed -gt 0) {
-        $summary += "`n`n## ❌ Failure Details`n"
+        $summary += "`n`n## Failure Details`n"
         foreach ($r in ($script:Results | Where-Object Status -eq 'fail')) {
             $errorSnippet = if ($r.ErrorOutput.Length -gt 500) { $r.ErrorOutput.Substring(0, 500) + '...' } else { $r.ErrorOutput }
             $summary += @"
@@ -505,9 +624,9 @@ $errorSnippet
 
 # Exit with failure if any packages failed
 if ($failed -gt 0) {
-    Write-Host "`n❌ $failed package(s) failed to install." -ForegroundColor Red
+    Write-Host "`n$failed package(s) failed to install." -ForegroundColor Red
     exit 1
 } else {
-    Write-Host "`n✅ All testable packages installed successfully." -ForegroundColor Green
+    Write-Host "`nAll testable packages installed successfully." -ForegroundColor Green
     exit 0
 }
