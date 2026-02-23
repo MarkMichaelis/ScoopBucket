@@ -14,9 +14,9 @@ Function Install-Chocolatey {
     choco feature enable -n allowEmptyChecksumsSecure
 
     #Set environment variables so the above options are true when directly calling Chocolatey functions/commands:
-    [Environment]::SetEnvironmentVariable("ChocolateyAllowEmptyChecksums", $true)
-    [Environment]::SetEnvironmentVariable("ChocolateyAllowEmptyChecksumsSecure", $true)
-    [Environment]::SetEnvironmentVariable("ChocolateyToolsLocation", "$env:ChocolateyInstall\Tools")
+    [Environment]::SetEnvironmentVariable("ChocolateyAllowEmptyChecksums", $true, 'Machine')
+    [Environment]::SetEnvironmentVariable("ChocolateyAllowEmptyChecksumsSecure", $true, 'Machine')
+    [Environment]::SetEnvironmentVariable("ChocolateyToolsLocation", "$env:ChocolateyInstall\Tools", 'Machine')
 
     # TODO: Figure repository for API Key
     if (Test-Path C:\data\Profile\ChocolateyAPIKey.txt) {

@@ -45,5 +45,5 @@ Add-ScoopBucket _Name 'extras'
 
 <#'McAfeeUninstall',#> 'OSBasePackages' | ForEach-Object {
   Write-Host "Installing $_..."
-  scoop install $_
+  scoop install -g $_
 }

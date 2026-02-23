@@ -1,0 +1,143 @@
+name: Validate Package Installs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  validate-installs:
+    name: Install & Validate Packages
+    runs-on: windows-2025
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Accept winget source agreements
+        shell: pwsh
+        run: |
+          winget source update --accept-source-agreements
+          winget source list
+
+      - name: Bootstrap Chocolatey
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+          if (-not (Get-Command choco -ErrorAction Ignore)) {
+            Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          }
+          choco feature enable -n allowGlobalConfirmation
+          choco feature enable -n allowEmptyChecksums
+
+      - name: Bootstrap Scoop
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          if (-not (Get-Command scoop -ErrorAction Ignore)) {
+            $env:SCOOP = "$env:ProgramData\scoop"
+            [Environment]::SetEnvironmentVariable('SCOOP', $env:SCOOP, 'Machine')
+            Invoke-Expression "& {$(Invoke-RestMethod get.scoop.sh)} -RunAsAdmin"
+          }
+
+      - name: Install Git & add Scoop buckets
+        shell: pwsh
+        run: |
+          if (-not (Get-Command git -ErrorAction Ignore)) {
+            choco install git -y --params "/GitOnlyOnPath /NoAutoCrlf /NoShellHereIntegration"
+            $env:Path = "$env:Path;$env:ProgramFiles\Git\cmd\"
+          }
+          scoop bucket add MarkMichaelis https://github.com/MarkMichaelis/ScoopBucket
+          scoop bucket add extras
+
+      - name: Run install validation
+        id: test
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          & "${{ github.workspace }}\.github\scripts\Test-Installs.ps1"
+
+      - name: Ensure issue labels exist
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "install-failure" --description "Automated: package install failed in CI" --color "d73a4a" --force
+          gh label create "automated" --description "Created by CI workflow" --color "0075ca" --force
+
+      - name: File issues for failures
+        if: always() && steps.test.outputs.has_failures == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $results = Get-Content "${{ github.workspace }}\test-results.json" | ConvertFrom-Json
+          $failures = $results | Where-Object { $_.Status -eq 'fail' }
+          $runUrl = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          foreach ($pkg in $failures) {
+            $title = "[CI] Install failure: $($pkg.Name) ($($pkg.InstallerType))"
+
+            # Check for existing open issue to avoid duplicates
+            $existing = gh issue list --search "in:title `"$title`"" --state open --json number --jq '.[].number' 2>$null
+            if ($existing) {
+              Write-Host "Issue already open for $($pkg.Name): #$existing — adding comment"
+              $commentBody = @"
+          ### Re-occurrence on $(Get-Date -Format 'yyyy-MM-dd')
+
+          This failure was detected again in [workflow run]($runUrl).
+
+          **Exit Code:** ``$($pkg.ExitCode)``
+          **Error:**
+          ``````
+          $($pkg.ErrorOutput)
+          ``````
+          "@
+              gh issue comment $existing.Split("`n")[0].Trim() --body $commentBody
+              continue
+            }
+
+            $body = @"
+          ## Package Install Failure
+
+          | Field | Value |
+          |---|---|
+          | **Package** | $($pkg.Name) |
+          | **ID** | $($pkg.PackageId) |
+          | **Installer** | $($pkg.InstallerType) |
+          | **Source Script** | $($pkg.SourceScript) |
+          | **Exit Code** | $($pkg.ExitCode) |
+          | **Workflow Run** | [View Run]($runUrl) |
+
+          ### Error Output
+          ``````
+          $($pkg.ErrorOutput)
+          ``````
+
+          ### Command Attempted
+          ``````
+          $($pkg.Command)
+          ``````
+
+          ---
+          *This issue was automatically created by the CI validation workflow.*
+          "@
+
+            Write-Host "Creating issue for: $($pkg.Name)"
+            gh issue create --title $title --body $body --label "install-failure" --label "automated"
+          }
+
+      - name: Upload results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-validation-results
+          path: test-results.json
+          retention-days: 30

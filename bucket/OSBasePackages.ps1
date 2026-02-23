@@ -22,7 +22,7 @@ $OSPackages = @{
 $OSPackages.VAlues | `
     ForEach-Object { 
         Write-Host "Installing $($_.WingetName)..."
-        Winget install --id $_.WingetID
+        Winget install --id $_.WingetID --scope machine
     }
 
 
