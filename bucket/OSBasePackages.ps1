@@ -10,7 +10,7 @@ $OSPackages = @{
     'Everything Cli'=([PSCustomObject]@{ WingetName='Everything Cli'; WinGetID='voidtools.Everything.Cli';  })
     'Google Chrome'=([PSCustomObject]@{ WingetName='Google Chrome'; WinGetID='Google.Chrome';  })
     'Process Explorer'=([PSCustomObject]@{ WingetName='Process Explorer'; WinGetID='Microsoft.Sysinternals.ProcessExplorer';  })
-    'SysInternals'=([PSCustomObject]@{ WingetName='SysInternals'; WinGetID='Microsoft.SysInternals';  })
+    'SysInternals'=([PSCustomObject]@{ WingetName='SysInternals Suite'; WinGetID='Microsoft.Sysinternals.Suite';  })
     'WinDirStat'=([PSCustomObject]@{ WingetName='WinDirStat'; WinGetID='WinDirStat.WinDirStat';  })
     'UniversalSilentSwitchFinder'=([PSCustomObject]@{ WingetName='UniversalSilentSwitchFinder'; WinGetID='WindowsPostInstallWizard.UniversalSilentSwitchFinder';  })
     'bat'=([PSCustomObject]@{ WingetName='bat'; WinGetID='sharkdp.bat';  }) # Supports Git integration which has not knowingly been configured.

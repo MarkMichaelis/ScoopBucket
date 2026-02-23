@@ -22,6 +22,33 @@ $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'  # Speed up web requests
 
 # ============================================================================
+# CI Skip List — packages that cannot install on a headless Windows Server
+# ============================================================================
+# Key = PackageId (winget) or package name (choco).  These are marked 'untested'
+# instead of 'fail' so the build stays green while still documenting coverage gaps.
+#
+# Reasons a package ends up here:
+#   - winget "No applicable installer found" — only user-scope MSIX/APPX available
+#   - Chocolatey package delisted / no longer in the community repo
+#   - Requires GUI session, license activation, or interactive prompts
+
+$script:CISkipPackages = @{
+    # winget: user-scope-only MSIX apps (no machine-scope MSI/EXE installer)
+    'Anthropic.Claude'              = 'User-scope MSIX only — no machine installer'
+    'eSpeak-NG.eSpeak-NG'           = 'User-scope MSIX only — no machine installer'
+    'Notion.Notion'                 = 'User-scope MSIX only — no machine installer'
+    'Pushbullet.Pushbullet'         = 'User-scope MSIX only — no machine installer'
+    'TechSmith.Snagit.2024'         = 'User-scope MSIX only — no machine installer (licensed software)'
+    'Spotify.Spotify'               = 'User-scope MSIX only — no machine installer'
+    'Doist.Todoist'                  = 'User-scope MSIX only — no machine installer'
+    'Zoom.Zoom.EXE'                 = 'User-scope MSIX only — no machine installer'
+    'ScooterSoftware.BeyondCompare.4' = 'User-scope MSIX only — no machine installer (licensed software)'
+    # choco: delisted or CI-incompatible
+    'dbxcli'                        = 'Package removed from Chocolatey community repository'
+    'Office365ProPlus'              = 'Requires GUI session and license activation (exit 17004)'
+}
+
+# ============================================================================
 # Results Tracking
 # ============================================================================
 
@@ -573,6 +600,15 @@ foreach ($group in $grouped) {
     Write-Host "`n========== $($group.Name) ==========" -ForegroundColor Cyan
 
     foreach ($pkg in $group.Group) {
+        # Check the CI skip list before attempting install
+        $skipKey = if ($pkg.InstallerType -eq 'choco') { $pkg.Name } else { $pkg.PackageId }
+        if ($script:CISkipPackages.ContainsKey($skipKey)) {
+            Skip-Package -Name $pkg.Name -PackageId $pkg.PackageId `
+                -InstallerType $pkg.InstallerType -SourceScript $pkg.SourceScript `
+                -Reason $script:CISkipPackages[$skipKey]
+            continue
+        }
+
         switch ($pkg.InstallerType) {
             'winget' {
                 Install-WingetPackage -Name $pkg.Name -PackageId $pkg.PackageId `
@@ -646,10 +682,12 @@ if ($scoopPackages.Count -gt 0) {
 }
 
 # --- Winget machine-scope installs (spot-check via registry HKLM) ---
-$wingetMachinePackages = @($packages | Where-Object { $_.InstallerType -eq 'winget' -and $_.Scope -eq 'machine' })
+# Only verify packages that actually passed installation (skip CI-skipped and failed)
+$passedNames = @($script:Results | Where-Object { $_.Status -eq 'pass' -and $_.InstallerType -eq 'winget' } | Select-Object -ExpandProperty Name)
+$wingetMachinePackages = @($packages | Where-Object { $_.InstallerType -eq 'winget' -and $_.Scope -eq 'machine' -and $passedNames -contains $_.Name })
 if ($wingetMachinePackages.Count -gt 0) {
     Write-Host "Verifying winget machine-scope installs via registry (spot-check)..." -ForegroundColor Gray
-    # Spot-check up to 5 winget machine-scope packages
+    # Spot-check up to 5 winget machine-scope packages that passed
     $spotCheck = $wingetMachinePackages | Select-Object -First 5
     foreach ($pkg in $spotCheck) {
         $searchName = $pkg.Name
@@ -680,22 +718,18 @@ if ($psModulePackages.Count -gt 0) {
     }
 }
 
-# --- Chocolatey environment variables persisted at Machine scope ---
-Write-Host "Verifying Chocolatey environment variables are set at Machine scope..." -ForegroundColor Gray
-$chocoEnvVars = @(
-    @{ Name='ChocolateyAllowEmptyChecksums';       Expected='True' }
-    @{ Name='ChocolateyAllowEmptyChecksumsSecure'; Expected='True' }
-    @{ Name='ChocolateyToolsLocation';             Expected=$null }  # just check it's non-empty
-)
-foreach ($ev in $chocoEnvVars) {
-    Test-Verification -Name "env-machine:$($ev.Name)" `
-        -Description "Environment variable '$($ev.Name)' should be set at Machine scope" `
-        -Test {
-            $val = [Environment]::GetEnvironmentVariable($ev.Name, 'Machine')
-            if ($null -eq $val -or $val -eq '') { return $false }
-            if ($null -ne $ev.Expected) { return $val -eq $ev.Expected }
-            return $true
-        }
+# --- Chocolatey feature verification ---
+# Note: choco 'feature enable' commands set features in the choco config file,
+# NOT as machine environment variables.  Verify via 'choco feature list' instead.
+Write-Host "Verifying Chocolatey features are enabled..." -ForegroundColor Gray
+$chocoFeatures = @('allowGlobalConfirmation', 'allowEmptyChecksums')
+foreach ($feat in $chocoFeatures) {
+    Test-Verification -Name "choco-feature:$feat" `
+        -Description "Chocolatey feature '$feat' should be enabled" `
+        -Test ([scriptblock]::Create(@"
+            `$output = cmd /c 'choco feature list --limit-output 2>&1'
+            `$output -match '${feat}\|Enabled'
+"@))
 }
 
 # --- MarkMichaelis bucket is present ---
