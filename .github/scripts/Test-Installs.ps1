@@ -57,6 +57,44 @@ function Add-Result {
 # Install Functions
 # ============================================================================
 
+# Per-package timeout (seconds) to prevent one hung install from consuming the
+# entire CI budget.  Scoop gets a longer window because Visual Studio installs
+# are legitimately large.
+$script:DefaultTimeoutSec  = 900   # 15 minutes — winget / choco / ps-module
+$script:ScoopTimeoutSec    = 2400  # 40 minutes — scoop (covers VS installs)
+
+function Invoke-WithTimeout {
+    <#
+    .SYNOPSIS
+        Runs an external command with a timeout.  Returns a hashtable with
+        ExitCode, Output, and TimedOut.
+    #>
+    param(
+        [string]$Command,
+        [int]$TimeoutSeconds = $script:DefaultTimeoutSec
+    )
+    $stdOutFile = [System.IO.Path]::GetTempFileName()
+    $stdErrFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $proc = Start-Process cmd -ArgumentList "/c $Command" `
+            -NoNewWindow -PassThru `
+            -RedirectStandardOutput $stdOutFile `
+            -RedirectStandardError  $stdErrFile
+        $finished = $proc.WaitForExit($TimeoutSeconds * 1000)
+        if (-not $finished) {
+            # Kill the process tree
+            try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch { }
+            $partialOut = if (Test-Path $stdOutFile) { Get-Content $stdOutFile -Raw } else { '' }
+            return @{ ExitCode = -1; Output = "$partialOut`n[TIMEOUT after ${TimeoutSeconds}s]"; TimedOut = $true }
+        }
+        $out = if (Test-Path $stdOutFile) { Get-Content $stdOutFile -Raw } else { '' }
+        $err = if (Test-Path $stdErrFile) { Get-Content $stdErrFile -Raw } else { '' }
+        return @{ ExitCode = $proc.ExitCode; Output = "$out`n$err".Trim(); TimedOut = $false }
+    } finally {
+        Remove-Item $stdOutFile, $stdErrFile -ErrorAction SilentlyContinue
+    }
+}
+
 function Install-WingetPackage {
     param(
         [string]$Name,
@@ -67,16 +105,21 @@ function Install-WingetPackage {
     $cmd = "winget install --id $PackageId --scope $Scope --accept-package-agreements --accept-source-agreements --disable-interactivity --silent"
     try {
         Write-Host "  Installing [winget] $Name ($PackageId)..."
-        $output = cmd /c "$cmd 2>&1"
-        $code = $LASTEXITCODE
+        $result = Invoke-WithTimeout -Command $cmd -TimeoutSeconds $script:DefaultTimeoutSec
+        $code = $result.ExitCode
+        if ($result.TimedOut) {
+            Add-Result -Name $Name -PackageId $PackageId -InstallerType 'winget' `
+                -SourceScript $SourceScript -Command $cmd -Status 'fail' `
+                -ExitCode $code -ErrorOutput $result.Output
+        }
         # winget exit code 0 = success, -1978335189 (0x8A150057) = already installed
-        if ($code -eq 0 -or $code -eq -1978335189) {
+        elseif ($code -eq 0 -or $code -eq -1978335189) {
             Add-Result -Name $Name -PackageId $PackageId -InstallerType 'winget' `
                 -SourceScript $SourceScript -Command $cmd -Status 'pass'
         } else {
             Add-Result -Name $Name -PackageId $PackageId -InstallerType 'winget' `
                 -SourceScript $SourceScript -Command $cmd -Status 'fail' `
-                -ExitCode $code -ErrorOutput ($output | Out-String)
+                -ExitCode $code -ErrorOutput $result.Output
         }
     } catch {
         Add-Result -Name $Name -PackageId $PackageId -InstallerType 'winget' `
@@ -93,15 +136,19 @@ function Install-ChocoPackage {
     $cmd = "choco install $Name -y --no-progress"
     try {
         Write-Host "  Installing [choco] $Name..."
-        $output = cmd /c "$cmd 2>&1"
-        $code = $LASTEXITCODE
-        if ($code -eq 0) {
+        $result = Invoke-WithTimeout -Command $cmd -TimeoutSeconds $script:DefaultTimeoutSec
+        $code = $result.ExitCode
+        if ($result.TimedOut) {
+            Add-Result -Name $Name -PackageId $Name -InstallerType 'choco' `
+                -SourceScript $SourceScript -Command $cmd -Status 'fail' `
+                -ExitCode $code -ErrorOutput $result.Output
+        } elseif ($code -eq 0) {
             Add-Result -Name $Name -PackageId $Name -InstallerType 'choco' `
                 -SourceScript $SourceScript -Command $cmd -Status 'pass'
         } else {
             Add-Result -Name $Name -PackageId $Name -InstallerType 'choco' `
                 -SourceScript $SourceScript -Command $cmd -Status 'fail' `
-                -ExitCode $code -ErrorOutput ($output | Out-String)
+                -ExitCode $code -ErrorOutput $result.Output
         }
     } catch {
         Add-Result -Name $Name -PackageId $Name -InstallerType 'choco' `
@@ -118,15 +165,19 @@ function Install-ScoopPackage {
     $cmd = "scoop install -g $Name"
     try {
         Write-Host "  Installing [scoop] $Name..."
-        $output = cmd /c "$cmd 2>&1"
-        $code = $LASTEXITCODE
-        if ($code -eq 0) {
+        $result = Invoke-WithTimeout -Command $cmd -TimeoutSeconds $script:ScoopTimeoutSec
+        $code = $result.ExitCode
+        if ($result.TimedOut) {
+            Add-Result -Name $Name -PackageId $Name -InstallerType 'scoop' `
+                -SourceScript $SourceScript -Command $cmd -Status 'fail' `
+                -ExitCode $code -ErrorOutput $result.Output
+        } elseif ($code -eq 0) {
             Add-Result -Name $Name -PackageId $Name -InstallerType 'scoop' `
                 -SourceScript $SourceScript -Command $cmd -Status 'pass'
         } else {
             Add-Result -Name $Name -PackageId $Name -InstallerType 'scoop' `
                 -SourceScript $SourceScript -Command $cmd -Status 'fail' `
-                -ExitCode $code -ErrorOutput ($output | Out-String)
+                -ExitCode $code -ErrorOutput $result.Output
         }
     } catch {
         Add-Result -Name $Name -PackageId $Name -InstallerType 'scoop' `
@@ -517,6 +568,7 @@ Write-Host "--- End Package List ---`n" -ForegroundColor DarkGray
 # Execute installs grouped by source script
 $grouped = $packages | Group-Object SourceScript | Sort-Object Name
 
+try {
 foreach ($group in $grouped) {
     Write-Host "`n========== $($group.Name) ==========" -ForegroundColor Cyan
 
@@ -731,4 +783,21 @@ if ($failed -gt 0) {
 } else {
     Write-Host "`nAll testable packages installed successfully." -ForegroundColor Green
     exit 0
+}
+
+} finally {
+    # ========================================================================
+    # Ensure results are ALWAYS written, even if the script is interrupted or
+    # cancelled mid-run.  The try block starts just before the install loop.
+    # ========================================================================
+    Write-Host "`n========== Writing partial results (finally block) ==========" -ForegroundColor Yellow
+    $partialPath = Join-Path $repoRoot 'test-results.json'
+    if ($script:Results.Count -gt 0 -and -not (Test-Path $partialPath)) {
+        $script:Results | ConvertTo-Json -Depth 5 | Set-Content -Path $partialPath -Encoding UTF8
+        Write-Host "Partial results written to: $partialPath"
+    }
+    if ($env:GITHUB_OUTPUT -and -not (Select-String -Path $env:GITHUB_OUTPUT -Pattern 'has_failures' -Quiet -ErrorAction SilentlyContinue)) {
+        $anyFail = @($script:Results | Where-Object Status -eq 'fail').Count -gt 0
+        "has_failures=$($anyFail ? 'true' : 'false')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+    }
 }

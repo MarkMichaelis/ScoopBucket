@@ -148,7 +148,7 @@ jobs:
           }
 
       - name: File issue for workflow-level failure
-        if: failure() && steps.test.outputs.has_failures != 'true'
+        if: (failure() || cancelled()) && steps.test.outputs.has_failures != 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
