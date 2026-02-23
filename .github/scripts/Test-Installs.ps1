@@ -681,23 +681,23 @@ if ($scoopPackages.Count -gt 0) {
     }
 }
 
-# --- Winget machine-scope installs (spot-check via registry HKLM) ---
-# Only verify packages that actually passed installation (skip CI-skipped and failed)
-$passedNames = @($script:Results | Where-Object { $_.Status -eq 'pass' -and $_.InstallerType -eq 'winget' } | Select-Object -ExpandProperty Name)
-$wingetMachinePackages = @($packages | Where-Object { $_.InstallerType -eq 'winget' -and $_.Scope -eq 'machine' -and $passedNames -contains $_.Name })
-if ($wingetMachinePackages.Count -gt 0) {
-    Write-Host "Verifying winget machine-scope installs via registry (spot-check)..." -ForegroundColor Gray
-    # Spot-check up to 5 winget machine-scope packages that passed
-    $spotCheck = $wingetMachinePackages | Select-Object -First 5
-    foreach ($pkg in $spotCheck) {
-        $searchName = $pkg.Name
-        Test-Verification -Name "winget-machine:$searchName" `
-            -Description "Winget package '$searchName' should appear under HKLM (machine-wide install)" `
+# --- Winget installs (spot-check via 'winget list') ---
+# Only verify packages that actually passed installation (skip CI-skipped and failed).
+# Uses 'winget list --id' which is the authoritative way to check if winget
+# considers a package installed, regardless of install scope or registry layout.
+$passedWinget = @($script:Results | Where-Object { $_.Status -eq 'pass' -and $_.InstallerType -eq 'winget' })
+if ($passedWinget.Count -gt 0) {
+    Write-Host "Verifying winget installs via 'winget list' (spot-check)..." -ForegroundColor Gray
+    # Spot-check up to 5 winget packages that passed
+    $spotCheck = $passedWinget | Select-Object -First 5
+    foreach ($r in $spotCheck) {
+        $pkgId = ($packages | Where-Object { $_.Name -eq $r.Name -and $_.InstallerType -eq 'winget' } | Select-Object -First 1).PackageId
+        if (-not $pkgId) { continue }
+        Test-Verification -Name "winget-installed:$($r.Name)" `
+            -Description "Winget package '$($r.Name)' ($pkgId) should appear in 'winget list'" `
             -Test ([scriptblock]::Create(@"
-                `$found = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
-                    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
-                    Where-Object { `$_.DisplayName -like '*$searchName*' }
-                `$null -ne `$found
+                `$output = cmd /c 'winget list --id $pkgId --accept-source-agreements --disable-interactivity 2>&1'
+                `$output -match [regex]::Escape('$pkgId')
 "@))
     }
 }
