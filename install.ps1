@@ -30,7 +30,7 @@ function Add-ScoopBucket {
     $env:Path = "$env:Path;$env:ProgramFiles\Git\cmd\"
   } 
 
-  if ((scoop bucket list) -notcontains $name) {
+  if ((scoop bucket list).Name -notcontains $name) {
     Write-Host "scoop bucket add $name $url"
     # Run in new PowerShell process to ensure git path is enabled.
     # powershell -ExecutionPolicy unrestricted -Command scoop bucket add $name $url
@@ -41,9 +41,19 @@ function Add-ScoopBucket {
   }
 }
 Add-ScoopBucket -Name 'MarkMichaelis' -Url 'https://github.com/MarkMichaelis/ScoopBucket'
-Add-ScoopBucket _Name 'extras' 
+Add-ScoopBucket -Name 'extras' 
 
 <#'McAfeeUninstall',#> 'OSBasePackages' | ForEach-Object {
-  Write-Host "Installing $_..."
-  scoop install -g $_
+  $app = $_
+  # Check if app is already installed globally
+  $installed = scoop list -g 2>&1 | Select-String -Pattern "^\s*$app\s" -Quiet
+  
+  if ($installed) {
+    Write-Host "✓ '$app' is already installed. Checking for updates..." -ForegroundColor Green
+    scoop update $app --global
+  }
+  else {
+    Write-Host "Installing $app..." -ForegroundColor Cyan
+    scoop install -g $app
+  }
 }
