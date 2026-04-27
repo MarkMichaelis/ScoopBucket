@@ -1,11 +1,11 @@
 {
     "$schema": "https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json",
-    "version": "1.05.000",
+    "version": "1.00.000",
     "url": [
         "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/Utils.ps1",
-        "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/AIAgents.ps1"
+        "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/ClaudeExcel.ps1"
     ],
     "installer": {
-        "script": "& \"$dir\\AIAgents.ps1\""
+        "script": "& \"$dir\\ClaudeExcel.ps1\""
     }
 }

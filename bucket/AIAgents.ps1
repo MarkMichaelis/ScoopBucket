@@ -36,7 +36,8 @@ if ($LASTEXITCODE -ne 0) {
 'MarkMichaelis/ClaudeCode',
 'MarkMichaelis/Codex',
 'MarkMichaelis/GeminiCli',
-'MarkMichaelis/GitHubCopilotCli' | ForEach-Object {
+'MarkMichaelis/GitHubCopilotCli',
+'MarkMichaelis/ClaudeExcel' | ForEach-Object {
     Write-Host "Installing $_..."
     scoop install $_
 }
