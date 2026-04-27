@@ -13,4 +13,13 @@ Write-Host 'Installing and configuring OSBasePackages...'
     scoop install -g $_
 }
 
+# Aspire requires the .NET SDK (installed above as `dotnet`) and is normally
+# paired with Visual Studio (installed above) and/or VS Code. Place this
+# install last so the SDK and Visual Studio are present when the Aspire CLI
+# registers its global dotnet tool and project templates.
+'MarkMichaelis/Aspire' | ForEach-Object {
+    Write-Host "Installing $_..."
+    scoop install $_
+}
+
 
