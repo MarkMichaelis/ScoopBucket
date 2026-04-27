@@ -7,9 +7,9 @@ Write-Host 'Installing and configuring OSBasePackages...'
     choco install -y $_
 }
 
-'' | ForEach-Object { 
+'MarkMichaelis/AIAgents' | ForEach-Object {
     Write-Host "Installing $_..."
-    choco install -y $_
+    scoop install $_
 }
 
 
