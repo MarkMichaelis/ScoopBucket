@@ -41,7 +41,7 @@ function Add-ScoopBucket {
   }
 }
 Add-ScoopBucket -Name 'MarkMichaelis' -Url 'https://github.com/MarkMichaelis/ScoopBucket'
-Add-ScoopBucket _Name 'extras' 
+Add-ScoopBucket -Name 'extras' -Url 'https://github.com/ScoopInstaller/Extras'
 
 <#'McAfeeUninstall',#> 'OSBasePackages' | ForEach-Object {
   Write-Host "Installing $_..."
