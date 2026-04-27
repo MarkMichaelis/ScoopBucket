@@ -15,7 +15,7 @@
 # winget surfaces: open the AppSource page, instruct the user to click "Get
 # it now", then poll the Office WEF registry to confirm the add-in landed.
 
-$Script:ClaudeExcelAppSourceId  = 'WA200010001'
+$Script:ClaudeExcelAppSourceId  = 'WA200007521'
 # Note: $script:var inside a double-quoted string does NOT expand the scope
 # qualifier reliably (the parser treats the colon as a type/scope delimiter
 # and stops at the next punctuation), so use a subexpression.
