@@ -19,7 +19,7 @@ $Script:ClaudeExcelAppSourceId  = 'WA200010001'
 # Note: $script:var inside a double-quoted string does NOT expand the scope
 # qualifier reliably (the parser treats the colon as a type/scope delimiter
 # and stops at the next punctuation), so use a subexpression.
-$Script:ClaudeExcelMarketplace  = "https://marketplace.microsoft.com/en-us/product/office/$($Script:ClaudeExcelAppSourceId)?tab=Overview"
+$Script:ClaudeExcelMarketplace  = "https://appsource.microsoft.com/en-us/product/office/$($Script:ClaudeExcelAppSourceId)?tab=Overview"
 $Script:ClaudeExcelWefRegRoot   = 'HKCU:\Software\Microsoft\Office\16.0\WEF'
 
 Function Test-ClaudeExcelInstalled {
