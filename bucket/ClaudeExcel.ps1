@@ -15,11 +15,11 @@
 # winget surfaces: open the AppSource page, instruct the user to click "Get
 # it now", then poll the Office WEF registry to confirm the add-in landed.
 
-$Script:ClaudeExcelAppSourceId  = 'WA200007521'
-# Note: $script:var inside a double-quoted string does NOT expand the scope
-# qualifier reliably (the parser treats the colon as a type/scope delimiter
-# and stops at the next punctuation), so use a subexpression.
-$Script:ClaudeExcelMarketplace  = "https://appsource.microsoft.com/en-us/product/office/$($Script:ClaudeExcelAppSourceId)?tab=Overview"
+# The canonical Anthropic landing page is the source of truth - it forwards
+# to AppSource and is updated by Anthropic if Microsoft re-keys the listing
+# (which happens; the AppSource asset id is not stable enough to hardcode).
+$Script:ClaudeExcelLandingPage  = 'https://claude.com/claude-for-excel'
+$Script:ClaudeExcelMarketplace  = 'https://appsource.microsoft.com/en-us/marketplace/apps?search=Claude%20for%20Excel&product=office%3Bexcel'
 $Script:ClaudeExcelWefRegRoot   = 'HKCU:\Software\Microsoft\Office\16.0\WEF'
 
 Function Test-ClaudeExcelInstalled {
@@ -36,7 +36,9 @@ Function Test-ClaudeExcelInstalled {
     # name. A recursive value scan is the most resilient detection: the exact
     # subkey name varies across Office builds (Manifests vs Developer vs
     # OfficeStoreAddins vs newer per-version variants).
-    $needles = @($Script:ClaudeExcelAppSourceId, 'Claude for Excel', 'Anthropic')
+    # Detection needs to match the Anthropic add-in regardless of which Microsoft
+    # asset id Microsoft is currently using - check publisher and product name.
+    $needles = @('Claude for Excel', 'Anthropic')
     $hits = Get-ChildItem -Path $Script:ClaudeExcelWefRegRoot -Recurse -ErrorAction SilentlyContinue |
         ForEach-Object {
             $key = $_
@@ -71,16 +73,19 @@ Function Install-ClaudeExcel {
     Write-Host 'Microsoft AppSource. Microsoft does not provide an unattended install'
     Write-Host 'path for Office Web Add-ins, so a one-time browser click is required.'
     Write-Host ''
-    Write-Host "  1. Opening AppSource page: $Script:ClaudeExcelMarketplace"
-    Write-Host '  2. Click "Get it now" and follow the Excel prompts.'
+    Write-Host "  1. Opening Anthropic's Claude for Excel page: $Script:ClaudeExcelLandingPage"
+    Write-Host '     (Click "Get it on Microsoft AppSource" - this redirects to the'
+    Write-Host '      official AppSource listing maintained by Anthropic.)'
+    Write-Host '  2. Click "Get it now" on AppSource and follow the Excel prompts.'
     Write-Host '  3. (Optional) Sign in with your Claude account inside Excel.'
+    Write-Host "     Alternative AppSource search: $Script:ClaudeExcelMarketplace"
     Write-Host ''
 
     try {
-        Start-Process $Script:ClaudeExcelMarketplace | Out-Null
+        Start-Process $Script:ClaudeExcelLandingPage | Out-Null
     }
     catch {
-        Write-Warning "Couldn't auto-open the browser: $($_.Exception.Message). Visit $Script:ClaudeExcelMarketplace manually."
+        Write-Warning "Couldn't auto-open the browser: $($_.Exception.Message). Visit $Script:ClaudeExcelLandingPage manually."
     }
 
     $timeoutSeconds = 300
@@ -94,7 +99,7 @@ Function Install-ClaudeExcel {
         Start-Sleep -Seconds 5
     }
 
-    Write-Warning "Claude for Excel was not detected within $timeoutSeconds seconds. If you completed the AppSource flow, a fresh Excel launch may be required for the registry to update. Otherwise, install manually from $Script:ClaudeExcelMarketplace."
+    Write-Warning "Claude for Excel was not detected within $timeoutSeconds seconds. If you completed the AppSource flow, a fresh Excel launch may be required for the registry to update. Otherwise, install manually from $Script:ClaudeExcelLandingPage."
 }
 
 Install-ClaudeExcel
