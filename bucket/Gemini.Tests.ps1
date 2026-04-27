@@ -3,10 +3,12 @@
 $sut  = (Split-Path -Leaf $PSCommandPath).Replace('.Tests.ps1', '')
 $name = $sut
 
-# Tagged 'Manual' because Gemini.ps1 uses a browser-watch pattern: it opens
-# the Google app desktop download page and waits for the user to click
-# "Download app". This cannot run unattended in CI.
-Describe "Install $name" -Tag 'Manual', 'Heavy', 'Install' {
+# Gemini.ps1 now performs a fully automated install via direct download from
+# dl.google.com (the URL is constructed using the appguid/path constants
+# extracted from search.google's main.min.js). Falls back to the legacy
+# browser-watch pattern only if that direct fetch fails. Tagged 'Heavy'
+# because it actually downloads ~11 MB and runs the Omaha installer.
+Describe "Install $name" -Tag 'Heavy', 'Install' {
     BeforeAll {
         if (Test-ScoopPackageInstalled $name) {
             scoop uninstall $name
@@ -24,6 +26,6 @@ Describe "Install $name" -Tag 'Manual', 'Heavy', 'Install' {
     }
 
     It 'drops the Google app for desktop install marker' {
-        Test-Path (Join-Path $env:LOCALAPPDATA 'Google\GoogleApp') | Should -Be $true
+        Test-Path (Join-Path $env:LOCALAPPDATA 'Google\Google\latest\google.exe') | Should -Be $true
     }
 }
