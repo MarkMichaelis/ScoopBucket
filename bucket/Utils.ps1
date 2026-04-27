@@ -8,7 +8,20 @@ if(!$env:SCOOP -and (test-path "$env:ProgramData\scoop\apps\scoop\current")) {
 
 if($env:SCOOP) {
     $currentScoopDirectory = "$env:SCOOP\apps\scoop\current"
-    . (Join-Path $currentScoopDirectory 'libexec\scoop-search.ps1') > $null
+    # Internal scoop helpers used by the `scoop` wrapper below
+    # (parse_app, Find-BucketDirectory, search_bucket). Their locations have
+    # shifted across scoop versions, so dot-source defensively.
+    foreach ($rel in @(
+            'lib\core.ps1',
+            'lib\buckets.ps1',
+            'lib\manifest.ps1',
+            'libexec\scoop-search.ps1'
+        )) {
+        $p = Join-Path $currentScoopDirectory $rel
+        if (Test-Path $p) {
+            . $p > $null 2>&1
+        }
+    }
 }
 else {
     Write-Warning '$env:SCOOP not found.'
