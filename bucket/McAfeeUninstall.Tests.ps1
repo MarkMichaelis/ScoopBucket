@@ -1,29 +1,24 @@
-
 . "$PSScriptRoot\Utils.ps1"
-$sut = (Split-Path -Leaf $MyInvocation.MyCommand.Path).Replace('.Tests', '')
-. "$PSScriptRoot\$sut"
 
-Describe Install-McAfeeUninstall {
-    it "scoop install McAfeeUninstall" {
-        $meScript = $PSCommandPath
-        $InstallName = ((Split-Path $meScript -Leaf) -replace '.Tests.ps1', '')
-        if(Test-ScoopPackageInstalled $InstallName) { scoop uninstall $installName }
-        $manifestPath = "$PSScriptRoot\McAfeeUninstall.json"
-        $manifestJson = Get-Content $manifestPath
-        $manifest = $manifestJson | ConvertFrom-Json
-        $manifest.url = $manifest.url | ForEach-Object {
-            [Uri]$mockUri = $_ -replace 'https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket', "$PSScriptRoot"
-            Write-Output $mockUri.AbsoluteUri
+$sut  = (Split-Path -Leaf $PSCommandPath).Replace('.Tests.ps1', '')
+$name = $sut
+
+Describe "Install $name" -Tag 'Heavy', 'Install' {
+    BeforeAll {
+        if (Test-ScoopPackageInstalled $name) {
+            scoop uninstall $name
         }
-        $mockManifestPath = (Join-Path $env:TEMP (Split-Path -Leaf $manifestPath)) 
-        try {
-            scoop hold scoop
-            $manifest | ConvertTo-Json | Out-File $mockManifestPath
-            scoop install $mockManifestPath
-        }
-        finally {
-            Remove-Item -force -Path $mockManifestPath -ErrorAction Ignore
-            scoop unhold scoop
-        }
+    }
+
+    It 'runs the uninstaller without throwing' {
+        { Install-LocalManifest "$PSScriptRoot\$name.json" } | Should -Not -Throw
+    }
+
+    It 'is idempotent on re-run' {
+        { Install-LocalManifest "$PSScriptRoot\$name.json" } | Should -Not -Throw
+    }
+
+    It 'leaves no McAfee programs registered' {
+        Get-Program 'McAfee*' | Should -BeNullOrEmpty
     }
 }

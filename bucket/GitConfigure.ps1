@@ -9,8 +9,12 @@ Function GitConfigure {
     # TODO: Set .ssh
     # See https://msdn.microsoft.com/en-us/powershell/wmf/5.0/feedback_symbolic?f=255&MSPPError=-2147217396
     if ($env:Data -and (Test-Path "$env:Data")) {
-        New-Item -ItemType Junction -Path "$env:USERPROFILE\.ssh" -Target "$env:Data\Profile\.ssh"
-        New-Item -ItemType HardLink -Target "$env:USERPROFILE\.gitconfig" -Path "$env:Data\Profile\.gitconfig"
+        if (-not (Test-Path "$env:USERPROFILE\.ssh")) {
+            New-Item -ItemType Junction -Path "$env:USERPROFILE\.ssh" -Target "$env:Data\Profile\.ssh"
+        }
+        if (-not (Test-Path "$env:Data\Profile\.gitconfig")) {
+            New-Item -ItemType HardLink -Target "$env:USERPROFILE\.gitconfig" -Path "$env:Data\Profile\.gitconfig"
+        }
     }
 
     Import-ChocolateyModule
@@ -22,7 +26,7 @@ Function GitConfigure {
         #/NoAutoCrlf"    <# This setting only affects new installs, it will not override an existing .gitconfig. This will ensure 'Checkout as is, commit as is' #>
     }
 
-    Install-Module posh-git -y -Scope -AllUsers -force -allowclobber  # Both Posh-Git and IntelliTect.Git support Get-GitBranch. 
+    Install-Module posh-git -Scope AllUsers -AllowClobber  # Both Posh-Git and IntelliTect.Git support Get-GitBranch. 
                                                                       # IntelliTect.Git will get priority if it appears first in the PSModulePath
                                                                       # or it is installed after Pscx (if not using source code)
     #Import-Module (Get-Childitem $env:PSModulePath.Split(';') posh-git.psm1 -Recurse -ErrorAction Ignore).FullName
@@ -58,9 +62,9 @@ Function GitConfigure {
     }
 
     # Confiure Misc. Diff Tools
-    git config difftool.debug-powershell.cmd 'powershell -noprofile -command { Write-Output \"REMOTE=''$REMOTE'' LOCAL=''$LOCAL''\"}'
-    git config difftool.debug-cmd.exe.cmd 'cmd.exe /C \"ECHO REMOTE=''$REMOTE'' LOCAL=''$LOCAL''\"}'
-    git config difftool.vscode.cmd 'code --wait --new-window --diff \"$LOCAL\" \"$REMOTE\"'
+    git config --global difftool.debug-powershell.cmd 'powershell -noprofile -command { Write-Output \"REMOTE=''$REMOTE'' LOCAL=''$LOCAL''\"}'
+    git config --global difftool.debug-cmd.exe.cmd 'cmd.exe /C \"ECHO REMOTE=''$REMOTE'' LOCAL=''$LOCAL''\"}'
+    git config --global difftool.vscode.cmd 'code --wait --new-window --diff \"$LOCAL\" \"$REMOTE\"'
 
     Set-Service -StartupType Manual ssh-agent
 }

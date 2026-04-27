@@ -1,26 +1,26 @@
 . "$PSScriptRoot\Utils.ps1"
-$sut = (Split-Path -Leaf $MyInvocation.MyCommand.Path).Replace('.Tests', '')
-. "$PSScriptRoot\$sut"
 
-Describe Install-MicrosoftOffice365 {
-    $meScript = $PSCommandPath
-    $installName = ((Split-Path $meScript -Leaf) -replace '.Tests.ps1', '')
-    if(Test-ScoopPackageInstalled $InstallName) { scoop uninstall $installName }
-    $manifestPath = "$PSScriptRoot\MicrosoftOffice365.json"
-    $manifestJson = Get-Content $manifestPath
-    $manifest = $manifestJson | ConvertFrom-Json
-    $manifest.url = $manifest.url | ForEach-Object {
-        [Uri]$mockUri = $_ -replace 'https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket', "$PSScriptRoot"
-        Write-Output $mockUri.AbsoluteUri
+$sut  = (Split-Path -Leaf $PSCommandPath).Replace('.Tests.ps1', '')
+$name = $sut
+
+Describe "Install $name" -Tag 'Heavy', 'Install' {
+    BeforeAll {
+        if (Test-ScoopPackageInstalled $name) {
+            scoop uninstall $name
+        }
     }
-    $mockManifestPath = (Join-Path $env:TEMP (Split-Path -Leaf $manifestPath)) 
-    try {
-        scoop hold scoop
-        $manifest | ConvertTo-Json | Out-File $mockManifestPath
-        scoop install $mockManifestPath
+
+    It 'installs from the local manifest' {
+        Install-LocalManifest "$PSScriptRoot\$name.json"
+        Test-ScoopPackageInstalled $name | Should -Be $true
     }
-    finally {
-        Remove-Item -force -Path $mockManifestPath -ErrorAction Ignore
-        scoop unhold scoop
+
+    It 'is idempotent on re-run' {
+        { Install-LocalManifest "$PSScriptRoot\$name.json" } | Should -Not -Throw
+        Test-ScoopPackageInstalled $name | Should -Be $true
+    }
+
+    It 'has Office365ProPlus installed' -Tag 'Heavy' {
+        Get-Program -Filter '*Microsoft 365*' | Should -Not -BeNullOrEmpty
     }
 }
