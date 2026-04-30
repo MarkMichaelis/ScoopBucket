@@ -8,7 +8,20 @@ if(!$env:SCOOP -and (test-path "$env:ProgramData\scoop\apps\scoop\current")) {
 
 if($env:SCOOP) {
     $currentScoopDirectory = "$env:SCOOP\apps\scoop\current"
-    . (Join-Path $currentScoopDirectory 'libexec\scoop-search.ps1') > $null
+    # Internal scoop helpers used by the `scoop` wrapper below
+    # (parse_app, Find-BucketDirectory, search_bucket). Their locations have
+    # shifted across scoop versions, so dot-source defensively.
+    foreach ($rel in @(
+            'lib\core.ps1',
+            'lib\buckets.ps1',
+            'lib\manifest.ps1',
+            'libexec\scoop-search.ps1'
+        )) {
+        $p = Join-Path $currentScoopDirectory $rel
+        if (Test-Path $p) {
+            . $p > $null 2>&1
+        }
+    }
 }
 else {
     Write-Warning '$env:SCOOP not found.'
@@ -291,6 +304,159 @@ if (!(Test-Path function:Install-WebDownload)) {
                 }
             }
             Write-Output (Invoke-Command $postDownloadScriptBlock)
+        }
+    }
+}
+
+<#
+.SYNOPSIS
+    Install a Scoop manifest from a working-copy path with its url[] entries
+    rewritten to point at the local bucket directory.
+
+.DESCRIPTION
+    Solves the local-test problem: a bucket manifest's url[] entries point at
+    raw.githubusercontent.com/.../master/bucket/..., so a plain
+    `scoop install <local.json>` would fetch master, not the working copy.
+    This helper rewrites those URLs to file:// URIs anchored at $LocalBucketRoot,
+    writes the rewritten manifest to $env:TEMP, and runs scoop install against
+    the temp manifest. Cleans up in a finally block.
+
+.PARAMETER ManifestPath
+    Absolute path to the source manifest (.json) in the working copy.
+
+.PARAMETER LocalBucketRoot
+    Directory to substitute for the GitHub-master bucket URL. Defaults to the
+    parent directory of $ManifestPath (i.e., bucket/ itself).
+
+.PARAMETER BucketName
+    Name of the scoop bucket to temporarily repoint at the working copy so
+    that fully-qualified manifest references inside installer scripts (e.g.
+    `scoop install MarkMichaelis/Claude` from AIAgents.ps1) resolve against
+    the local repo. The original bucket source is captured before the swap
+    and restored in `finally`. Defaults to 'MarkMichaelis'. Pass $null to
+    skip the swap entirely.
+
+.EXAMPLE
+    Install-LocalManifest -ManifestPath "$PSScriptRoot\McAfeeUninstall.json"
+#>
+Function Install-LocalManifest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ManifestPath,
+        [string]$LocalBucketRoot = (Split-Path -Parent $ManifestPath),
+        [AllowNull()][string]$BucketName = 'MarkMichaelis'
+    )
+
+    if (-not (Test-Path $ManifestPath)) {
+        throw "Manifest not found: $ManifestPath"
+    }
+
+    # Resolve to absolute paths so the regex substitution produces a valid
+    # file:// URI. [Uri]::AbsoluteUri returns empty for relative paths.
+    $ManifestPath = (Resolve-Path -LiteralPath $ManifestPath).Path
+    if (-not $PSBoundParameters.ContainsKey('LocalBucketRoot')) {
+        $LocalBucketRoot = Split-Path -Parent $ManifestPath
+    } else {
+        $LocalBucketRoot = (Resolve-Path -LiteralPath $LocalBucketRoot).Path
+    }
+    $repoRoot = Split-Path -Parent $LocalBucketRoot
+
+    $manifest = Get-Content -Path $ManifestPath -Raw | ConvertFrom-Json
+    if ($manifest.url) {
+        $manifest.url = @(
+            $manifest.url | ForEach-Object {
+                $rewritten = $_ -replace `
+                    'https://raw\.githubusercontent\.com/MarkMichaelis/ScoopBucket/master/bucket', `
+                    $LocalBucketRoot
+                ([Uri]$rewritten).AbsoluteUri
+            }
+        )
+    }
+
+    # Capture original bucket source so we can restore it after the install.
+    # If the bucket isn't currently registered, $originalSource stays $null
+    # and we'll just remove the temp bucket on cleanup.
+    $bucketSwapped = $false
+    $originalSource = $null
+    if ($BucketName) {
+        $bucketDir = Join-Path $env:USERPROFILE "scoop\buckets\$BucketName"
+        $localUrl = ([Uri]$repoRoot).AbsoluteUri
+        if (Test-Path $bucketDir) {
+            # Pre-register safe.directory to dodge git's "dubious ownership"
+            # error which otherwise blanks out the remote URL lookup.
+            $safeDir = ($bucketDir -replace '\\','/')
+            $null = git config --global --add safe.directory $safeDir 2>&1
+            try {
+                $gitOut = git -C $bucketDir config --get remote.origin.url 2>$null
+                if ($gitOut) { $originalSource = $gitOut.Trim() }
+            } catch { }
+        }
+        # Only swap if the bucket isn't already pointing at the working copy
+        # (avoids pointless rm/add cycles on repeat calls).
+        $alreadyLocal = $originalSource -and (
+            $originalSource -eq $localUrl -or
+            $originalSource.TrimEnd('/','\') -eq $repoRoot.TrimEnd('/','\')
+        )
+        if (-not $alreadyLocal) {
+            if (Test-Path $bucketDir) {
+                $null = scoop.ps1 bucket rm $BucketName 2>&1
+            }
+            # scoop bucket add requires a git URL, not a raw path. Convert to
+            # a file:// URI (scoop's "not a valid Git URL" warnings are noisy
+            # but harmless — the file:// URL itself succeeds).
+            $null = scoop.ps1 bucket add $BucketName $localUrl 2>&1
+            $bucketSwapped = $true
+            # safe.directory needs to cover the freshly-cloned dir as well.
+            $null = git config --global --add safe.directory $safeDir 2>&1
+
+            # Rewrite url[] entries in every manifest in the cloned bucket so
+            # that nested `scoop install MarkMichaelis/<App>` calls (e.g. from
+            # AIAgents.ps1's installer script) also resolve unpushed .ps1 files
+            # from the working copy. Modifies the clone only.
+            $clonedBucketDir = Join-Path $bucketDir 'bucket'
+            if (Test-Path $clonedBucketDir) {
+                Get-ChildItem $clonedBucketDir -Filter '*.json' | ForEach-Object {
+                    try {
+                        $sub = Get-Content $_.FullName -Raw | ConvertFrom-Json
+                    } catch { return }
+                    if (-not $sub.url) { return }
+                    $changed = $false
+                    $sub.url = @(
+                        $sub.url | ForEach-Object {
+                            $r = $_ -replace `
+                                'https://raw\.githubusercontent\.com/MarkMichaelis/ScoopBucket/master/bucket', `
+                                $LocalBucketRoot
+                            if ($r -ne $_) { $changed = $true }
+                            ([Uri]$r).AbsoluteUri
+                        }
+                    )
+                    if ($changed) {
+                        $sub | ConvertTo-Json -Depth 20 | Set-Content -Path $_.FullName -Encoding UTF8
+                    }
+                }
+            }
+        }
+    }
+
+    $tempManifest = Join-Path $env:TEMP (Split-Path -Leaf $ManifestPath)
+    $appName = [System.IO.Path]::GetFileNameWithoutExtension($ManifestPath)
+    try {
+        scoop.ps1 hold scoop | Out-Null
+        # Pre-clean: if a prior failed install left scoop in a wedged state,
+        # `scoop install` will try to purge it mid-run and then fail with an
+        # "empty Uri" error inside Get-InstallationHelper. Uninstall up-front.
+        $null = scoop.ps1 uninstall $appName 2>&1
+        $manifest | ConvertTo-Json -Depth 20 | Out-File -FilePath $tempManifest -Encoding UTF8
+        scoop.ps1 install $tempManifest
+    }
+    finally {
+        Remove-Item -Force -Path $tempManifest -ErrorAction Ignore
+        scoop.ps1 unhold scoop | Out-Null
+        if ($bucketSwapped) {
+            $null = scoop.ps1 bucket rm $BucketName 2>&1
+            if ($originalSource) {
+                $null = scoop.ps1 bucket add $BucketName $originalSource 2>&1
+            }
         }
     }
 }

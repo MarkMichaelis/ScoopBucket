@@ -29,10 +29,13 @@ Function Install-Chocolatey {
 
     if (Test-Path C:\Dropbox\Profile\chocolatey.license.xml) {
         [string]$chocolateyLicenseFolder = (Join-Path "$env:ChocolateyInstall" 'License')
-        mkdir $chocolateyLicenseFolder
-        # TODO: Figure out repository for chocolatey license.
-        #TODO: Switch to use New-Item.
-        cmd /c mklink (Join-Path $chocolateyLicenseFolder chocolatey.license.xml) C:\Dropbox\Profile\chocolatey.license.xml
+        if (-not (Test-Path $chocolateyLicenseFolder)) {
+            New-Item -ItemType Directory -Path $chocolateyLicenseFolder -Force | Out-Null
+        }
+        $licenseLink = Join-Path $chocolateyLicenseFolder 'chocolatey.license.xml'
+        if (-not (Test-Path $licenseLink)) {
+            New-Item -ItemType SymbolicLink -Path $licenseLink -Target 'C:\Dropbox\Profile\chocolatey.license.xml' | Out-Null
+        }
     }
 
     Import-ChocolateyModule

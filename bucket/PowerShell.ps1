@@ -13,7 +13,31 @@ Install-Module Pscx -AllowClobber -AllowPrerelease -Scope AllUsers  # Both Pscx 
 Install-Module ZLocation -Repository PSGallery -Scope AllUsers
 Install-Module PSReadLine -Force -Scope AllUsers   # Update the version of PSReadline
 Install-Module Microsoft.PowerShell.SecretManagement -Scope AllUsers
+Install-Module WinGet-Essentials -Repository PSGallery -Scope AllUsers
+Install-Module Microsoft.PowerShell.ConsoleGuiTools -Repository PSGallery -Scope AllUsers
 choco install Pester
+
+# Install Scott Hanselman's Windows Terminal Copilot CLI skill
+# (sets tab title/color from inside Copilot CLI via !tab commands).
+# Repo: https://github.com/shanselman/windows-terminal-copilot-skill
+if (Get-Command git -ErrorAction Ignore) {
+    $skillPath = Join-Path $env:USERPROFILE '.copilot\skills\windows-terminal'
+    if (Test-Path (Join-Path $skillPath '.git')) {
+        git -C $skillPath pull --quiet
+    } else {
+        New-Item -ItemType Directory -Path (Split-Path $skillPath -Parent) -Force | Out-Null
+        git clone --quiet https://github.com/shanselman/windows-terminal-copilot-skill.git $skillPath
+    }
+    $importLine = 'Import-Module "$env:USERPROFILE\.copilot\skills\windows-terminal\WindowsTerminalSkill.psd1"'
+    if (-not (Test-Path $PROFILE)) {
+        New-Item -ItemType File -Path $PROFILE -Force | Out-Null
+    }
+    if (-not (Select-String -Path $PROFILE -Pattern 'WindowsTerminalSkill\.psd1' -SimpleMatch -Quiet)) {
+        Add-Content -Path $PROFILE -Value $importLine
+    }
+} else {
+    Write-Warning 'git not found; skipping windows-terminal-copilot-skill install.'
+}
 
 
 

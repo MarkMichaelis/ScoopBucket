@@ -1,0 +1,63 @@
+# ----------------------------------------------------------------------------
+# Per-package functional test template (Pester v5).
+#
+# To use:
+#   1. Copy-Item Test-Template.Tests.ps1.txt <Name>.Tests.ps1
+#   2. The $sut/$name derivation below auto-discovers the package name from
+#      the test file's own filename, so usually you do not need to hard-code
+#      anything here.
+#   3. Implement the "primary signal" It block with a per-package assertion:
+#        - CLIs:        Get-Command <cli> | Should -Not -BeNullOrEmpty
+#        - Desktop apps: Get-Program -Filter '<DisplayName>' | Should -Not -BeNullOrEmpty
+#        - Config:      git config --global <key> | Should -Be '<expected>'
+#   4. If your package is interactive (browser-watch, VS, WSL) tag it -Manual.
+#   5. Run locally with:
+#        pwsh -NoProfile -File .\Invoke-Tests.ps1 -Pattern <Name> -Tag All
+# ----------------------------------------------------------------------------
+
+. "$PSScriptRoot\Utils.ps1"
+
+# Derive the package/script name from this file's name. e.g.,
+#   "Claude.Tests.ps1" -> "Claude"
+$sut  = (Split-Path -Leaf $PSCommandPath).Replace('.Tests.ps1', '')
+$name = $sut
+
+Describe "Install $name" -Tag 'Heavy', 'Install' {
+    BeforeAll {
+        # Start from a clean slate so the install path is exercised.
+        if (Test-ScoopPackageInstalled $name) {
+            scoop uninstall $name
+        }
+    }
+
+    It 'installs from the local manifest' {
+        # Install-LocalManifest rewrites url[] entries to point at the working
+        # copy so that local PS1 changes are exercised end-to-end (rather than
+        # silently fetching from raw.githubusercontent.com/.../master/...).
+        Install-LocalManifest "$PSScriptRoot\$name.json"
+        Test-ScoopPackageInstalled $name | Should -Be $true
+    }
+
+    It 'is idempotent on re-run' {
+        # Idempotency contract (README.md): a second install must not throw and
+        # must not duplicate links/files/registry/profile imports.
+        { Install-LocalManifest "$PSScriptRoot\$name.json" } | Should -Not -Throw
+        Test-ScoopPackageInstalled $name | Should -Be $true
+    }
+
+    It 'exposes its primary signal post-install' {
+        # TODO: replace this placeholder with a per-package assertion.
+        # Examples:
+        #   Get-Command <cli> -ErrorAction Ignore | Should -Not -BeNullOrEmpty
+        #   Get-Program -Filter '<DisplayName>' | Should -Not -BeNullOrEmpty
+        #   Test-Path "$env:LOCALAPPDATA\Programs\<App>\<App>.exe" | Should -Be $true
+        Set-ItResult -Skipped -Because 'replace this It block with a per-package assertion'
+    }
+
+    AfterAll {
+        # Optional: leave the install in place by default so subsequent runs of
+        # the test suite do not re-pay the install cost. Uncomment the next
+        # line if you want each test run to start clean.
+        # if (Test-ScoopPackageInstalled $name) { scoop uninstall $name }
+    }
+}
