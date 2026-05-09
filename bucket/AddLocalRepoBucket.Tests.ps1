@@ -7,21 +7,17 @@ Describe "Install AddLocalRepoBucket" -Tag 'Light', 'Install' {
         if ((scoop bucket list) -match 'LocalRepo') {
             Invoke-Expression $script:uninstallScript | Out-Null
         }
-        # scoop refuses to add two buckets that share the same git URL. If
-        # MarkMichaelis is already pointing at the canonical scoop bucket URL,
-        # this manifest's `scoop bucket add LocalRepo <same-url>` becomes a
-        # no-op. Detect that case and skip the install assertion.
+        # scoop refuses to add two buckets that share the same git URL. If any
+        # already-registered bucket points at the canonical URL this manifest
+        # would add, `scoop bucket add LocalRepo <same-url>` becomes a no-op.
+        # Detect via `scoop bucket list`'s Source column so we work for both
+        # per-user (USERPROFILE\scoop) and global (ProgramData\scoop) installs.
         $script:duplicateOfExisting = $false
-        $mmDir = Join-Path $env:USERPROFILE 'scoop\buckets\MarkMichaelis'
-        if (Test-Path $mmDir) {
-            $null = git config --global --add safe.directory ($mmDir -replace '\\','/') 2>&1
-            $mmUrl = (git -C $mmDir config --get remote.origin.url 2>$null)
-            if ($mmUrl) {
-                $mmUrl = $mmUrl.Trim().TrimEnd('.git')
-                $targetUrl = ($script:installScript -split '\s+')[-1].TrimEnd('.git')
-                if ($mmUrl -eq $targetUrl) { $script:duplicateOfExisting = $true }
-            }
-        }
+        $targetUrl = ($script:installScript -split '\s+')[-1].TrimEnd('.git')
+        $existingUrls = @(scoop bucket list | ForEach-Object {
+            if ($_.PSObject.Properties['Source']) { $_.Source } else { $null }
+        } | Where-Object { $_ } | ForEach-Object { $_.ToString().Trim().TrimEnd('.git') })
+        if ($existingUrls -contains $targetUrl) { $script:duplicateOfExisting = $true }
     }
 
     It 'adds the LocalRepo bucket' {
