@@ -83,6 +83,36 @@ jobs:
         shell: pwsh
         run: $PSVersionTable | Format-Table -AutoSize
 
+      - name: Bootstrap Scoop
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          if (-not (Get-Command scoop -ErrorAction Ignore)) {
+            $env:SCOOP = "$env:ProgramData\scoop"
+            [Environment]::SetEnvironmentVariable('SCOOP', $env:SCOOP, 'Machine')
+            Invoke-Expression "& {$(Invoke-RestMethod get.scoop.sh)} -RunAsAdmin"
+          }
+          # Ensure scoop shims are on PATH for this and all subsequent steps
+          $scoopShims = Join-Path $env:ProgramData 'scoop\shims'
+          if ($env:Path -notlike "*$scoopShims*") {
+            $env:Path = "$scoopShims;$env:Path"
+          }
+          # Persist for subsequent steps via GITHUB_PATH
+          if ($env:GITHUB_PATH) {
+            $scoopShims | Out-File -FilePath $env:GITHUB_PATH -Append
+          }
+          # Verify scoop is now available
+          Write-Host "Scoop location: $(Get-Command scoop -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)"
+          scoop --version
+
+      - name: Add MarkMichaelis bucket
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (scoop bucket list | Select-String MarkMichaelis)) {
+            scoop bucket add MarkMichaelis https://github.com/MarkMichaelis/ScoopBucket
+          }
+
       - name: Run Pester Light tests
         shell: pwsh
         run: |
