@@ -17,6 +17,10 @@ Describe 'DeveloperBasePackages bundle' -Tag 'Light','Bundle' {
         function choco  { $script:chocoCalls  += ,@($args) }
         function scoop  { $script:scoopCalls  += ,@($args) }
         function winget { $script:wingetCalls += ,@($args) }
+        # Install-BucketApp lives in Utils.ps1 (stripped below); route it to
+        # the production fallback so `scoop install MarkMichaelis/<App>`
+        # assertions still hold.
+        function Install-BucketApp { param($Name) scoop install "MarkMichaelis/$Name" }
 
         $script:InvokeBundle = {
             $src = Get-Content -Raw -Path $script:sut

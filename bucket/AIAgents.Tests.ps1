@@ -38,6 +38,10 @@ Describe 'AIAgents install orchestration' -Tag 'Heavy','Bundle' {
         function npx.cmd   { $script:npxCalls    += ,@($args); $global:LASTEXITCODE = 0 }
         function dotnet    { $script:dotnetCalls += ,@($args); $global:LASTEXITCODE = 0; '' }
         function gh        { $script:ghCalls     += ,@($args); $global:LASTEXITCODE = 0; 'fake-token' }
+        # Install-BucketApp is defined in Utils.ps1 (which we strip below).
+        # Stub it to route to the production fallback path so existing
+        # `MarkMichaelis/<App>` scoop-call assertions still hold.
+        function Install-BucketApp { param($Name) scoop install "MarkMichaelis/$Name" }
 
         # Bundle scripts dot-source Utils.ps1 which defines competing
         # `choco`/`scoop` wrappers; strip that line so our stubs win.
@@ -114,6 +118,7 @@ Describe 'AIAgents MCP config generation' -Tag 'Light','Bundle' {
         function npx.cmd { $global:LASTEXITCODE = 0 }
         function dotnet  { $global:LASTEXITCODE = 0; '' }
         function gh      { $global:LASTEXITCODE = 0; 'fake-token' }
+        function Install-BucketApp { param($Name) }
 
         $script:configPaths = @{
             ClaudeDesktop = Join-Path $env:APPDATA 'Claude\claude_desktop_config.json'

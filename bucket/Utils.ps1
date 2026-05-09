@@ -324,6 +324,12 @@ if (!(Test-Path function:Install-WebDownload)) {
 .PARAMETER ManifestPath
     Absolute path to the source manifest (.json) in the working copy.
 
+.PARAMETER ManifestName
+    Bucket-relative manifest name (e.g. 'AIAgents'). Resolves to
+    `$env:SCOOPBUCKET_LOCAL_REPO\bucket\<name>.json`. Mutually exclusive
+    with -ManifestPath. Useful for nested invocations from bundle scripts
+    (see Install-BucketApp).
+
 .PARAMETER LocalBucketRoot
     Directory to substitute for the GitHub-master bucket URL. Defaults to the
     parent directory of $ManifestPath (i.e., bucket/ itself).
@@ -340,25 +346,32 @@ if (!(Test-Path function:Install-WebDownload)) {
     Install-LocalManifest -ManifestPath "$PSScriptRoot\McAfeeUninstall.json"
 #>
 Function Install-LocalManifest {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'Path')]
     param(
-        [Parameter(Mandatory)][string]$ManifestPath,
-        [string]$LocalBucketRoot = (Split-Path -Parent $ManifestPath),
+        [Parameter(Mandatory, ParameterSetName = 'Path', Position = 0)][string]$ManifestPath,
+        [Parameter(Mandatory, ParameterSetName = 'Name')][string]$ManifestName,
+        [string]$LocalBucketRoot,
         [AllowNull()][string]$BucketName = 'MarkMichaelis'
     )
 
+    if ($PSCmdlet.ParameterSetName -eq 'Name') {
+        if (-not $env:SCOOPBUCKET_LOCAL_REPO) {
+            throw "Install-LocalManifest -ManifestName requires `$env:SCOOPBUCKET_LOCAL_REPO to be set."
+        }
+        $ManifestPath = Join-Path $env:SCOOPBUCKET_LOCAL_REPO "bucket\$ManifestName.json"
+    }
+
     if (-not (Test-Path $ManifestPath)) {
         throw "Manifest not found: $ManifestPath"
+    }
+    if (-not $LocalBucketRoot) {
+        $LocalBucketRoot = Split-Path -Parent $ManifestPath
     }
 
     # Resolve to absolute paths so the regex substitution produces a valid
     # file:// URI. [Uri]::AbsoluteUri returns empty for relative paths.
     $ManifestPath = (Resolve-Path -LiteralPath $ManifestPath).Path
-    if (-not $PSBoundParameters.ContainsKey('LocalBucketRoot')) {
-        $LocalBucketRoot = Split-Path -Parent $ManifestPath
-    } else {
-        $LocalBucketRoot = (Resolve-Path -LiteralPath $LocalBucketRoot).Path
-    }
+    $LocalBucketRoot = (Resolve-Path -LiteralPath $LocalBucketRoot).Path
     $repoRoot = Split-Path -Parent $LocalBucketRoot
 
     $manifest = Get-Content -Path $ManifestPath -Raw | ConvertFrom-Json
@@ -408,39 +421,18 @@ Function Install-LocalManifest {
             $bucketSwapped = $true
             # safe.directory needs to cover the freshly-cloned dir as well.
             $null = git config --global --add safe.directory $safeDir 2>&1
-
-            # Rewrite url[] entries in every manifest in the cloned bucket so
-            # that nested `scoop install MarkMichaelis/<App>` calls (e.g. from
-            # AIAgents.ps1's installer script) also resolve unpushed .ps1 files
-            # from the working copy. Modifies the clone only.
-            $clonedBucketDir = Join-Path $bucketDir 'bucket'
-            if (Test-Path $clonedBucketDir) {
-                Get-ChildItem $clonedBucketDir -Filter '*.json' | ForEach-Object {
-                    try {
-                        $sub = Get-Content $_.FullName -Raw | ConvertFrom-Json
-                    } catch { return }
-                    if (-not $sub.url) { return }
-                    $changed = $false
-                    $sub.url = @(
-                        $sub.url | ForEach-Object {
-                            $r = $_ -replace `
-                                'https://raw\.githubusercontent\.com/MarkMichaelis/ScoopBucket/master/bucket', `
-                                $LocalBucketRoot
-                            if ($r -ne $_) { $changed = $true }
-                            ([Uri]$r).AbsoluteUri
-                        }
-                    )
-                    if ($changed) {
-                        $sub | ConvertTo-Json -Depth 20 | Set-Content -Path $_.FullName -Encoding UTF8
-                    }
-                }
-            }
         }
     }
 
     $tempManifest = Join-Path $env:TEMP (Split-Path -Leaf $ManifestPath)
     $appName = [System.IO.Path]::GetFileNameWithoutExtension($ManifestPath)
+    $previousLocalRepo = $env:SCOOPBUCKET_LOCAL_REPO
     try {
+        # Expose the working-copy repo root to nested invocations
+        # (Install-BucketApp called from installer.script) so they can
+        # build per-app temp manifests instead of `scoop install
+        # MarkMichaelis/<App>` against the (un-mutated) cloned bucket.
+        $env:SCOOPBUCKET_LOCAL_REPO = $repoRoot
         scoop.ps1 hold scoop | Out-Null
         # Pre-clean: if a prior failed install left scoop in a wedged state,
         # `scoop install` will try to purge it mid-run and then fail with an
@@ -452,11 +444,49 @@ Function Install-LocalManifest {
     finally {
         Remove-Item -Force -Path $tempManifest -ErrorAction Ignore
         scoop.ps1 unhold scoop | Out-Null
+        if ($previousLocalRepo) {
+            $env:SCOOPBUCKET_LOCAL_REPO = $previousLocalRepo
+        } else {
+            Remove-Item Env:\SCOOPBUCKET_LOCAL_REPO -ErrorAction Ignore
+        }
         if ($bucketSwapped) {
             $null = scoop.ps1 bucket rm $BucketName 2>&1
             if ($originalSource) {
                 $null = scoop.ps1 bucket add $BucketName $originalSource 2>&1
             }
         }
+    }
+}
+
+<#
+.SYNOPSIS
+    Install a MarkMichaelis bucket app, preferring a working-copy manifest
+    when running under Install-LocalManifest.
+
+.DESCRIPTION
+    Bundle scripts (AIAgents.ps1, ClientBasePackages.ps1, etc.) call this
+    helper instead of `scoop install MarkMichaelis/<App>`. When the outer
+    install was started via Install-LocalManifest, the env var
+    SCOOPBUCKET_LOCAL_REPO points at the working-copy repo root. In that
+    case we recurse through Install-LocalManifest -ManifestName so the
+    nested install also resolves unpushed `.ps1` files from the working
+    copy — without ever mutating the cloned MarkMichaelis bucket dir.
+
+    In production (env var unset) we fall back to the regular
+    `scoop install MarkMichaelis/<App>` path.
+
+.PARAMETER Name
+    Bare app/manifest name (e.g. 'Claude'). Do NOT include the
+    'MarkMichaelis/' prefix.
+#>
+function Install-BucketApp {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+
+    if ($env:SCOOPBUCKET_LOCAL_REPO -and
+        (Test-Path (Join-Path $env:SCOOPBUCKET_LOCAL_REPO "bucket\$Name.json"))) {
+        Install-LocalManifest -ManifestName $Name
+    } else {
+        scoop install "MarkMichaelis/$Name"
     }
 }

@@ -35,9 +35,9 @@ $WingetPackages.Values | `
 # paired with Visual Studio (installed above) and/or VS Code. Place this
 # install last so the SDK and Visual Studio are present when the Aspire CLI
 # registers its global dotnet tool and project templates.
-'MarkMichaelis/Aspire' | ForEach-Object {
+'Aspire' | ForEach-Object {
     Write-Host "Installing $_..."
-    scoop install $_
+    Install-BucketApp $_
 }
 
 

@@ -47,16 +47,16 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Install each AI agent (and CLI) via its own bucket manifest.
-'MarkMichaelis/Claude',
-'MarkMichaelis/ChatGPT',
-'MarkMichaelis/Gemini',
-'MarkMichaelis/MicrosoftCopilot',
-'MarkMichaelis/ClaudeCode',
-'MarkMichaelis/Codex',
-'MarkMichaelis/GeminiCli',
-'MarkMichaelis/GitHubCopilotCli' | ForEach-Object {
+'Claude',
+'ChatGPT',
+'Gemini',
+'MicrosoftCopilot',
+'ClaudeCode',
+'Codex',
+'GeminiCli',
+'GitHubCopilotCli' | ForEach-Object {
     Write-Host "Installing $_..."
-    scoop install $_
+    Install-BucketApp $_
 }
 
 # ---------------------------------------------------------------------------
