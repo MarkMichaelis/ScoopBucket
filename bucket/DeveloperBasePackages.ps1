@@ -8,7 +8,10 @@ Write-Host 'Installing and configuring OSBasePackages...'
 }
 
 #hub - GitHub CLI
-'dotnet', 'VisualStudio2026Enterprise' | ForEach-Object { 
+# BeyondCompare: winget only ships a user-scope MSIX (`ScooterSoftware.BeyondCompare.4`)
+# which fails machine-scope install in CI; the scoop `extras/beyondcompare`
+# manifest installs cleanly. Refs #14/#46.
+'dotnet', 'VisualStudio2026Enterprise', 'extras/beyondcompare' | ForEach-Object {
     Write-Host "Installing $_..."
     scoop install -g $_
 }
@@ -20,7 +23,6 @@ $WingetPackages = @{
 #    'AIShell'=([PSCustomObject]@{ WingetName='AI Shell'; WinGetID='Microsoft.AIShell'; })
     'Python'=([PSCustomObject]@{ WingetName='Python'; WinGetID='Python.Python.3.14'; })
 #    'Miniforge3'=([PSCustomObject]@{ WingetName='Miniforge3'; WinGetID='CondaForge.Miniforge3'; })
-    'BeyondCompare'=([PSCustomObject]@{ WingetName='Beyond Compare'; WinGetID='ScooterSoftware.BeyondCompare.4'; })
 }
 
 $WingetPackages.Values | `

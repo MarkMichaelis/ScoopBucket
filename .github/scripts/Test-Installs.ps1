@@ -34,15 +34,7 @@ $ProgressPreference = 'SilentlyContinue'  # Speed up web requests
 
 $script:CISkipPackages = @{
     # winget: user-scope-only MSIX apps (no machine-scope MSI/EXE installer)
-    'Anthropic.Claude'              = 'User-scope MSIX only — no machine installer'
-    'eSpeak-NG.eSpeak-NG'           = 'User-scope MSIX only — no machine installer'
-    'Notion.Notion'                 = 'User-scope MSIX only — no machine installer'
-    'Pushbullet.Pushbullet'         = 'User-scope MSIX only — no machine installer'
-    'TechSmith.Snagit.2024'         = 'User-scope MSIX only — no machine installer (licensed software)'
-    'Spotify.Spotify'               = 'User-scope MSIX only — no machine installer'
-    'Doist.Todoist'                  = 'User-scope MSIX only — no machine installer'
-    'Zoom.Zoom.EXE'                 = 'User-scope MSIX only — no machine installer'
-    'ScooterSoftware.BeyondCompare.4' = 'User-scope MSIX only — no machine installer (licensed software)'
+    'Pushbullet.Pushbullet'         = 'User-scope MSIX only — no machine installer; no msstore/scoop/choco alternative (#8)'
     # choco: delisted or CI-incompatible
     'Office365ProPlus'              = 'Requires GUI session and license activation (exit 17004)'
     # scoop: browser-watch installers requiring interactive Download click

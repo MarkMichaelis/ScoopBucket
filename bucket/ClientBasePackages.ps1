@@ -35,23 +35,28 @@ $WingetPackages = @{
     'Bitwarden'=([PSCustomObject]@{ WingetName='Bitwarden'; WinGetID='Bitwarden.Bitwarden'; })
     'BitwardenCLI'=([PSCustomObject]@{ WingetName='Bitwarden CLI'; WinGetID='Bitwarden.CLI'; })
     'calibre'=([PSCustomObject]@{ WingetName='calibre'; WinGetID='calibre.calibre'; })
-    'Claude'=([PSCustomObject]@{ WingetName='Claude'; WinGetID='Anthropic.Claude'; })
 #    'Comet'=([PSCustomObject]@{ WingetName='Comet (Perplexity)'; WinGetID='Perplexity.Comet'; })
     'SoX'=([PSCustomObject]@{ WingetName='SoX'; WinGetID='ChrisBagwell.SoX';  })
-    'eSpeak-NG'=([PSCustomObject]@{ WingetName='eSpeak NG'; WinGetID='eSpeak-NG.eSpeak-NG';  })
     'Dropbox'=([PSCustomObject]@{ WingetName='Dropbox'; WinGetID='Dropbox.Dropbox'; })
     # foxitreader's choco package times out downloading the upstream
     # installer in CI (#27). Foxit publishes a winget manifest, which is
     # also the preferred install engine per the README.
     'FoxitReader'=([PSCustomObject]@{ WingetName='Foxit PDF Reader'; WinGetID='Foxit.FoxitReader'; })
-    'Notion'=([PSCustomObject]@{ WingetName='Notion'; WinGetID='Notion.Notion'; })
 #    'PowerAutomate'=([PSCustomObject]@{ WingetName='Power Automate'; WinGetID='Microsoft.PowerAutomateDesktop'; })
+    # Pushbullet: no machine-scope winget installer, no MS Store entry, no
+    # scoop manifest. The choco `pushbullet` package (v1.0.0, 2017) wraps
+    # the long-discontinued standalone desktop app. Left on CISkip until
+    # an upstream alternative appears. Refs #8/#46.
     'Pushbullet'=([PSCustomObject]@{ WingetName='Pushbullet'; WinGetID='Pushbullet.Pushbullet'; })
     'Signal'=([PSCustomObject]@{ WingetName='Signal'; WinGetID='OpenWhisperSystems.Signal'; })
-    'Snagit'=([PSCustomObject]@{ WingetName='Snagit'; WinGetID='TechSmith.Snagit.2024'; })
-    'Spotify'=([PSCustomObject]@{ WingetName='Spotify'; WinGetID='Spotify.Spotify'; })
-    'Todoist'=([PSCustomObject]@{ WingetName='Todoist'; WinGetID='Doist.Todoist'; })
-    'Zoom'=([PSCustomObject]@{ WingetName='Zoom'; WinGetID='Zoom.Zoom.EXE'; })
+}
+
+# Apps with no machine-scope winget installer and no Microsoft Store
+# alternative — install via the scoop `extras` bucket instead. See #5
+# (Claude), #6 (eSpeak NG), #7 (Notion), #10 (Spotify), #12 (Zoom).
+'extras/claude','espeak-ng','extras/notion','extras/spotify','extras/zoom' | ForEach-Object {
+    Write-Host "Installing $_..."
+    scoop install -g $_
 }
 
 $WingetPackages.Values | `
@@ -66,6 +71,11 @@ $MicrosoftStorePackages = @{
     'VPNUnlimited'=([PSCustomObject]@{ WingetName='VPN Unlimited'; WinGetID='9NRQBLR605RG'; })
     'Grammarly'=([PSCustomObject]@{ WingetName='Grammarly'; WinGetID='XPDDXX9QW8N9D7'; })
     'WhatsApp'=([PSCustomObject]@{ WingetName='WhatsApp'; WinGetID='9NKSQGP7F2NH'; })
+    # Snagit and Todoist publish only user-scope MSIX through winget's
+    # default source; the Microsoft Store listing is the cleanest fully
+    # automated path. Refs #9 (Snagit), #11 (Todoist).
+    'Snagit'=([PSCustomObject]@{ WingetName='Snagit'; WinGetID='XPDNSF6TXN2R6Z'; })
+    'Todoist'=([PSCustomObject]@{ WingetName='Todoist'; WinGetID='9MWF2DWS5Z9N'; })
 }
 
 $MicrosoftStorePackages.Values | `
