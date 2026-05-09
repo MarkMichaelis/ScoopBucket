@@ -145,6 +145,9 @@ function Get-ExpectedCliName {
     }
 }
 
+$script:FindBinaryScript  = Join-Path $PSScriptRoot 'Find-PackageBinary.ps1'
+$script:HelpProbeScript   = Join-Path $PSScriptRoot 'Test-CliHelpFlag.ps1'
+
 function New-Record {
     param(
         [Parameter(Mandatory)][string] $Package,
@@ -154,9 +157,12 @@ function New-Record {
         [string] $ParserNote = ''
     )
 
-    $expected  = Get-ExpectedCliName -Identifier $PackageId -Source $Source
-    $available = $false
-    $path      = $null
+    $expected     = Get-ExpectedCliName -Identifier $PackageId -Source $Source
+    $available    = $false
+    $path         = $null
+    $onDiskPath   = $null
+    $helpFlag     = $null
+    $helpExit     = $null
 
     if ($expected) {
         $cmd = Get-Command $expected -ErrorAction Ignore | Select-Object -First 1
@@ -166,6 +172,29 @@ function New-Record {
                 $path = $cmd.Source
             } elseif ($cmd.PSObject.Properties['Definition']) {
                 $path = $cmd.Definition
+            }
+        } else {
+            # Fallback: not on PATH — see if the binary exists on disk and
+            # responds to a help flag. Distinguishes "not installed" from
+            # "installed but PATH/shim missing" (issue #47).
+            try {
+                $hit = & $script:FindBinaryScript -Name $expected
+            } catch {
+                $hit = $null
+            }
+            if ($hit -and $hit.Path) {
+                $onDiskPath = $hit.Path
+                try {
+                    $probe = & $script:HelpProbeScript -Path $hit.Path
+                    if ($probe -and $probe.Success) {
+                        $helpFlag = $probe.Flag
+                        $helpExit = $probe.ExitCode
+                    } elseif ($probe) {
+                        $helpExit = $probe.ExitCode
+                    }
+                } catch {
+                    # swallow — discovery is best-effort
+                }
             }
         }
     }
@@ -177,6 +206,9 @@ function New-Record {
         ExpectedCli  = $expected
         Available    = $available
         Path         = $path
+        OnDiskPath   = $onDiskPath
+        HelpFlag     = $helpFlag
+        HelpExitCode = $helpExit
         SourceScript = $SourceScript
         ParserNote   = $ParserNote
     }
@@ -324,8 +356,8 @@ $lines.Add('## CLI-availability discovery (Phase 1)')
 $lines.Add('')
 $lines.Add($summaryLine)
 $lines.Add('')
-$lines.Add('| Source | Package | PackageId | ExpectedCli | Available | Path | SourceScript |')
-$lines.Add('| --- | --- | --- | --- | --- | --- | --- |')
+$lines.Add('| Source | Package | PackageId | ExpectedCli | Available | Path | OnDiskPath | HelpFlag | HelpExit | SourceScript |')
+$lines.Add('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
 foreach ($r in $sorted) {
     if ($r.ExpectedCli) { $cli = '`' + $r.ExpectedCli + '`' } else { $cli = '_(none)_' }
     if ($null -eq $r.ExpectedCli) {
@@ -335,10 +367,13 @@ foreach ($r in $sorted) {
     } else {
         $availSym = 'no'
     }
-    if ($r.Path) { $pathCell = '`' + $r.Path + '`' } else { $pathCell = '' }
+    if ($r.Path)       { $pathCell    = '`' + $r.Path + '`' }       else { $pathCell    = '' }
+    if ($r.OnDiskPath) { $onDiskCell  = '`' + $r.OnDiskPath + '`' } else { $onDiskCell  = '' }
+    if ($r.HelpFlag)   { $flagCell    = '`' + $r.HelpFlag + '`' }   else { $flagCell    = '' }
+    if ($null -ne $r.HelpExitCode) { $exitCell = [string]$r.HelpExitCode } else { $exitCell = '' }
     $note = ''
     if ($r.ParserNote) { $note = " _($($r.ParserNote))_" }
-    $lines.Add("| $($r.Source) | $($r.Package)$note | $($r.PackageId) | $cli | $availSym | $pathCell | $($r.SourceScript) |")
+    $lines.Add("| $($r.Source) | $($r.Package)$note | $($r.PackageId) | $cli | $availSym | $pathCell | $onDiskCell | $flagCell | $exitCell | $($r.SourceScript) |")
 }
 $markdown = ($lines -join [Environment]::NewLine)
 
