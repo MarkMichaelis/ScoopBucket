@@ -9,21 +9,32 @@ $OSPackages = @{
     'Everything'=([PSCustomObject]@{ WingetName='Everything'; WinGetID='voidtools.Everything';  })
     'Everything Cli'=([PSCustomObject]@{ WingetName='Everything Cli'; WinGetID='voidtools.Everything.Cli';  })
     'Google Chrome'=([PSCustomObject]@{ WingetName='Google Chrome'; WinGetID='Google.Chrome';  })
-    'Process Explorer'=([PSCustomObject]@{ WingetName='Process Explorer'; WinGetID='Microsoft.Sysinternals.ProcessExplorer';  })
-    'SysInternals'=([PSCustomObject]@{ WingetName='SysInternals Suite'; WinGetID='Microsoft.Sysinternals.Suite';  })
+    # Process Explorer / SysInternals Suite: winget repeatedly fails with
+    # "Installer hash does not match" because download.sysinternals.com ships
+    # rolling updates without bumping the winget manifest hash. Installed via
+    # scoop extras/sysinternals below (suite includes procexp).
     'WinDirStat'=([PSCustomObject]@{ WingetName='WinDirStat'; WinGetID='WinDirStat.WinDirStat';  })
     'UniversalSilentSwitchFinder'=([PSCustomObject]@{ WingetName='UniversalSilentSwitchFinder'; WinGetID='WindowsPostInstallWizard.UniversalSilentSwitchFinder';  })
     'bat'=([PSCustomObject]@{ WingetName='bat'; WinGetID='sharkdp.bat';  }) # Supports Git integration which has not knowingly been configured.
-    'BurntSushi.ripgrep.MSVC'=([PSCustomObject]@{ WingetName='Ripgrep'; WinGetID='BurntSushi.ripgrep.MSVC';  }) 
+    'BurntSushi.ripgrep.MSVC'=([PSCustomObject]@{ WingetName='Ripgrep'; WinGetID='BurntSushi.ripgrep.MSVC';  })
     'fzf'=([PSCustomObject]@{ WingetName='fzf'; WinGetID='junegunn.fzf';  })  # Needs PowerShell install of PSFzf module. See https://github.com/kelleyma49/PSFzf
-    'FFmpeg'=([PSCustomObject]@{ WingetName='FFmpeg'; WinGetID='Gyan.FFmpeg';  })
+    # FFmpeg: winget Gyan.FFmpeg has a recurring nested-installer path drift
+    # (manifest expects ffmpeg-<ver>-full_build\bin\ffmpeg.exe, zip layout
+    # changes per release). Installed via scoop main/ffmpeg below.
     'Google Cloud SDK'=([PSCustomObject]@{ WingetName='Google Cloud SDK'; WinGetID='Google.CloudSDK';  })
 }
 
 $OSPackages.VAlues | `
-    ForEach-Object { 
+    ForEach-Object {
         Write-Host "Installing $($_.WingetName)..."
         Winget install --id $_.WingetID --scope machine
     }
+
+# Scoop-installed packages (replacements for winget entries that suffer
+# upstream hash / nested-installer drift — see #29, #43, #44).
+Write-Host 'Installing ffmpeg (scoop main)...'
+scoop install ffmpeg
+Write-Host 'Installing sysinternals suite (scoop extras)...'
+scoop install extras/sysinternals
 
 
