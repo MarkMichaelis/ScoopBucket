@@ -153,6 +153,25 @@ required to be retrofitted.
   registration belongs in the bundle's `.ps1` (idempotent — guard so
   re-runs don't double-register).
 
+### CLI-availability discovery (in progress)
+
+See #45 for the tracking issue. Rolling out in three phases:
+
+- **Phase 1 — Local discovery.** A `Get-PackageCommands.ps1` helper
+  parses every `bucket\*.ps1` for winget / scoop / choco / module
+  install patterns, derives a probable CLI short name per package, runs
+  `Get-Command` against it, and writes `cli-availability.json`.
+- **Phase 2 — CI integration.** A Pester `Heavy`-tagged test
+  (`bucket\PackageCommands.Tests.ps1`) runs the discovery script after
+  the validate-installs job, uploads `cli-availability.json` as an
+  artifact, and posts a Markdown summary to `GITHUB_STEP_SUMMARY`. The
+  test does **not** fail the build at this phase — it only reports.
+- **Phase 3 — Enforcement.** The test asserts availability for an
+  explicit allow-list of "must-have CLI" packages (those covered by the
+  rule above). Packages with non-obvious CLI names register themselves
+  in an `ExpectedCliMap`, and any package missing its expected CLI
+  fails the build.
+
 ## Testing
 
 A per-package functional-test framework based on Pester is in development
