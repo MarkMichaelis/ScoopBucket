@@ -669,12 +669,68 @@ function Test-Verification {
     }
 }
 
+function Get-PackagesNeedingVerification {
+    <#
+    .SYNOPSIS
+        Returns the subset of $Packages of the given InstallerType whose
+        install step succeeded (Status='pass') in $Results.
+    .DESCRIPTION
+        Post-install verification should only run when the install actually
+        succeeded.  Packages that were skipped via CISkipPackages, or whose
+        install failed upstream, already have an 'untested'/'fail' row in the
+        results — running a second verification check just produces a duplicate
+        failure (and a duplicate auto-filed CI issue) for the same root cause.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Packages,
+        [Parameter(Mandatory)][string]$InstallerType,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results
+    )
+    $passedNames = @{}
+    foreach ($r in $Results) {
+        if ($r.InstallerType -eq $InstallerType -and $r.Status -eq 'pass') {
+            $passedNames[$r.Name] = $true
+        }
+    }
+    @($Packages | Where-Object {
+        $_.InstallerType -eq $InstallerType -and $passedNames.ContainsKey($_.Name)
+    })
+}
+
+function Add-VerificationSkipped {
+    <#
+    .SYNOPSIS
+        Records an 'untested' verification row for a package whose install was
+        skipped or failed, so the gap is still visible in the results table
+        without filing a duplicate failure issue.
+    #>
+    param(
+        [string]$Name,
+        [string]$Reason
+    )
+    Add-Result -Name $Name -PackageId $Name -InstallerType 'verification' `
+        -SourceScript 'Test-Installs.ps1' `
+        -Command "SKIPPED: $Reason" -Status 'untested'
+}
+
 # --- Scoop global installs (derived from discovered packages) ---
+# Only verify packages whose install actually passed.  Skipped/failed installs
+# already have a row in $script:Results — running a second 'Test-Path' check
+# would just produce a duplicate failure for the same upstream cause.
 $scoopPackages = @($packages | Where-Object InstallerType -eq 'scoop')
 if ($scoopPackages.Count -gt 0) {
     Write-Host "Verifying scoop packages are installed globally..." -ForegroundColor Gray
     $scoopGlobalAppsPath = Join-Path $env:ProgramData 'scoop\apps'
+    $scoopToVerify = Get-PackagesNeedingVerification -Packages $scoopPackages `
+        -InstallerType 'scoop' -Results @($script:Results)
+    $scoopVerifyNames = @{}
+    foreach ($p in $scoopToVerify) { $scoopVerifyNames[$p.Name] = $true }
     foreach ($pkg in $scoopPackages) {
+        if (-not $scoopVerifyNames.ContainsKey($pkg.Name)) {
+            Add-VerificationSkipped -Name "scoop-global:$($pkg.Name)" `
+                -Reason "Install was skipped or failed; verification not attempted"
+            continue
+        }
         Test-Verification -Name "scoop-global:$($pkg.Name)" `
             -Description "Scoop package '$($pkg.Name)' should be installed globally under $scoopGlobalAppsPath" `
             -Test ([scriptblock]::Create("Test-Path (Join-Path '$scoopGlobalAppsPath' '$($pkg.Name)')"))
@@ -703,11 +759,23 @@ if ($passedWinget.Count -gt 0) {
 }
 
 # --- PowerShell modules installed to AllUsers (derived from discovered packages) ---
+# Same reasoning as scoop-global above: only verify modules that installed
+# successfully.  Failed/skipped installs would otherwise generate a duplicate
+# verification failure issue.
 $psModulePackages = @($packages | Where-Object InstallerType -eq 'ps-module')
 if ($psModulePackages.Count -gt 0) {
     Write-Host "Verifying PowerShell modules are installed to AllUsers scope..." -ForegroundColor Gray
+    $psModulesToVerify = Get-PackagesNeedingVerification -Packages $psModulePackages `
+        -InstallerType 'ps-module' -Results @($script:Results)
+    $psVerifyNames = @{}
+    foreach ($p in $psModulesToVerify) { $psVerifyNames[$p.Name] = $true }
     foreach ($pkg in $psModulePackages) {
         $modName = $pkg.Name
+        if (-not $psVerifyNames.ContainsKey($modName)) {
+            Add-VerificationSkipped -Name "ps-module-scope:$modName" `
+                -Reason "Install was skipped or failed; verification not attempted"
+            continue
+        }
         Test-Verification -Name "ps-module-scope:$modName" `
             -Description "Module '$modName' should be installed under Program Files (AllUsers scope)" `
             -Test ([scriptblock]::Create(@"

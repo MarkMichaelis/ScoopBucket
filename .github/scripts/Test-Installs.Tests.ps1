@@ -22,6 +22,7 @@ BeforeAll {
         'Get-IterationInstaller'
         'Get-PackagesFromScript'
         'Get-AllPackages'
+        'Get-PackagesNeedingVerification'
     )
 
     $functionBodies = foreach ($funcName in $functionsToLoad) {
@@ -614,5 +615,92 @@ Describe 'Get-AllPackages' {
 
     It 'should have no empty package IDs' {
         $allPkgs | ForEach-Object { $_.PackageId | Should -Not -BeNullOrEmpty }
+    }
+}
+
+
+# ============================================================================
+# Get-PackagesNeedingVerification
+# ============================================================================
+
+Describe 'Get-PackagesNeedingVerification' {
+    BeforeAll {
+        $script:samplePackages = @(
+            [PSCustomObject]@{ Name = 'Anthropic.Claude'; PackageId = 'Anthropic.Claude'; InstallerType = 'winget' }
+            [PSCustomObject]@{ Name = 'GitHub.cli';       PackageId = 'GitHub.cli';       InstallerType = 'winget' }
+            [PSCustomObject]@{ Name = 'MarkMichaelis/Claude'; PackageId = 'MarkMichaelis/Claude'; InstallerType = 'scoop' }
+            [PSCustomObject]@{ Name = '7zip';             PackageId = '7zip';             InstallerType = 'scoop' }
+            [PSCustomObject]@{ Name = 'Pester';           PackageId = 'Pester';           InstallerType = 'ps-module' }
+        )
+    }
+
+    It 'returns only packages whose install Status is pass for the given installer type' {
+        $results = @(
+            [PSCustomObject]@{ Name = 'GitHub.cli'; InstallerType = 'winget'; Status = 'pass' }
+            [PSCustomObject]@{ Name = 'Anthropic.Claude'; InstallerType = 'winget'; Status = 'untested' }
+            [PSCustomObject]@{ Name = '7zip'; InstallerType = 'scoop'; Status = 'pass' }
+            [PSCustomObject]@{ Name = 'MarkMichaelis/Claude'; InstallerType = 'scoop'; Status = 'fail' }
+        )
+
+        $wingetVerify = Get-PackagesNeedingVerification -Packages $script:samplePackages `
+            -InstallerType 'winget' -Results $results
+        $wingetVerify | Should -HaveCount 1
+        $wingetVerify[0].PackageId | Should -Be 'GitHub.cli'
+
+        $scoopVerify = Get-PackagesNeedingVerification -Packages $script:samplePackages `
+            -InstallerType 'scoop' -Results $results
+        $scoopVerify | Should -HaveCount 1
+        $scoopVerify[0].PackageId | Should -Be '7zip'
+    }
+
+    It 'excludes packages that are on the CI skip list (untested status)' {
+        # Anthropic.Claude is on $script:CISkipPackages -> recorded as 'untested'
+        # via Skip-Package, so it must NOT be verified (would generate a duplicate
+        # auto-filed issue).
+        $results = @(
+            [PSCustomObject]@{ Name = 'Anthropic.Claude'; InstallerType = 'winget'; Status = 'untested' }
+            [PSCustomObject]@{ Name = 'GitHub.cli';       InstallerType = 'winget'; Status = 'pass' }
+        )
+
+        $verify = Get-PackagesNeedingVerification -Packages $script:samplePackages `
+            -InstallerType 'winget' -Results $results
+
+        ($verify | Where-Object PackageId -eq 'Anthropic.Claude') | Should -BeNullOrEmpty
+        ($verify | Where-Object PackageId -eq 'GitHub.cli')       | Should -Not -BeNullOrEmpty
+    }
+
+    It 'excludes packages whose install failed' {
+        $results = @(
+            [PSCustomObject]@{ Name = 'MarkMichaelis/Claude'; InstallerType = 'scoop'; Status = 'fail' }
+            [PSCustomObject]@{ Name = '7zip';                 InstallerType = 'scoop'; Status = 'pass' }
+        )
+
+        $verify = Get-PackagesNeedingVerification -Packages $script:samplePackages `
+            -InstallerType 'scoop' -Results $results
+
+        ($verify | Where-Object PackageId -eq 'MarkMichaelis/Claude') | Should -BeNullOrEmpty
+        ($verify | Where-Object PackageId -eq '7zip')                 | Should -Not -BeNullOrEmpty
+    }
+
+    It 'returns an empty collection when no installs of the given type passed' {
+        $results = @(
+            [PSCustomObject]@{ Name = 'Anthropic.Claude'; InstallerType = 'winget'; Status = 'untested' }
+        )
+
+        $verify = Get-PackagesNeedingVerification -Packages $script:samplePackages `
+            -InstallerType 'ps-module' -Results $results
+
+        @($verify).Count | Should -Be 0
+    }
+
+    It 'does not cross-contaminate installer types (a passed scoop install does not authorize a winget verification)' {
+        $results = @(
+            [PSCustomObject]@{ Name = 'Pester'; InstallerType = 'scoop'; Status = 'pass' }  # different type
+        )
+
+        $verify = Get-PackagesNeedingVerification -Packages $script:samplePackages `
+            -InstallerType 'ps-module' -Results $results
+
+        @($verify).Count | Should -Be 0
     }
 }
