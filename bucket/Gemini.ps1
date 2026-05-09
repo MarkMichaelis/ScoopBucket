@@ -121,6 +121,16 @@ Function Install-GeminiBrowserWatch {
 Function Install-Gemini {
     Write-Host "Running $($MyInvocation.MyCommand.Name)..."
 
+    # The browser-watch fallback (and Google's Cloudflare-fronted CDN) requires
+    # an interactive user to click "Download the app" and complete the install.
+    # In headless CI there is no such user, so the install hangs until the job
+    # times out (see issues #25, #26). Early-exit cleanly so the bundle records
+    # this package as 'untested' rather than failing the whole CI run.
+    if ($env:CI -or $env:GITHUB_ACTIONS -eq 'true') {
+        Write-Host 'Gemini install requires interactive download — skipping in CI.'
+        return
+    }
+
     $installedMarker = Join-Path $env:LOCALAPPDATA 'Google\Google\latest\google.exe'
     if (Test-Path $installedMarker) {
         Write-Host 'Google app for desktop already installed; skipping.'

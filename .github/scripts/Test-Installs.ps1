@@ -46,6 +46,8 @@ $script:CISkipPackages = @{
     # choco: delisted or CI-incompatible
     'dbxcli'                        = 'Package removed from Chocolatey community repository'
     'Office365ProPlus'              = 'Requires GUI session and license activation (exit 17004)'
+    # scoop: browser-watch installers requiring interactive Download click
+    'MarkMichaelis/Gemini'          = 'Browser-watch installer requires interactive Download click; see #25, #26'
 }
 
 # ============================================================================
