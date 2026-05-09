@@ -35,9 +35,8 @@ Describe 'ClientBasePackages bundle' -Tag 'Light','Bundle' {
     }
 
     It 'invokes choco install for each chocolatey base package' {
-        $script:chocoCalls.Count | Should -Be 3
+        $script:chocoCalls.Count | Should -Be 2
         $names = $script:chocoCalls | ForEach-Object { $_[-1] }
-        $names | Should -Contain 'foxitreader'
         $names | Should -Contain 'exiftool'
         $names | Should -Contain 'geosetter'
         ($script:chocoCalls[0] -join ' ') | Should -Match '^install -y '
@@ -58,8 +57,8 @@ Describe 'ClientBasePackages bundle' -Tag 'Light','Bundle' {
     }
 
     It 'invokes winget install for the WinGet + msstore package sets' {
-        # 15 entries in $WingetPackages + 4 entries in $MicrosoftStorePackages.
-        $script:wingetCalls.Count | Should -Be 19
+        # 16 entries in $WingetPackages + 4 entries in $MicrosoftStorePackages.
+        $script:wingetCalls.Count | Should -Be 20
         $invokedIds = $script:wingetCalls | ForEach-Object {
             $idIdx = [array]::IndexOf($_, '--id')
             if ($idIdx -ge 0) { $_[$idIdx + 1] }
@@ -68,6 +67,7 @@ Describe 'ClientBasePackages bundle' -Tag 'Light','Bundle' {
         # block — drift in either set will trip these assertions.
         $invokedIds | Should -Contain 'Bitwarden.Bitwarden'
         $invokedIds | Should -Contain 'Anthropic.Claude'
+        $invokedIds | Should -Contain 'Foxit.FoxitReader'
         $invokedIds | Should -Contain 'Zoom.Zoom.EXE'
         $invokedIds | Should -Contain '9NT1R1C2HH7J'   # ChatGPT (msstore)
         $invokedIds | Should -Contain '9NKSQGP7F2NH'   # WhatsApp (msstore)
@@ -77,7 +77,7 @@ Describe 'ClientBasePackages bundle' -Tag 'Light','Bundle' {
         $msstoreCalls = $script:wingetCalls | Where-Object { $_ -contains 'msstore' }
         @($msstoreCalls).Count | Should -Be 4
         $machineCalls = $script:wingetCalls | Where-Object { $_ -contains 'machine' }
-        @($machineCalls).Count | Should -Be 15
+        @($machineCalls).Count | Should -Be 16
     }
 
     It 'sideloads the Readwise Reader MSIX' {
@@ -93,9 +93,9 @@ Describe 'ClientBasePackages bundle' -Tag 'Light','Bundle' {
         $script:webRequests  = @()
         $script:appxInstalls = @()
         { & $script:InvokeBundle } | Should -Not -Throw
-        $script:chocoCalls.Count   | Should -Be 3
+        $script:chocoCalls.Count   | Should -Be 2
         $script:scoopCalls.Count   | Should -Be 3
-        $script:wingetCalls.Count  | Should -Be 19
+        $script:wingetCalls.Count  | Should -Be 20
         @($script:webRequests).Count  | Should -Be 1
         @($script:appxInstalls).Count | Should -Be 1
     }

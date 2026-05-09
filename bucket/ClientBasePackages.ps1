@@ -2,7 +2,7 @@
 Write-Host 'Installing and configuring OSBasePackages...'
 . "$PSScriptRoot\Utils.ps1"
 
-'foxitreader','exiftool','geosetter' | ForEach-Object {
+'exiftool','geosetter' | ForEach-Object {
     Write-Host "Installing $_..."
     choco install -y $_
 }
@@ -40,6 +40,10 @@ $WingetPackages = @{
     'SoX'=([PSCustomObject]@{ WingetName='SoX'; WinGetID='ChrisBagwell.SoX';  })
     'eSpeak-NG'=([PSCustomObject]@{ WingetName='eSpeak NG'; WinGetID='eSpeak-NG.eSpeak-NG';  })
     'Dropbox'=([PSCustomObject]@{ WingetName='Dropbox'; WinGetID='Dropbox.Dropbox'; })
+    # foxitreader's choco package times out downloading the upstream
+    # installer in CI (#27). Foxit publishes a winget manifest, which is
+    # also the preferred install engine per the README.
+    'FoxitReader'=([PSCustomObject]@{ WingetName='Foxit PDF Reader'; WinGetID='Foxit.FoxitReader'; })
     'Notion'=([PSCustomObject]@{ WingetName='Notion'; WinGetID='Notion.Notion'; })
 #    'PowerAutomate'=([PSCustomObject]@{ WingetName='Power Automate'; WinGetID='Microsoft.PowerAutomateDesktop'; })
     'Pushbullet'=([PSCustomObject]@{ WingetName='Pushbullet'; WinGetID='Pushbullet.Pushbullet'; })
