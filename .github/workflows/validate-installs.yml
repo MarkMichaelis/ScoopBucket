@@ -7,17 +7,55 @@ on:
 
 permissions:
   issues: write
-  contents: read
+  contents: write
 
 jobs:
+  verify-versions:
+    name: Verify (and auto-fix) manifest version bumps
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: verify-versions-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git identity
+        shell: pwsh
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Verify (or auto-fix) manifest version bumps
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & pwsh -NoProfile -File ./Test-ManifestVersionBumps.ps1 -Amend -Push -Branch '${{ github.ref_name }}'
+          $code = $LASTEXITCODE
+          if ($code -ne 0) { exit $code }
+          $triggered = '${{ github.sha }}'
+          $current   = (git rev-parse HEAD).Trim()
+          if ($triggered -ne $current) {
+            Write-Host "::warning::Auto-corrected missing manifest version bump on main: $triggered -> $current. Install the opt-in pre-push hook (git config core.hooksPath .githooks) to have this happen locally."
+          }
+
   validate-installs:
     name: Install & Validate Packages
+    needs: verify-versions
     runs-on: windows-2025
     timeout-minutes: 120
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
 
       - name: Accept winget source agreements
         shell: pwsh

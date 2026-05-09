@@ -8,12 +8,76 @@ on:
   workflow_dispatch:
 
 jobs:
+  verify-versions:
+    name: Verify (and auto-fix) manifest version bumps
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: verify-versions-${{ github.ref }}
+      cancel-in-progress: false
+    outputs:
+      fixed: ${{ steps.run.outputs.fixed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+
+      - name: Configure git identity
+        shell: pwsh
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Detect fork PR
+        id: fork
+        shell: pwsh
+        run: |
+          $isFork = '${{ github.event.pull_request.head.repo.fork }}' -eq 'true'
+          "is_fork=$($isFork.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Fork PR: $isFork"
+
+      - name: Verify (or auto-fix) manifest version bumps
+        id: run
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $isFork = '${{ steps.fork.outputs.is_fork }}' -eq 'true'
+          if ($isFork) {
+            # No write access to a fork's branch; check-only with a clear hint.
+            & pwsh -NoProfile -File ./Test-ManifestVersionBumps.ps1
+            exit $LASTEXITCODE
+          }
+          & pwsh -NoProfile -File ./Test-ManifestVersionBumps.ps1 -Amend -Push -Branch '${{ github.event.pull_request.head.ref || github.ref_name }}'
+          $code = $LASTEXITCODE
+          if ($code -ne 0) { exit $code }
+
+          # Was the previous commit auto-amended? Detect by comparing the
+          # local HEAD to the SHA the workflow was originally triggered on.
+          $triggered = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $current   = (git rev-parse HEAD).Trim()
+          $fixed     = ($triggered -ne $current).ToString().ToLower()
+          "fixed=$fixed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          if ($fixed -eq 'true' -and '${{ github.ref }}' -eq 'refs/heads/main') {
+            Write-Host "::warning::Auto-corrected missing manifest version bump on main: $triggered -> $current. Install the opt-in pre-push hook (git config core.hooksPath .githooks) to have this happen locally."
+          }
+
   pester:
     name: Light suite (Windows)
+    needs: verify-versions
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
 
       - name: Show PowerShell version
         shell: pwsh

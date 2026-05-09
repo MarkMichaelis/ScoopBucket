@@ -83,6 +83,31 @@ If a single change touches files referenced by multiple manifests (e.g.
 `Utils.ps1`), bump every affected manifest. The version bump must be in
 the same commit as the change, so `scoop update` picks it up.
 
+**This rule is auto-enforced and auto-fixed by CI.** A `verify-versions`
+job runs first in both `test.yml` and `validate-installs.yml`. If a
+referenced file changed without a matching bump, it bumps the minor
+segment, amends the commit, and force-pushes back to the branch — your
+downstream CI jobs then run against the corrected commit. On `main`,
+the auto-fix is announced via a `::warning::` annotation (yellow, not
+red); no human action is required. On fork PRs (where CI has no write
+access) the job fails with instructions to run `-Fix` locally.
+
+For the cleanest local flow, enable the opt-in pre-push hook so the
+fix happens on your machine instead of on CI:
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+The hook runs the same helper (`Test-ManifestVersionBumps.ps1 -Amend`)
+and folds any needed bump into the commit being pushed.
+
+> **Note.** For the auto-fix to cover a helper that your bundle's
+> `.ps1` dot-sources (e.g. `Utils.ps1`), the helper must be declared in
+> the manifest's `url` array. Files outside the `url` set are
+> deliberately not tracked.
+
+
 ### Installation engine preference
 
 When adding a package, choose the installer in this order, falling

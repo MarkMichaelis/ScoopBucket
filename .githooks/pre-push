@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+# Opt-in pre-push hook. Enable with:
+#
+#     git config core.hooksPath .githooks
+#
+# Auto-bumps any Scoop manifest whose referenced files changed without a
+# corresponding minor-version bump, amends the commit being pushed, and
+# lets the push proceed. Equivalent to the CI verify-versions gate, but
+# runs locally so contributions arrive pre-corrected.
+exec pwsh -NoProfile -File ./Test-ManifestVersionBumps.ps1 -Amend
