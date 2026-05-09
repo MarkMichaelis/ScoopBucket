@@ -23,7 +23,25 @@ if (-not (Get-Command npx -ErrorAction SilentlyContinue)) {
 # an agent asks it to open a page. Install just chromium (~150MB) since it's
 # the default Playwright browser and is sufficient for the MCP use case.
 Write-Host 'Ensuring Playwright chromium browser is installed (required by @playwright/mcp)...'
-& npx.cmd -y playwright install chromium
+# Install @playwright/test globally so `playwright` is on PATH. This avoids
+# running `npx playwright install` from a directory with no package.json,
+# which emits a noisy "running 'npx playwright install' without first
+# installing your project's dependencies" warning. `npm install --global` is
+# idempotent — npm short-circuits if the package is already installed at the
+# requested version — and `playwright install chromium` itself skips browsers
+# that are already on disk, satisfying the bucket's idempotency contract.
+if (-not (Get-Command playwright -ErrorAction SilentlyContinue)) {
+    & npm.cmd install --global '@playwright/test'
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "npm install --global @playwright/test exited with code $LASTEXITCODE; falling back to npx for browser install."
+    }
+}
+if (Get-Command playwright -ErrorAction SilentlyContinue) {
+    & playwright.cmd install chromium
+}
+else {
+    & npx.cmd -y '@playwright/test' install chromium
+}
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "playwright install chromium exited with code $LASTEXITCODE; the Playwright MCP server may fail at runtime."
 }
