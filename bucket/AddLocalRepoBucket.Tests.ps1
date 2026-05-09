@@ -1,5 +1,13 @@
 Describe "Install AddLocalRepoBucket" -Tag 'Light', 'Install' {
     BeforeAll {
+        # Skip the suite if scoop isn't usable in this environment (e.g. CI
+        # runners that haven't bootstrapped scoop yet). The Utils.ps1 `scoop`
+        # wrapper shells out to `scoop.ps1`, which produces a hard
+        # CommandNotFoundException when scoop isn't on PATH — we'd rather skip
+        # than have BeforeAll/AfterAll blow up the whole describe.
+        $script:scoopAvailable = [bool](Get-Command scoop.ps1 -ErrorAction Ignore)
+        if (-not $script:scoopAvailable) { return }
+
         . "$PSScriptRoot\Utils.ps1"
         $manifest = Get-Content "$PSScriptRoot\AddLocalRepoBucket.json" -Raw | ConvertFrom-Json
         $script:installScript = $manifest.installer.script -join "`n"
@@ -25,6 +33,10 @@ Describe "Install AddLocalRepoBucket" -Tag 'Light', 'Install' {
     }
 
     It 'adds the LocalRepo bucket' {
+        if (-not $script:scoopAvailable) {
+            Set-ItResult -Skipped -Because 'scoop.ps1 is not available on PATH'
+            return
+        }
         if ($script:duplicateOfExisting) {
             Set-ItResult -Skipped -Because 'MarkMichaelis bucket already covers this URL; scoop dedup-rejects the second add'
             return
@@ -34,12 +46,17 @@ Describe "Install AddLocalRepoBucket" -Tag 'Light', 'Install' {
     }
 
     It 'is idempotent on re-run' {
+        if (-not $script:scoopAvailable) {
+            Set-ItResult -Skipped -Because 'scoop.ps1 is not available on PATH'
+            return
+        }
         # scoop bucket add fails if the bucket already exists; per the
         # idempotency contract a 2nd run must not throw.
         { Invoke-Expression $script:installScript 2>&1 | Out-Null } | Should -Not -Throw
     }
 
     AfterAll {
+        if (-not $script:scoopAvailable) { return }
         if ((scoop bucket list) -match 'LocalRepo') {
             Invoke-Expression $script:uninstallScript | Out-Null
         }
