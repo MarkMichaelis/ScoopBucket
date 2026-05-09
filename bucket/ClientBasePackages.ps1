@@ -24,6 +24,8 @@ Write-Host 'Installing and configuring OSBasePackages...'
 
 $WingetPackages = @{
     'AmazonKindle'=([PSCustomObject]@{ WingetName='Amazon Kindle'; WinGetID='Amazon.Kindle'; })
+    'Bitwarden'=([PSCustomObject]@{ WingetName='Bitwarden'; WinGetID='Bitwarden.Bitwarden'; })
+    'BitwardenCLI'=([PSCustomObject]@{ WingetName='Bitwarden CLI'; WinGetID='Bitwarden.CLI'; })
     'calibre'=([PSCustomObject]@{ WingetName='calibre'; WinGetID='calibre.calibre'; })
     'Claude'=([PSCustomObject]@{ WingetName='Claude'; WinGetID='Anthropic.Claude'; })
 #    'Comet'=([PSCustomObject]@{ WingetName='Comet (Perplexity)'; WinGetID='Perplexity.Comet'; })
