@@ -2,9 +2,17 @@
 Write-Host 'Installing and configuring OSBasePackages...'
 . "$PSScriptRoot\Utils.ps1"
 
-'foxitreader','exiftool','dbxcli','geosetter' | ForEach-Object { 
+'foxitreader','exiftool','geosetter' | ForEach-Object {
     Write-Host "Installing $_..."
     choco install -y $_
+}
+
+# dbxcli was delisted from the Chocolatey community repository (#13).
+# Install via this bucket's Scoop manifest (DbxCli.json), which fetches
+# the upstream GitHub release binary directly. See also #46.
+'MarkMichaelis/DbxCli' | ForEach-Object {
+    Write-Host "Installing $_..."
+    scoop install $_
 }
 
 # Claude for Excel must be installed after Microsoft Office (which is a
@@ -12,14 +20,14 @@ Write-Host 'Installing and configuring OSBasePackages...'
 # under Excel's WEF (Web Extension Framework). It's installed here -
 # rather than as part of AIAgents - so the AIAgents bucket stays
 # Office-independent for users who only want the AI clients/CLIs.
-'MarkMichaelis/ClaudeExcel' | ForEach-Object {
+'ClaudeExcel' | ForEach-Object {
     Write-Host "Installing $_..."
-    scoop install $_
+    Install-BucketApp $_
 }
 
-'MarkMichaelis/AIAgents' | ForEach-Object {
+'AIAgents' | ForEach-Object {
     Write-Host "Installing $_..."
-    scoop install $_
+    Install-BucketApp $_
 }
 
 $WingetPackages = @{

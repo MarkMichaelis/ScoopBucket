@@ -21,6 +21,10 @@ Describe 'ClientBasePackages bundle' -Tag 'Light','Bundle' {
         function winget            { $script:wingetCalls  += ,@($args) }
         function Invoke-WebRequest { $script:webRequests  += ,@($args) }
         function Add-AppxPackage   { $script:appxInstalls += ,@($args) }
+        # Install-BucketApp lives in Utils.ps1 (stripped below); route it to
+        # the production fallback so `scoop install MarkMichaelis/<App>`
+        # assertions still hold.
+        function Install-BucketApp { param($Name) scoop install "MarkMichaelis/$Name" }
 
         $script:InvokeBundle = {
             $src = Get-Content -Raw -Path $script:sut
@@ -31,20 +35,20 @@ Describe 'ClientBasePackages bundle' -Tag 'Light','Bundle' {
     }
 
     It 'invokes choco install for each chocolatey base package' {
-        $script:chocoCalls.Count | Should -Be 4
+        $script:chocoCalls.Count | Should -Be 3
         $names = $script:chocoCalls | ForEach-Object { $_[-1] }
         $names | Should -Contain 'foxitreader'
         $names | Should -Contain 'exiftool'
-        $names | Should -Contain 'dbxcli'
         $names | Should -Contain 'geosetter'
         ($script:chocoCalls[0] -join ' ') | Should -Match '^install -y '
     }
 
     It 'invokes scoop install for each MarkMichaelis bundle manifest' {
-        $script:scoopCalls.Count | Should -Be 2
+        $script:scoopCalls.Count | Should -Be 3
         $names = $script:scoopCalls | ForEach-Object { $_[-1] }
         $names | Should -Contain 'MarkMichaelis/ClaudeExcel'
         $names | Should -Contain 'MarkMichaelis/AIAgents'
+        $names | Should -Contain 'MarkMichaelis/DbxCli'
         foreach ($call in $script:scoopCalls) {
             $call[0] | Should -Be 'install'
             # Per-user installs (no -g) — Office/AIAgents land in the user
@@ -89,8 +93,8 @@ Describe 'ClientBasePackages bundle' -Tag 'Light','Bundle' {
         $script:webRequests  = @()
         $script:appxInstalls = @()
         { & $script:InvokeBundle } | Should -Not -Throw
-        $script:chocoCalls.Count   | Should -Be 4
-        $script:scoopCalls.Count   | Should -Be 2
+        $script:chocoCalls.Count   | Should -Be 3
+        $script:scoopCalls.Count   | Should -Be 3
         $script:wingetCalls.Count  | Should -Be 19
         @($script:webRequests).Count  | Should -Be 1
         @($script:appxInstalls).Count | Should -Be 1
