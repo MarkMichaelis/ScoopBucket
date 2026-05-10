@@ -48,7 +48,7 @@ Describe 'AIAgents install orchestration' -Tag 'Heavy','Bundle' {
         $script:InvokeBundle = {
             $src = Get-Content -Raw -Path $script:sut
             $src = $src -replace '(?m)^\s*\.\s+"\$PSScriptRoot\\Utils\.ps1".*$',''
-            . ([scriptblock]::Create($src))
+            . ([scriptblock]::Create($src)) @args
         }
         & $script:InvokeBundle
     }
@@ -131,7 +131,7 @@ Describe 'AIAgents MCP config generation' -Tag 'Light','Bundle' {
         $script:InvokeBundle = {
             $src = Get-Content -Raw -Path $script:sut
             $src = $src -replace '(?m)^\s*\.\s+"\$PSScriptRoot\\Utils\.ps1".*$',''
-            . ([scriptblock]::Create($src))
+            . ([scriptblock]::Create($src)) @args
         }
         & $script:InvokeBundle
     }
@@ -150,7 +150,7 @@ Describe 'AIAgents MCP config generation' -Tag 'Light','Bundle' {
         }
     }
 
-    It 'writes valid JSON with the 5 base mcpServers entries in <name>' -ForEach @(
+    It 'writes valid JSON with the 4 base mcpServers entries in <name>' -ForEach @(
         @{ name = 'ClaudeDesktop' }
         @{ name = 'ClaudeCode' }
         @{ name = 'Gemini' }
@@ -164,7 +164,6 @@ Describe 'AIAgents MCP config generation' -Tag 'Light','Bundle' {
         $json.mcpServers.playwright      | Should -Not -BeNullOrEmpty
         $json.mcpServers.filesystem      | Should -Not -BeNullOrEmpty
         $json.mcpServers.github          | Should -Not -BeNullOrEmpty
-        $json.mcpServers.shell           | Should -Not -BeNullOrEmpty
     }
 
     It 'writes a Codex TOML config containing each MCP server section' {
@@ -174,7 +173,6 @@ Describe 'AIAgents MCP config generation' -Tag 'Light','Bundle' {
         $content | Should -Match '\[mcp_servers\.playwright\]'
         $content | Should -Match '\[mcp_servers\.filesystem\]'
         $content | Should -Match '\[mcp_servers\.github\]'
-        $content | Should -Match '\[mcp_servers\.shell\]'
     }
 
     It 'is idempotent: re-running does not duplicate mcpServers entries' {
@@ -184,7 +182,7 @@ Describe 'AIAgents MCP config generation' -Tag 'Light','Bundle' {
             $path = $script:configPaths[$name]
             $json = Get-Content -Raw -Path $path | ConvertFrom-Json
             # Each named entry must appear exactly once.
-            foreach ($expected in 'context7','playwright','filesystem','github','shell') {
+            foreach ($expected in 'context7','playwright','filesystem','github') {
                 @($json.mcpServers.PSObject.Properties.Name |
                     Where-Object { $_ -eq $expected }).Count |
                         Should -Be 1 -Because "$expected should appear exactly once in $path"
@@ -192,10 +190,39 @@ Describe 'AIAgents MCP config generation' -Tag 'Light','Bundle' {
         }
 
         $codex = Get-Content -Raw -Path $script:configPaths.Codex
-        foreach ($expected in 'context7','playwright','filesystem','github','shell') {
+        foreach ($expected in 'context7','playwright','filesystem','github') {
             $pattern = "\[mcp_servers\.$expected\]"
             ([regex]::Matches($codex, $pattern)).Count |
                 Should -Be 1 -Because "[mcp_servers.$expected] should appear exactly once in codex config.toml"
         }
+    }
+
+    It '-Reset prunes deprecated shell entry but preserves user-added entries' {
+        # Pre-seed each JSON config with a deprecated 'shell' entry plus a
+        # user-added 'usercustom' entry that must survive.
+        foreach ($name in 'ClaudeDesktop','ClaudeCode','Gemini','Copilot') {
+            $path = $script:configPaths[$name]
+            $json = Get-Content -Raw -Path $path | ConvertFrom-Json
+            $json.mcpServers | Add-Member -NotePropertyName shell `
+                -NotePropertyValue ([pscustomobject]@{ command = 'npx'; args = @('-y','mcp-server-commands') }) -Force
+            $json.mcpServers | Add-Member -NotePropertyName usercustom `
+                -NotePropertyValue ([pscustomobject]@{ command = 'echo'; args = @('hi') }) -Force
+            $json | ConvertTo-Json -Depth 20 | Set-Content -Path $path -Encoding UTF8
+        }
+        $codexPath = $script:configPaths.Codex
+        Add-Content -Path $codexPath -Value "`r`n[mcp_servers.shell]`r`ncommand = `"npx`"`r`nargs = [`"-y`", `"mcp-server-commands`"]`r`n"
+        Add-Content -Path $codexPath -Value "`r`n[mcp_servers.usercustom]`r`ncommand = `"echo`"`r`nargs = [`"hi`"]`r`n"
+
+        & $script:InvokeBundle -Reset
+
+        foreach ($name in 'ClaudeDesktop','ClaudeCode','Gemini','Copilot') {
+            $path = $script:configPaths[$name]
+            $json = Get-Content -Raw -Path $path | ConvertFrom-Json
+            $json.mcpServers.PSObject.Properties.Name | Should -Not -Contain 'shell' -Because "shell should be pruned from $path"
+            $json.mcpServers.PSObject.Properties.Name | Should -Contain 'usercustom' -Because "user-added entries must survive in $path"
+        }
+        $codex = Get-Content -Raw -Path $codexPath
+        $codex | Should -Not -Match '\[mcp_servers\.shell\]'
+        $codex | Should     -Match '\[mcp_servers\.usercustom\]'
     }
 }
