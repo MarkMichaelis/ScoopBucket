@@ -23,6 +23,8 @@ BeforeAll {
         'Get-PackagesFromScript'
         'Get-AllPackages'
         'Get-PackagesNeedingVerification'
+        'Get-ScoopAppLeaf'
+        'Test-IsTransientWingetFailure'
     )
 
     $functionBodies = foreach ($funcName in $functionsToLoad) {
@@ -702,5 +704,57 @@ Describe 'Get-PackagesNeedingVerification' {
             -InstallerType 'ps-module' -Results $results
 
         @($verify).Count | Should -Be 0
+    }
+}
+
+# ============================================================================
+# Test-IsTransientWingetFailure
+# ============================================================================
+
+Describe 'Test-IsTransientWingetFailure' {
+    It 'returns true for hresult -2145844746 (0x801901F6 Bad gateway)' {
+        Test-IsTransientWingetFailure -ExitCode -2145844746 -Output '' | Should -BeTrue
+    }
+
+    It 'returns false for exit code 0' {
+        Test-IsTransientWingetFailure -ExitCode 0 -Output '' | Should -BeFalse
+    }
+
+    It 'returns true when output mentions Bad gateway even for unrelated exit code' {
+        Test-IsTransientWingetFailure -ExitCode -1 -Output 'Installer failed: Bad gateway from CDN' | Should -BeTrue
+    }
+
+    It 'returns true when output mentions ''Download request status is not success''' {
+        Test-IsTransientWingetFailure -ExitCode -1 -Output 'Download request status is not success (502).' | Should -BeTrue
+    }
+
+    It 'returns true when output mentions hex code 0x801901f6 (case-insensitive)' {
+        Test-IsTransientWingetFailure -ExitCode -1 -Output 'hresult: 0x801901F6' | Should -BeTrue
+    }
+
+    It 'returns false for an unrelated error message' {
+        Test-IsTransientWingetFailure -ExitCode -1 -Output 'random other error' | Should -BeFalse
+    }
+}
+
+# ============================================================================
+# Get-ScoopAppLeaf
+# ============================================================================
+
+Describe 'Get-ScoopAppLeaf' {
+    It 'strips the bucket prefix from extras/beyondcompare' {
+        Get-ScoopAppLeaf -Name 'extras/beyondcompare' | Should -Be 'beyondcompare'
+    }
+
+    It 'strips the bucket prefix from MarkMichaelis/Aspire' {
+        Get-ScoopAppLeaf -Name 'MarkMichaelis/Aspire' | Should -Be 'Aspire'
+    }
+
+    It 'strips the bucket prefix from MarkMichaelis/DbxCli' {
+        Get-ScoopAppLeaf -Name 'MarkMichaelis/DbxCli' | Should -Be 'DbxCli'
+    }
+
+    It 'returns a bare name unchanged when no slash is present' {
+        Get-ScoopAppLeaf -Name '7zip' | Should -Be '7zip'
     }
 }

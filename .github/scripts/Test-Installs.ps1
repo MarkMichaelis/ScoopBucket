@@ -115,6 +115,26 @@ function Invoke-WithTimeout {
     }
 }
 
+function Test-IsTransientWingetFailure {
+    <#
+    .SYNOPSIS
+        Classifies winget install failures as transient (retryable) or not.
+    .DESCRIPTION
+        Recognises HTTP 502 / "Bad gateway" download failures (hresult
+        0x801901F6 / -2145844746) and similar CDN-side hiccups that recover
+        on retry.  Add other known transient codes here as we encounter them.
+    #>
+    param(
+        [int]$ExitCode,
+        [string]$Output
+    )
+    # 0x801901F6 = -2145844746 (HTTP 502 Bad gateway during download)
+    $transientCodes = @(-2145844746)
+    if ($transientCodes -contains $ExitCode) { return $true }
+    if ($Output -match '0x801901f6|Bad gateway|Download request status is not success') { return $true }
+    return $false
+}
+
 function Install-WingetPackage {
     param(
         [string]$Name,
@@ -125,14 +145,29 @@ function Install-WingetPackage {
     $cmd = "winget install --id $PackageId --scope $Scope --accept-package-agreements --accept-source-agreements --disable-interactivity --silent"
     try {
         Write-Host "  Installing [winget] $Name ($PackageId)..."
-        $result = Invoke-WithTimeout -Command $cmd -TimeoutSeconds $script:DefaultTimeoutSec
-        $code = $result.ExitCode
+        $maxAttempts = 3
+        $result = $null
+        $code = 0
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            $result = Invoke-WithTimeout -Command $cmd -TimeoutSeconds $script:DefaultTimeoutSec
+            $code = $result.ExitCode
+            # Timeouts are NOT transient — fail fast.
+            if ($result.TimedOut) { break }
+            # winget exit code 0 = success, -1978335189 (0x8A150057) = already installed
+            if ($code -eq 0 -or $code -eq -1978335189) { break }
+            if ($attempt -lt $maxAttempts -and (Test-IsTransientWingetFailure -ExitCode $code -Output $result.Output)) {
+                $delay = [int](10 * [Math]::Pow(3, $attempt - 1))
+                Write-Host "  Retry $attempt/$maxAttempts for [winget] $Name (transient: exit $code); sleeping ${delay}s..."
+                Start-Sleep -Seconds $delay
+                continue
+            }
+            break
+        }
         if ($result.TimedOut) {
             Add-Result -Name $Name -PackageId $PackageId -InstallerType 'winget' `
                 -SourceScript $SourceScript -Command $cmd -Status 'fail' `
                 -ExitCode $code -ErrorOutput $result.Output
         }
-        # winget exit code 0 = success, -1978335189 (0x8A150057) = already installed
         elseif ($code -eq 0 -or $code -eq -1978335189) {
             Add-Result -Name $Name -PackageId $PackageId -InstallerType 'winget' `
                 -SourceScript $SourceScript -Command $cmd -Status 'pass'
@@ -690,6 +725,18 @@ function Get-PackagesNeedingVerification {
     })
 }
 
+function Get-ScoopAppLeaf {
+    <#
+    .SYNOPSIS
+        Returns the leaf application directory name for a scoop package
+        identifier, stripping any bucket prefix (e.g. 'extras/beyondcompare'
+        -> 'beyondcompare').  Scoop installs apps under apps/<leaf> without
+        the bucket prefix, so verification paths must use the leaf name.
+    #>
+    param([Parameter(Mandatory)][string]$Name)
+    ($Name -split '/')[ -1 ]
+}
+
 function Add-VerificationSkipped {
     <#
     .SYNOPSIS
@@ -724,9 +771,10 @@ if ($scoopPackages.Count -gt 0) {
                 -Reason "Install was skipped or failed; verification not attempted"
             continue
         }
+        $leaf = Get-ScoopAppLeaf -Name $pkg.Name
         Test-Verification -Name "scoop-global:$($pkg.Name)" `
             -Description "Scoop package '$($pkg.Name)' should be installed globally under $scoopGlobalAppsPath" `
-            -Test ([scriptblock]::Create("Test-Path (Join-Path '$scoopGlobalAppsPath' '$($pkg.Name)')"))
+            -Test ([scriptblock]::Create("Test-Path (Join-Path '$scoopGlobalAppsPath' '$leaf')"))
     }
 }
 
