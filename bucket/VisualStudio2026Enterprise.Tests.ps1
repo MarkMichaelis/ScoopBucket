@@ -25,14 +25,14 @@ Describe "Install $name" -Tag 'Manual','Heavy','Install' {
         Test-ScoopPackageInstalled $name | Should -Be $true
     }
 
-    It 'is registered as Visual Studio 2022' {
+    It 'is registered as Visual Studio 2026' {
         $vswhere = Get-Command vswhere -ErrorAction Ignore
         if ($vswhere) {
-            $installations = & vswhere.exe -products '*' -property installationPath 2>$null
-            $vs2022 = $installations | Where-Object { $_ -match '2022' }
-            $vs2022 | Should -Not -BeNullOrEmpty
+            $installations = & vswhere.exe -prerelease -products '*' -property installationPath 2>$null
+            $vs2026 = $installations | Where-Object { $_ -match '2026' }
+            $vs2026 | Should -Not -BeNullOrEmpty
         } else {
-            Get-Program -Filter '*Visual Studio*2022*' | Should -Not -BeNullOrEmpty
+            Get-Program -Filter '*Visual Studio*2026*' | Should -Not -BeNullOrEmpty
         }
     }
 }
