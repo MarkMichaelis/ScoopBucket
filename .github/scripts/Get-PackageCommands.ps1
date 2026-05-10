@@ -108,7 +108,7 @@ $NoCliPackages = @(
     '9NT1R1C2HH7J','9NRQBLR605RG','XPDDXX9QW8N9D7','9NKSQGP7F2NH',
     'gitextensions','gitkraken','git-credential-manager-for-windows',
     'Microsoft-Teams','Office365ProPlus','foxitreader','geosetter',
-    'TotalCommander','VisualStudio2019Enterprise','MarkMichaelis/ChatGPT',
+    'TotalCommander','MarkMichaelis/ChatGPT',
     'MarkMichaelis/Claude','MarkMichaelis/Gemini','MarkMichaelis/MicrosoftCopilot',
     'MarkMichaelis/ClaudeExcel','MarkMichaelis/AIAgents'
 )
