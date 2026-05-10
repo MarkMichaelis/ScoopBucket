@@ -113,6 +113,63 @@ jobs:
           Set-ExecutionPolicy Bypass -Scope Process -Force
           & "${{ github.workspace }}\.github\scripts\Test-Installs.ps1"
 
+      - name: CLI availability discovery (#45 Phase 2, non-failing)
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $results = & "${{ github.workspace }}\.github\scripts\Get-PackageCommands.ps1" -Quiet
+          if ($null -eq $results) { $results = @() }
+          $results | ConvertTo-Json -Depth 6 | Set-Content -Path "${{ github.workspace }}\cli-availability.json" -Encoding UTF8
+          # Run the Pester scaffold (also non-failing).
+          Invoke-Pester -Path "${{ github.workspace }}\bucket\PackageCommands.Tests.ps1" -Tag Heavy -Output Detailed -PassThru | Out-Null
+
+      - name: CLI availability — write step summary
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $jsonPath = "${{ github.workspace }}\cli-availability.json"
+          if (-not (Test-Path $jsonPath)) {
+            "## CLI availability discovery`n`n_No results produced._" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            return
+          }
+          $rows = Get-Content $jsonPath -Raw | ConvertFrom-Json
+          if ($null -eq $rows) { $rows = @() }
+          $considered = @($rows | Where-Object { $_.ExpectedCli })
+          $available  = @($considered | Where-Object { $_.Available })
+          $missing    = @($considered | Where-Object { -not $_.Available })
+          $sb = [System.Text.StringBuilder]::new()
+          [void]$sb.AppendLine("## CLI availability discovery (#45 Phase 2)")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("- Total package entries: **$($rows.Count)**")
+          [void]$sb.AppendLine("- With expected CLI: **$($considered.Count)**")
+          [void]$sb.AppendLine("- Available on PATH: **$($available.Count)**")
+          [void]$sb.AppendLine("- Missing: **$($missing.Count)**")
+          [void]$sb.AppendLine("")
+          if ($missing.Count -gt 0) {
+            [void]$sb.AppendLine("### Missing CLIs")
+            [void]$sb.AppendLine("")
+            [void]$sb.AppendLine("| Source | Package | Expected CLI | OnDiskPath | HelpFlag |")
+            [void]$sb.AppendLine("|---|---|---|---|---|")
+            foreach ($m in $missing) {
+              $onDisk   = if ($m.PSObject.Properties['OnDiskPath']) { $m.OnDiskPath } else { '' }
+              $helpFlag = if ($m.PSObject.Properties['HelpFlag'])   { $m.HelpFlag   } else { '' }
+              [void]$sb.AppendLine("| $($m.Source) | $($m.PackageId) | ``$($m.ExpectedCli)`` | $onDisk | $helpFlag |")
+            }
+          }
+          $sb.ToString() | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload CLI availability artifact
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-availability
+          path: cli-availability.json
+          retention-days: 30
+
       - name: Ensure issue labels exist
         if: always()
         shell: pwsh
