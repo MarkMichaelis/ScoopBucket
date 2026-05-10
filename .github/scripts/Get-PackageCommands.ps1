@@ -94,6 +94,7 @@ $ExpectedCliOverrides = @{
     'MarkMichaelis/GitHubCopilotCli'                       = 'copilot'
     'MarkMichaelis/Aspire'                                 = 'aspire'
     'VisualStudio2026Enterprise'                           = 'devenv'
+    'extras/beyondcompare'                                = 'bcompare'
 }
 
 # Identifiers known to ship no CLI; expected CLI -> $null (Available stays
@@ -105,12 +106,15 @@ $NoCliPackages = @(
     'Google.Chrome','voidtools.Everything','WinDirStat.WinDirStat',
     'Microsoft.Sysinternals.ProcessExplorer','Microsoft.Sysinternals.Suite',
     'WindowsPostInstallWizard.UniversalSilentSwitchFinder',
-    '9NT1R1C2HH7J','9NRQBLR605RG','XPDDXX9QW8N9D7','9NKSQGP7F2NH',
+    '9NT1R1C2HH7J','9NRQBLR605RG','XPDDXX9QW8N9D7','9NKSQGP7F2NH','9MWF2DWS5Z9N',
+    'XPDNSF6TXN2R6Z',
+    'Foxit.FoxitReader',
     'gitextensions','gitkraken','git-credential-manager-for-windows',
     'Microsoft-Teams','Office365ProPlus','foxitreader','geosetter',
     'TotalCommander','MarkMichaelis/ChatGPT',
     'MarkMichaelis/Claude','MarkMichaelis/Gemini','MarkMichaelis/MicrosoftCopilot',
-    'MarkMichaelis/ClaudeExcel','MarkMichaelis/AIAgents'
+    'MarkMichaelis/ClaudeExcel','MarkMichaelis/AIAgents',
+    'extras/claude','extras/notion','extras/spotify','extras/zoom','extras/sysinternals'
 )
 
 function Get-ExpectedCliName {

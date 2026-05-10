@@ -33,9 +33,8 @@ Describe 'CLI availability discovery (Phase 1, non-failing)' -Tag 'Heavy','CliAv
         $considered = @($script:results | Where-Object { $_.ExpectedCli })
         $available  = @($considered | Where-Object { $_.Available })
         Write-Host ""
-        Write-Host "Discovered $($script:results.Count) package entries; " +
-                   "$($considered.Count) have an expected CLI; " +
-                   "$($available.Count) of those are on PATH."
+        Write-Host ("Discovered {0} package entries; {1} have an expected CLI; {2} of those are on PATH." -f `
+            $script:results.Count, $considered.Count, $available.Count)
         Write-Host ""
         $script:results |
             Format-Table Source, Package, ExpectedCli, Available, SourceScript -AutoSize |
@@ -63,6 +62,26 @@ Describe 'CLI availability discovery (Phase 1, non-failing)' -Tag 'Heavy','CliAv
             }
             # Phase 1: report only, never fail.
             $true | Should -BeTrue
+        }
+    }
+
+    It 'treats known GUI/store-only packages as no-CLI entries' {
+        $knownNoCli = @(
+            'Foxit.FoxitReader',
+            'XPDNSF6TXN2R6Z',
+            'extras/claude',
+            'extras/notion',
+            'extras/spotify',
+            'extras/zoom',
+            'extras/sysinternals'
+        )
+
+        foreach ($id in $knownNoCli) {
+            $rows = @($script:results | Where-Object { $_.PackageId -eq $id })
+            $rows.Count | Should -BeGreaterThan 0
+            foreach ($row in $rows) {
+                $row.ExpectedCli | Should -BeNullOrEmpty
+            }
         }
     }
 }
