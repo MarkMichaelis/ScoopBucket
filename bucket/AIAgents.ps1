@@ -1,3 +1,12 @@
+[CmdletBinding()]
+param(
+    # When set, prune any MCP server names this bucket has retired
+    # (see $DeprecatedMcpServers below) from existing user MCP configs.
+    # Off by default so a routine `scoop install` / reinstall never removes
+    # entries the user may still rely on. Intended for direct invocation:
+    #   pwsh -File AIAgents.ps1 -Reset
+    [switch]$Reset
+)
 
 Write-Host 'Installing and configuring AIAgents...'
 . "$PSScriptRoot\Utils.ps1"
@@ -109,7 +118,14 @@ if ([string]::IsNullOrWhiteSpace($GithubToken)) {
 # Configure MCP servers for every MCP-capable agent.
 # Idempotent: re-running just overwrites the named entries; other MCP servers
 # in the same config are preserved.
+#
+# $DeprecatedMcpServers lists names this script previously configured but has
+# since retired. They are NOT removed by default (a routine reinstall must
+# never silently delete a server the user may rely on); pass -Reset to prune
+# them from existing configs.
 # ---------------------------------------------------------------------------
+
+$DeprecatedMcpServers = @('shell')
 
 $McpServers = @(
     @{
@@ -132,11 +148,6 @@ $McpServers = @(
         Command   = 'npx'
         Arguments = @('-y', '@modelcontextprotocol/server-github')
         Env       = @{ GITHUB_PERSONAL_ACCESS_TOKEN = $GithubToken }
-    }
-    @{
-        Name      = 'shell'
-        Command   = 'npx'
-        Arguments = @('-y', 'mcp-server-commands')
     }
 )
 
@@ -255,9 +266,63 @@ $JsonAgents = @(
     @{ Label = 'GitHub Copilot CLI';  Path = (Join-Path $env:USERPROFILE  '.copilot\mcp-config.json') }
 )
 
+Function Remove-McpServerFromJsonConfig {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$AgentLabel,
+        [Parameter(Mandatory)][string]$ServerName
+    )
+
+    if (-not (Test-Path $Path)) { return }
+    try {
+        $config = Get-Content -Path $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        Write-Warning "$AgentLabel`: existing config at $Path is not valid JSON; skipping prune of $ServerName."
+        return
+    }
+    if (-not $config.PSObject.Properties['mcpServers']) { return }
+    if (-not $config.mcpServers.PSObject.Properties[$ServerName]) { return }
+
+    $config.mcpServers.PSObject.Properties.Remove($ServerName)
+    $config | ConvertTo-Json -Depth 20 | Set-Content -Path $Path -Encoding UTF8
+    Write-Host "$AgentLabel`: pruned deprecated $ServerName MCP from $Path"
+}
+
+Function Remove-McpServerFromCodex {
+    param(
+        [Parameter(Mandatory)][string]$ServerName
+    )
+
+    $path = Join-Path $env:USERPROFILE '.codex\config.toml'
+    if (-not (Test-Path $path)) { return }
+
+    $sectionPattern    = "(?ms)^\[mcp_servers\.$([regex]::Escape($ServerName))\].*?(?=^\[|\z)"
+    $envSectionPattern = "(?ms)^\[mcp_servers\.$([regex]::Escape($ServerName))\.env\].*?(?=^\[|\z)"
+
+    $content    = Get-Content -Path $path -Raw
+    $newContent = [regex]::Replace($content, $envSectionPattern, '')
+    $newContent = [regex]::Replace($newContent, $sectionPattern, '')
+    if ($newContent -ne $content) {
+        Set-Content -Path $path -Value $newContent.TrimEnd() -Encoding UTF8
+        Write-Host "Codex CLI: pruned deprecated $ServerName MCP from $path"
+    }
+}
+
 foreach ($server in $McpServers) {
     foreach ($agent in $JsonAgents) {
         Add-McpServerToJsonConfig -Path $agent.Path -AgentLabel $agent.Label -Server $server
     }
     Add-McpServerToCodex -Server $server
+}
+
+if ($Reset) {
+    Write-Host "-Reset: pruning deprecated MCP server names ($($DeprecatedMcpServers -join ', '))..."
+    foreach ($name in $DeprecatedMcpServers) {
+        foreach ($agent in $JsonAgents) {
+            Remove-McpServerFromJsonConfig -Path $agent.Path -AgentLabel $agent.Label -ServerName $name
+        }
+        Remove-McpServerFromCodex -ServerName $name
+    }
 }
