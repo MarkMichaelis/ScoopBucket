@@ -71,6 +71,15 @@ function Add-Result {
     })
     $icon = switch ($Status) { 'pass' { '✅' } 'fail' { '❌' } 'untested' { '⏭️' } }
     Write-Host "$icon [$InstallerType] $Name - $Status $(if ($ExitCode -ne 0) { "(exit $ExitCode)" })"
+    # Surface captured installer stdout/stderr for failures so post-mortem
+    # doesn't require a special re-run to learn the real cause.  Wrapped in a
+    # GitHub Actions log group so the workflow log stays readable.
+    if ($Status -eq 'fail' -and -not [string]::IsNullOrWhiteSpace($ErrorOutput)) {
+        $hex = '0x{0:X8}' -f ([uint32]([int]$ExitCode -band 0xFFFFFFFF))
+        Write-Host "::group::[$InstallerType] $Name failure output (exit $ExitCode / $hex)"
+        Write-Host $ErrorOutput
+        Write-Host "::endgroup::"
+    }
 }
 
 # ============================================================================
