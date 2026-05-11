@@ -174,29 +174,38 @@ See #45 for the tracking issue. Rolling out in three phases:
 
 ## CLI tab-completion registration
 
-Every bundle that installs CLI tools (`AIAgents`, `ClientBasePackages`,
-`DeveloperBasePackages`) calls `Register-AllCliCompletions -Force` after
-its installs run, so a fresh `scoop install` of any of these bundles
-leaves a usable PowerShell tab-completion experience in place without an
-extra opt-in step.
+Every bundle that installs CLI tools registers PowerShell tab completion
+for the CLIs it owns. Per-CLI native-completion commands are co-located
+with their install (e.g. `Register-CliCompletion -Cli gh -NativeCommand
+{ gh completion -s powershell }` next to the `gh` install in
+`GitConfigure.ps1`), so adding or dropping a CLI never requires editing
+`Utils.ps1`.
 
-The standalone `CliCompletions` bundle exists for retroactive coverage —
-install (or `scoop update CliCompletions`) at any time to scan every CLI
-already on `PATH` and register completion for it. The bundle exposes a
-`register-all-cli-completions` shim so you can re-run it on demand.
+Bundles that install many CLIs (`AIAgents`, `ClientBasePackages`,
+`DeveloperBasePackages`) additionally call `Invoke-CliCompletionsSweep
+-Force` at the end of their install, which (a) ensures the
+[`PSCompletions`](https://github.com/abgox/PSCompletions) module is
+installed and (b) registers a PSCompletions-fallback block for any CLI
+on `PATH` whose owning bundle didn't supply a native command. To
+re-run the sweep manually after installing other tools by hand:
+
+```powershell
+. D:\Git\ScoopBucket\bucket\Utils.ps1
+Invoke-CliCompletionsSweep -Force
+```
 
 Behavior:
 
-- Each CLI is resolved in order: built-in PowerShell-shell completion
-  command (curated map in `Utils.ps1`) → `PSCompletions` (`abgox/PSCompletions`)
-  fallback → skipped with a reason.
+- Each CLI is resolved in order: caller-supplied `-NativeCommand`
+  scriptblock (owned by the install script) → `PSCompletions`
+  (`abgox/PSCompletions`) fallback → skipped with a reason.
 - All registrations are written as sentinel-delimited blocks
   (`# ScoopBucket:CliCompletion:<cli>:BEGIN v1 … :END`) inside
   `$PROFILE.AllUsersAllHosts`. Two runs with `-Force` produce a
   byte-identical profile.
-- `-Force` is opt-in for ad-hoc invocations (`register-all-cli-completions`
-  defaults to gap-fill only); the bundle installers pass `-Force`
-  explicitly so reinstalls always refresh blocks.
+- `-Force` is opt-in for ad-hoc invocations (defaults to gap-fill
+  only); the bundle installers pass `-Force` explicitly so reinstalls
+  always refresh blocks.
 - Writing to `$PROFILE.AllUsersAllHosts` requires an elevated session.
   Bundle scripts wrap the call in `try/catch` and emit a warning, so a
   non-elevated reinstall succeeds but the user is told their completion

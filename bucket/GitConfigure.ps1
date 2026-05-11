@@ -55,6 +55,15 @@ Function GitConfigure {
     winget install --scope machine GitHub.cli
     # scoop install hub # gh is a more recent standalone CLI (while hub is a proxy to git)
 
+    # gh native tab completion. Co-located with the gh install so adding /
+    # dropping the CLI here doesn't require editing Utils.ps1. Best-effort:
+    # silently skipped when the session isn't elevated.
+    try {
+        Register-CliCompletion -Cli gh -NativeCommand { gh completion -s powershell 2>$null } -Force -Confirm:$false -ErrorAction Stop | Out-Null
+    } catch {
+        Write-Warning "Skipping gh tab-completion registration: $($_.Exception.Message)"
+    }
+
     # TODO: Check if already configured.
     # TODO: Remove hard coding if the information.
     if (-not (git config --global user.name)) {

@@ -495,12 +495,19 @@ function Install-BucketApp {
 # PowerShell tab-completion registration for installed CLI tools.
 #
 # Two-tier strategy per CLI:
-#   1. Native — emit the verbatim output of `<cli> completion powershell`
-#      (or the curated equivalent in $script:CliCompletionNativeMap) into
-#      a sentinel-delimited block in the AllUsersAllHosts profile.
-#   2. PSCompletions fallback — emit `Import-Module PSCompletions` (once)
-#      and call `psc add <cli>` at registration time so PSCompletions's
-#      own storage retains the binding for future sessions.
+#   1. Native — the caller passes -NativeCommand { … } to Register-CliCompletion.
+#      The scriptblock is invoked and its stdout (verbatim
+#      `Register-ArgumentCompleter` source from e.g. `gh completion -s powershell`)
+#      is embedded in a sentinel-delimited block in the AllUsersAllHosts profile.
+#      Curated knowledge of which command goes with which CLI now lives in the
+#      OWNING bundle's install script — not in this helper — so adding or
+#      dropping a CLI never requires editing Utils.ps1.
+#   2. PSCompletions fallback — when no -NativeCommand is supplied (or its
+#      output is empty), this helper probes the PSCompletions catalog
+#      (abgox/PSCompletions). When the CLI is known to PSCompletions, the
+#      profile gets `Import-Module PSCompletions` and `psc add <cli>` is
+#      invoked at registration time so PSCompletions's own storage retains
+#      the binding for future sessions.
 #   3. Skip — no native command and no PSCompletions catalog entry.
 #
 # Persistence: the registration code is embedded directly in
@@ -509,22 +516,9 @@ function Install-BucketApp {
 # (`# ScoopBucket:CliCompletion:<cli>:BEGIN v1` / `:END`) give
 # idempotent per-CLI replace/append semantics.
 #
-# All state-changing operations honour SupportsShouldProcess; the public
-# Completions.ps1 entry point propagates -WhatIf / -Confirm.
+# All state-changing operations honour SupportsShouldProcess; callers
+# propagate -WhatIf / -Confirm through SupportsShouldProcess.
 # ============================================================================
-
-# Curated native-completion map. Each entry is the command this helper runs
-# to emit PowerShell registration source for the CLI. Add tools here as
-# they prove out — blind probing of unknown CLIs is intentionally avoided.
-$script:CliCompletionNativeMap = @{
-    'gh'      = { gh completion -s powershell 2>$null }
-    'rg'      = { rg --generate complete-powershell 2>$null }
-    'bw'      = { bw completion --shell powershell 2>$null }
-    'docker'  = { docker completion powershell 2>$null }
-    'copilot' = { copilot completion powershell 2>$null }
-    'gcloud'  = { gcloud --quiet --help-format=ps1 2>$null }  # gcloud ships its own; if this fails the CLI registers itself on shell init
-    'scoop'   = $null  # scoop-completion module handles this separately; treated as PSCompletions fallback
-}
 
 # Sentinel patterns. Bumping the trailing version invalidates older blocks
 # on the next force-refresh.
@@ -591,30 +585,35 @@ function Resolve-CliCompletionSource {
                        Code=<powershell text or $null>;
                        PSCompletionsName=<name or $null> }.
     .DESCRIPTION
-        Native curated map → PSCompletions catalog probe → Skipped.
-        Catalog probe uses `psc list` if the module is loaded;
-        otherwise treats every unknown CLI as a candidate (PSCompletions
-        will simply error at registration time if it has no definition).
+        Two strategies, in order:
+
+        1. Native — caller supplies -NativeCommand { … }. The scriptblock
+           is invoked and its stdout becomes the profile block. Native
+           completion lookup is no longer centralised in Utils.ps1; each
+           owning bundle declares its own per-CLI scriptblock.
+
+        2. PSCompletions catalog probe — used when no -NativeCommand is
+           passed (or its output is empty). Treats every CLI with a
+           matching `psc list` entry as a candidate.
+
+        Otherwise: Skipped.
     #>
     [OutputType([hashtable])]
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Cli)
+    param(
+        [Parameter(Mandatory)][string]$Cli,
+        [scriptblock]$NativeCommand
+    )
 
-    # Strategy 1: native curated map.
-    if ($script:CliCompletionNativeMap.ContainsKey($Cli)) {
-        $sb = $script:CliCompletionNativeMap[$Cli]
-        if ($sb) {
-            # Capture native output. If the CLI isn't installed, the
-            # subshell errors and we fall through; we still emit a
-            # guarded block so the profile re-evaluates on shell start.
-            $native = $null
-            try { $native = & $sb 2>$null | Out-String } catch { }
-            if ($native -and $native.Trim()) {
-                # Wrap with Get-Command guard so the profile is safe even
-                # when the CLI later gets uninstalled.
-                $guarded = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n$native}"
-                return @{ Source = 'Native'; Code = $guarded; PSCompletionsName = $null }
-            }
+    # Strategy 1: explicit native scriptblock supplied by the caller.
+    if ($NativeCommand) {
+        $native = $null
+        try { $native = & $NativeCommand 2>$null | Out-String } catch { }
+        if ($native -and $native.Trim()) {
+            # Wrap with Get-Command guard so the profile is safe even
+            # when the CLI later gets uninstalled.
+            $guarded = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n$native}"
+            return @{ Source = 'Native'; Code = $guarded; PSCompletionsName = $null }
         }
     }
 
@@ -686,11 +685,18 @@ function Register-CliCompletion {
         Register PowerShell tab-completion for a single CLI by embedding
         a sentinel-delimited block in the AllUsersAllHosts profile.
     .DESCRIPTION
-        Native curated commands preferred; PSCompletions fallback. Idempotent.
-        Honours -WhatIf / -Confirm via SupportsShouldProcess. Requires admin
-        (throws otherwise) unless -ProfilePath overrides.
+        Caller-supplied -NativeCommand preferred; PSCompletions fallback.
+        Idempotent. Honours -WhatIf / -Confirm via SupportsShouldProcess.
+        Requires admin (throws otherwise) unless -ProfilePath overrides.
     .PARAMETER Cli
         Bare command name (e.g. 'gh').
+    .PARAMETER NativeCommand
+        Scriptblock that emits the CLI's PowerShell completion source on
+        stdout, e.g. { gh completion -s powershell 2>$null }. When omitted
+        (or empty output), Register-CliCompletion falls through to the
+        PSCompletions catalog probe. Per-CLI native registration commands
+        live in the OWNING bundle script — not in this helper — so this
+        function stays generic.
     .PARAMETER Force
         Overwrite an existing block for the same CLI. Without -Force,
         existing blocks are preserved (no-op for already-registered CLIs).
@@ -705,6 +711,7 @@ function Register-CliCompletion {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)][string]$Cli,
+        [scriptblock]$NativeCommand,
         [switch]$Force,
         [string]$ProfilePath
     )
@@ -717,11 +724,30 @@ function Register-CliCompletion {
         }
     }
 
-    $resolved = Resolve-CliCompletionSource -Cli $Cli
+    # Short-circuit on an existing block when not forcing. We don't need to
+    # know what source *would* be resolved if the user-visible answer is
+    # "preserve what's already there".
+    $content  = Read-CompletionProfileContent -Path $target
+    $existed  = [regex]::IsMatch($content, "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:BEGIN \w+")
+    if ($existed -and -not $Force) {
+        return [pscustomobject]@{
+            Cli = $Cli; Source = 'Preserved'; Action = 'Preserved'
+            ProfilePath = $target; Reason = 'Existing block preserved; pass -Force to overwrite.'
+        }
+    }
+
+    $resolveSplat = @{ Cli = $Cli }
+    if ($NativeCommand) { $resolveSplat['NativeCommand'] = $NativeCommand }
+    $resolved = Resolve-CliCompletionSource @resolveSplat
     if ($resolved.Source -eq 'Skipped') {
+        $reason = if ($NativeCommand) {
+            "Native command produced no output for '$Cli' and PSCompletions has no catalog entry."
+        } else {
+            "No -NativeCommand supplied and PSCompletions has no catalog entry for '$Cli'."
+        }
         return [pscustomobject]@{
             Cli = $Cli; Source = 'Skipped'; Action = 'Skipped'; ProfilePath = $target
-            Reason = "No native completion command in curated map and PSCompletions has no definition for '$Cli'."
+            Reason = $reason
         }
     }
 
@@ -745,16 +771,7 @@ function Register-CliCompletion {
         }
     }
 
-    $content = Read-CompletionProfileContent -Path $target
     $ver     = $script:CompletionSentinelVersion
-    $pattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:BEGIN \w+"
-    $existed = [regex]::IsMatch($content, $pattern)
-    if ($existed -and -not $Force) {
-        return [pscustomobject]@{
-            Cli = $Cli; Source = $resolved.Source; Action = 'Preserved'
-            ProfilePath = $target; Reason = 'Existing block preserved; pass -Force to overwrite.'
-        }
-    }
 
     $shouldProcessAction = if ($existed) { "Replace completion block for '$Cli' ($($resolved.Source))" }
                            else         { "Add completion block for '$Cli' ($($resolved.Source))" }
@@ -814,6 +831,12 @@ function Register-AllCliCompletions {
         Idempotent. Default behaviour: only register CLIs that don't already
         have a profile block. Pass -Force to overwrite existing blocks.
         Returns the per-CLI result objects for the summary table.
+
+        No -NativeCommand can be passed here — by design, this sweep covers
+        only the PSCompletions fallback (and any per-CLI native blocks that
+        the owning bundle's install script already wrote via
+        Register-CliCompletion -NativeCommand). Bundles register their
+        own native completions; this function never invents one.
     .PARAMETER Force
         Forwarded to Register-CliCompletion. Default $false (no -Force flag).
     .PARAMETER ProfilePath
@@ -846,5 +869,63 @@ function Register-AllCliCompletions {
     # Summary
     $byAction = $results | Group-Object Action | ForEach-Object { "$($_.Name)=$($_.Count)" }
     Write-Host "Completion registration summary: $($byAction -join ', ')"
+    return @($results)
+}
+
+function Invoke-CliCompletionsSweep {
+    <#
+    .SYNOPSIS
+        Install the PSCompletions PowerShell module (if missing) and
+        register PSCompletions-fallback completion blocks for every CLI
+        on PATH. The on-demand equivalent of what scoop-installing this
+        bucket previously did via the standalone CliCompletions bundle.
+    .DESCRIPTION
+        Idempotent. Pass -Force to overwrite existing blocks.
+        Honours -WhatIf / -Confirm via SupportsShouldProcess. Native
+        per-CLI completion is OWNED by the bundle that installs the CLI
+        — bundle install scripts call Register-CliCompletion -NativeCommand
+        directly. This sweep covers the long tail (any CLI on PATH whose
+        owning bundle wasn't installed via this bucket) by registering a
+        PSCompletions catalog entry when one exists.
+    .PARAMETER Force
+        Overwrite existing per-CLI blocks. Also forwarded to
+        Install-PSCompletionsModule for an unconditional refresh.
+    .PARAMETER ProfilePath
+        Test hook: redirect profile writes to this file instead of
+        $PROFILE.AllUsersAllHosts.
+    .PARAMETER Names
+        Optional explicit list of CLIs. Defaults to every CommandType
+        =Application on PATH.
+    .OUTPUTS
+        PSCustomObject[] — same shape as Register-AllCliCompletions.
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    [OutputType([pscustomobject[]])]
+    param(
+        [switch]$Force,
+        [string]$ProfilePath,
+        [string[]]$Names
+    )
+
+    Write-Host 'Configuring PowerShell tab completion for installed CLI tools...'
+
+    # Ensure the PSCompletions fallback module is present (AllUsers). Idempotent.
+    Install-PSCompletionsModule -Force:$Force -WhatIf:$WhatIfPreference
+
+    $splat = @{ Force = [bool]$Force }
+    if ($ProfilePath) { $splat['ProfilePath'] = $ProfilePath }
+    if ($Names)       { $splat['Names']       = $Names }
+
+    $results = Register-AllCliCompletions @splat -WhatIf:$WhatIfPreference
+
+    # Emit a markdown-friendly summary table on the host stream.
+    if ($results) {
+        $results |
+            Sort-Object Source, Cli |
+            Format-Table -AutoSize Cli, Source, Action, Reason |
+            Out-String |
+            Write-Host
+    }
+
     return @($results)
 }

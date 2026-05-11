@@ -181,27 +181,24 @@ jobs:
           }
           Write-Host "Pinned CLI contract held: $($result.PassedCount)/$($result.TotalCount) checks passed."
 
-      - name: CLI completion — pinned curated map
+      - name: CLI completion — per-bundle native registration (pinned)
         if: always()
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
           $result = Invoke-Pester -Path "${{ github.workspace }}\bucket\CompletionPinned.Tests.ps1" -Tag Heavy,CompletionPinned -Output Detailed -PassThru
           if ($result.FailedCount -gt 0) {
-            Write-Host "::error::CLI completion curated map regressed: $($result.FailedCount) of $($result.TotalCount) checks failed."
+            Write-Host "::error::Per-bundle completion contract regressed: $($result.FailedCount) of $($result.TotalCount) checks failed."
             exit 1
           }
-          Write-Host "Curated completion map intact: $($result.PassedCount)/$($result.TotalCount) checks passed."
+          Write-Host "Per-bundle completion contract intact: $($result.PassedCount)/$($result.TotalCount) checks passed."
 
       - name: CLI completion — bundle entry-point + idempotency
         if: always()
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
-          $result = Invoke-Pester -Path @(
-            "${{ github.workspace }}\bucket\CliCompletions.Tests.ps1",
-            "${{ github.workspace }}\bucket\CompletionIdempotency.Tests.ps1"
-          ) -Tag Light,Bundle,Heavy,Idempotency -Output Detailed -PassThru
+          $result = Invoke-Pester -Path "${{ github.workspace }}\bucket\CompletionIdempotency.Tests.ps1" -Tag Heavy,Idempotency -Output Detailed -PassThru
           if ($result.FailedCount -gt 0) {
             Write-Host "::error::CLI completion bundle tests failed: $($result.FailedCount) of $($result.TotalCount)."
             exit 1

@@ -1,36 +1,47 @@
 # ----------------------------------------------------------------------------
-# Pinned contract for the curated CLI-completion native map.
+# Pinned contract for per-bundle CLI tab-completion registration.
 #
-# Locks the set of CLIs the bucket guarantees will get a tab-completion
-# block in the AllUsersAllHosts profile when their owning bundle is
-# installed. Regressions here mean either:
-#   (a) the curated map in Utils.ps1 silently lost an entry, or
-#   (b) the registration helper changed its sentinel format.
+# Each curated CLI must be registered by its owning bundle's install script
+# via `Register-CliCompletion -Cli <name> -NativeCommand { ... }`. This
+# replaces the old central `$CliCompletionNativeMap` in Utils.ps1 — knowledge
+# of how to generate completion for a given CLI now lives next to its
+# install, not in a shared catalog. Regressions here mean either:
+#   (a) a bundle silently lost its native-registration line, or
+#   (b) the helper signature changed.
 #
 # Tagged 'Heavy','CompletionPinned' so the standard fast suite is
 # unaffected. Validate-installs.yml will invoke this explicitly.
 # ----------------------------------------------------------------------------
 
-Describe 'CliCompletion pinned contract — curated native map' -Tag 'Heavy','CompletionPinned' {
+Describe 'CliCompletion pinned contract -- per-bundle native registration' -Tag 'Heavy','CompletionPinned' {
 
     BeforeAll {
         . (Join-Path $PSScriptRoot 'Utils.ps1')
     }
 
-    It 'includes <Cli> in the curated native map' -ForEach @(
-        @{ Cli = 'gh' }
-        @{ Cli = 'rg' }
-        @{ Cli = 'bw' }
-        @{ Cli = 'docker' }
-        @{ Cli = 'copilot' }
-        @{ Cli = 'gcloud' }
+    It '<Cli> is registered with -NativeCommand in <Bundle>' -ForEach @(
+        @{ Cli = 'gh';      Bundle = 'GitConfigure.ps1' }
+        @{ Cli = 'rg';      Bundle = 'OSBasePackages.ps1' }
+        @{ Cli = 'gcloud';  Bundle = 'OSBasePackages.ps1' }
+        @{ Cli = 'bw';      Bundle = 'ClientBasePackages.ps1' }
+        @{ Cli = 'copilot'; Bundle = 'AIAgents.ps1' }
     ) {
-        param($Cli)
-        $script:CliCompletionNativeMap.ContainsKey($Cli) |
-            Should -BeTrue -Because "the curated native map must continue to declare '$Cli'"
+        param($Cli, $Bundle)
+        $path = Join-Path $PSScriptRoot $Bundle
+        Test-Path $path | Should -BeTrue -Because "bundle script '$Bundle' must exist"
+        $content = Get-Content -Raw -Path $path
+        # Pattern: Register-CliCompletion ... -Cli <name> ... -NativeCommand
+        # Tolerant of param ordering and quoting.
+        $pattern = "(?ms)Register-CliCompletion\b[^\r\n]*?-Cli\s+['`"]?$([regex]::Escape($Cli))['`"]?\b[^\r\n]*?-NativeCommand"
+        $content | Should -Match $pattern -Because "'$Bundle' must call Register-CliCompletion -Cli $Cli -NativeCommand { ... }"
     }
 
     It 'uses sentinel version v1' {
         $script:CompletionSentinelVersion | Should -Be 'v1'
+    }
+
+    It 'Register-CliCompletion exposes the -NativeCommand parameter' {
+        (Get-Command Register-CliCompletion).Parameters.ContainsKey('NativeCommand') | Should -BeTrue
+        (Get-Command Register-CliCompletion).Parameters['NativeCommand'].ParameterType | Should -Be ([scriptblock])
     }
 }
