@@ -767,3 +767,54 @@ Describe 'Get-ScoopAppLeaf' {
         Get-ScoopAppLeaf -Name '7zip' | Should -Be '7zip'
     }
 }
+
+
+# ============================================================================
+# Add-Result (regression: negative ExitCode must format as unsigned hex
+# without throwing  see fix in PR for the line-78 [uint32] cast crash)
+# ============================================================================
+
+Describe 'Add-Result hex formatting for negative ExitCode' -Tag 'Unit' {
+    BeforeAll {
+        # Dot-source Add-Result in isolation.
+        $scriptPath = Join-Path $PSScriptRoot 'Test-Installs.ps1'
+        $scriptContent = Get-Content $scriptPath -Raw
+        if ($scriptContent -match '(?ms)(function\s+Add-Result\s*\{.+?\n\})') {
+            $script:Results = [System.Collections.ArrayList]::new()
+            Invoke-Expression $Matches[1]
+        } else {
+            throw 'Add-Result function not found in Test-Installs.ps1'
+        }
+    }
+
+    It 'does not throw for winget signed-negative exit code -1978335184' {
+        $output = & {
+            Add-Result -Name 'TestPackage' -PackageId 'Test.Package' `
+                -InstallerType 'winget' -SourceScript 'fake.ps1' `
+                -Command 'winget install --id Test.Package' `
+                -Status 'fail' -ExitCode -1978335184 -ErrorOutput 'simulated failure'
+        } *>&1
+        # Should produce the hex group header with 0x8A150030
+        ($output -join "`n") | Should -Match '0x8A150030'
+    }
+
+    It 'does not throw for ExitCode -1' {
+        $output = & {
+            Add-Result -Name 'TestPkg2' -PackageId 'Test.Pkg2' `
+                -InstallerType 'choco' -SourceScript 'fake.ps1' `
+                -Command 'choco install test' `
+                -Status 'fail' -ExitCode -1 -ErrorOutput 'simulated'
+        } *>&1
+        ($output -join "`n") | Should -Match '0xFFFFFFFF'
+    }
+
+    It 'formats positive ExitCode correctly' {
+        $output = & {
+            Add-Result -Name 'TestPkg3' -PackageId 'Test.Pkg3' `
+                -InstallerType 'winget' -SourceScript 'fake.ps1' `
+                -Command 'winget install --id Test.Pkg3' `
+                -Status 'fail' -ExitCode 1 -ErrorOutput 'simulated'
+        } *>&1
+        ($output -join "`n") | Should -Match '0x00000001'
+    }
+}
