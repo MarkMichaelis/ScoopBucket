@@ -75,7 +75,17 @@ function Add-Result {
     # doesn't require a special re-run to learn the real cause.  Wrapped in a
     # GitHub Actions log group so the workflow log stays readable.
     if ($Status -eq 'fail' -and -not [string]::IsNullOrWhiteSpace($ErrorOutput)) {
-        $hex = '0x{0:X8}' -f ([uint32]([int]$ExitCode -band 0xFFFFFFFF))
+        # Format the exit code as unsigned hex.  Cannot use ([uint32]($ExitCode -band 0xFFFFFFFF))
+        # because PowerShell's 0xFFFFFFFF literal is int (-1), so -band preserves the
+        # signed value and the [uint32] cast then fails on any negative exit code (e.g.
+        # winget's -1978335184).  BitConverter reinterprets the int32 bit pattern as uint32.
+        # Wrapped in try/catch so a formatting bug here can never abort the install loop
+        # (which is exactly what bit us before the fix).
+        try {
+            $hex = '0x{0:X8}' -f [BitConverter]::ToUInt32([BitConverter]::GetBytes([int32]$ExitCode), 0)
+        } catch {
+            $hex = "(hex-format-failed: $($_.Exception.Message))"
+        }
         Write-Host "::group::[$InstallerType] $Name failure output (exit $ExitCode / $hex)"
         Write-Host $ErrorOutput
         Write-Host "::endgroup::"
