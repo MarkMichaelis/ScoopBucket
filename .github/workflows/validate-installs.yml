@@ -113,6 +113,14 @@ jobs:
           Set-ExecutionPolicy Bypass -Scope Process -Force
           & "${{ github.workspace }}\.github\scripts\Test-Installs.ps1"
 
+      - name: Apply post-install hooks (PATH/shim sidecars)
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          & "${{ github.workspace }}\.github\scripts\Invoke-PostInstallHooks.ps1"
+
       - name: CLI availability discovery (#45 Phase 2, non-failing)
         if: always()
         continue-on-error: true

@@ -505,6 +505,30 @@ function Get-PackagesFromScript {
         }
     }
 
+    # --- 4b. Standalone scoop install (e.g. `scoop install ffmpeg`,
+    #         `scoop install extras/sysinternals`).  Bare-positional, NOT
+    #         inside a `... | ForEach-Object` pipeline (handled by --- 2 ---).
+    foreach ($line in $lines) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^\s*#') { continue }
+        if ($trimmed -match '\$_') { continue }
+        if ($trimmed -match '^\s*scoop\s+install\s+(?:-g\s+)?([A-Za-z0-9][\w\-/.]*)\s*$') {
+            $pkgName = $Matches[1]
+            $key = "scoop:$pkgName"
+            if ($foundPackageIds.ContainsKey($key)) { continue }
+            $foundPackageIds[$key] = $true
+
+            $null = $packages.Add([PSCustomObject]@{
+                Name           = $pkgName
+                PackageId      = $pkgName
+                InstallerType  = 'scoop'
+                SourceScript   = $scriptName
+                Scope          = ''
+                AdditionalArgs = ''
+            })
+        }
+    }
+
     # --- 5. Install-Module commands ---
     foreach ($line in $lines) {
         $trimmed = $line.Trim()
