@@ -86,8 +86,8 @@ $ExpectedCliOverrides = @{
     'dbxcli'                                               = 'dbxcli'
     'eSpeak-NG.eSpeak-NG'                                  = 'espeak-ng'
     'ScooterSoftware.BeyondCompare.4'                      = 'bcompare'
+    'extras/beyondcompare'                                 = 'bcompare'
     'calibre.calibre'                                      = 'calibre'
-    'Anthropic.Claude'                                     = 'claude'
     'MarkMichaelis/ClaudeCode'                             = 'claude'
     'MarkMichaelis/Codex'                                  = 'codex'
     'MarkMichaelis/GeminiCli'                              = 'gemini'
@@ -105,12 +105,28 @@ $NoCliPackages = @(
     'Google.Chrome','voidtools.Everything','WinDirStat.WinDirStat',
     'Microsoft.Sysinternals.ProcessExplorer','Microsoft.Sysinternals.Suite',
     'WindowsPostInstallWizard.UniversalSilentSwitchFinder',
-    '9NT1R1C2HH7J','9NRQBLR605RG','XPDDXX9QW8N9D7','9NKSQGP7F2NH',
+    '9NT1R1C2HH7J','9NRQBLR605RG','XPDDXX9QW8N9D7','9NKSQGP7F2NH','XPDNSF6TXN2R6Z',
     'gitextensions','gitkraken','git-credential-manager-for-windows',
-    'Microsoft-Teams','Office365ProPlus','foxitreader','geosetter',
-    'TotalCommander','MarkMichaelis/ChatGPT',
+    'Microsoft-Teams','Office365ProPlus','foxitreader','Foxit.FoxitReader',
+    'geosetter','TotalCommander','MarkMichaelis/ChatGPT',
     'MarkMichaelis/Claude','MarkMichaelis/Gemini','MarkMichaelis/MicrosoftCopilot',
-    'MarkMichaelis/ClaudeExcel','MarkMichaelis/AIAgents'
+    'MarkMichaelis/ClaudeExcel','MarkMichaelis/AIAgents',
+    # Scoop GUI desktop apps (separate from corresponding CLI packages above)
+    'extras/claude','extras/notion','extras/spotify',
+    # Bundle of tools (procexp/procmon/psexec/...); availability handled by
+    # adding the install dir to Machine PATH in OSBasePackages.ps1, not by
+    # probing for a single binary called "sysinternals".
+    'extras/sysinternals',
+    # PS modules / chocolatey-internal packages without a CLI surface.
+    'au','Pester','chocolatey-core.extension',
+    # Anthropic.Claude is the desktop GUI; the CLI ships as Anthropic.ClaudeCode
+    # (mapped via MarkMichaelis/ClaudeCode override above).
+    'Anthropic.Claude',
+    # Parser-defense: the .EXAMPLE comment in Utils.ps1 used to slip "VisualStudio"
+    # past the choco-install regex.  The Strip-comment-blocks pass below is the
+    # primary fix; this entry is belt-and-braces in case someone re-introduces
+    # an .EXAMPLE doc that mentions a literal `choco install VisualStudio`.
+    'VisualStudio'
 )
 
 function Get-ExpectedCliName {
@@ -147,6 +163,40 @@ function Get-ExpectedCliName {
 
 $script:FindBinaryScript  = Join-Path $PSScriptRoot 'Find-PackageBinary.ps1'
 $script:HelpProbeScript   = Join-Path $PSScriptRoot 'Test-CliHelpFlag.ps1'
+
+function Update-PathFromRegistry {
+    <#
+    .SYNOPSIS
+        Refresh $env:Path with the current Machine + User PATH from the registry.
+    .DESCRIPTION
+        Installer programs (winget, scoop -g, choco) write to the *Machine* PATH
+        in the registry, but a long-running PowerShell process inherits its
+        $env:Path snapshot at start-up and never re-reads it.  In CI that means
+        every CLI installed during the same job appears "missing on PATH" even
+        though a fresh shell would see it (issue surfaced by run 25642136341 —
+        bw/rg/copilot/fzf/bat/es all sat in C:\Program Files\WinGet\Links\
+        which Machine PATH knew about but our pwsh process didn't).
+
+        Call this once after install batches and before CLI probing.  Idempotent.
+    #>
+    $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $user    = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $current = $env:Path
+    $segments = @()
+    foreach ($src in @($machine, $user, $current)) {
+        if (-not $src) { continue }
+        foreach ($p in ($src -split ';')) {
+            $p = $p.Trim()
+            if ($p -and ($segments -notcontains $p)) { $segments += $p }
+        }
+    }
+    $env:Path = $segments -join ';'
+}
+
+# Refresh PATH from the registry so freshly-installed CLIs (whose installers
+# updated Machine PATH after this process started) become discoverable to the
+# Get-Command probe below.
+Update-PathFromRegistry
 
 function New-Record {
     param(
@@ -229,9 +279,13 @@ foreach ($file in $bundleScripts) {
     $scriptName = $file.Name
     $content    = Get-Content -Path $file.FullName -Raw
 
-    # Strip line-leading comments so commented-out installs are ignored.
+    # Strip multi-line comment-help blocks (<# ... #>) first so .EXAMPLE
+    # snippets (e.g. "choco install VisualStudio -y --force" inside Utils.ps1's
+    # comment header) aren't parsed as real installs.  Then strip line-leading
+    # # comments so commented-out installs are also ignored.
+    $stripped = [regex]::Replace($content, '(?s)<#.*?#>', '')
     $sanitizedLines = @()
-    foreach ($line in ($content -split "`r?`n")) {
+    foreach ($line in ($stripped -split "`r?`n")) {
         if ($line -match '^\s*#') { $sanitizedLines += '' } else { $sanitizedLines += $line }
     }
     $sanitized = $sanitizedLines -join "`n"

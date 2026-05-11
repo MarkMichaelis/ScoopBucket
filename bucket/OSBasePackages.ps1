@@ -37,4 +37,23 @@ scoop install ffmpeg
 Write-Host 'Installing sysinternals suite (scoop extras)...'
 scoop install extras/sysinternals
 
+# extras/sysinternals unpacks the suite (procexp, procmon, psexec, handle, ...)
+# but does NOT shim individual tools.  Append the install directory to Machine
+# PATH so every tool in the suite is callable from the command line.
+# Idempotent: only adds the entry if it isn't already present.
+$siDir = $null
+try { $siDir = (& scoop prefix sysinternals 2>$null | Select-Object -First 1) } catch { }
+if ($siDir -and (Test-Path $siDir)) {
+    $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $alreadyPresent = ($machinePath -split ';' | Where-Object { $_.TrimEnd('\') -ieq $siDir.TrimEnd('\') })
+    if (-not $alreadyPresent) {
+        [Environment]::SetEnvironmentVariable('Path', "$machinePath;$siDir", 'Machine')
+        Write-Host "  Added sysinternals dir to Machine PATH: $siDir"
+    } else {
+        Write-Host "  sysinternals dir already on Machine PATH: $siDir"
+    }
+} else {
+    Write-Warning "  Could not resolve sysinternals install dir via 'scoop prefix sysinternals'"
+}
+
 
