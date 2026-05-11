@@ -95,8 +95,13 @@ Remove-Item "$env:TEMP\ReadwiseReader.msix" -ErrorAction Ignore
 # Tab-completion registration: idempotent best-effort. Skipped (with a
 # warning) when the session isn't elevated so a normal scoop reinstall
 # still succeeds for users without admin rights.
+#
+# Per-CLI native registration commands are co-located with this bundle
+# (which owns the corresponding install). Adding or removing a CLI here
+# requires no edit to Utils.ps1.
 try {
-    Register-AllCliCompletions -Force -Confirm:$false -ErrorAction Stop | Out-Null
+    Register-CliCompletion -Cli bw -NativeCommand { bw completion --shell powershell 2>$null } -Force -Confirm:$false -ErrorAction Stop | Out-Null
+    Invoke-CliCompletionsSweep -Force -Confirm:$false -ErrorAction Stop | Out-Null
 }
 catch {
     Write-Warning "Skipping CLI tab-completion registration: $($_.Exception.Message)"

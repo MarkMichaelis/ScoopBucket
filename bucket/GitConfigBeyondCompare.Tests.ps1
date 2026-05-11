@@ -29,4 +29,21 @@ Describe "Install $name" -Tag 'Heavy', 'Install' {
         }
         git config --global diff.tool | Should -Be 'bc'
     }
+
+    It 'discovers a registry-recorded Beyond Compare install when present' {
+        . "$PSScriptRoot\GitConfigBeyondCompare.ps1" *>$null
+        $regDir = Get-BeyondCompareDirFromRegistry
+        $anyKey = (Test-Path 'HKCU:\SOFTWARE\Scooter Software') -or
+                  (Test-Path 'HKLM:\SOFTWARE\Scooter Software') -or
+                  (Test-Path 'HKLM:\SOFTWARE\WOW6432Node\Scooter Software')
+        if (-not $anyKey) {
+            Set-ItResult -Skipped -Because 'No Scooter Software registry keys on this machine'
+            return
+        }
+        if (-not $regDir) {
+            Set-ItResult -Skipped -Because 'Scooter Software key exists but no usable BComp.exe was found via registry probe'
+            return
+        }
+        Test-Path (Join-Path $regDir 'BComp.exe') | Should -Be $true
+    }
 }

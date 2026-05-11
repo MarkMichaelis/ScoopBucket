@@ -12,9 +12,28 @@ Describe 'CliCompletion idempotency' -Tag 'Heavy','Idempotency' {
         New-Item -ItemType Directory -Path $script:sandbox -Force | Out-Null
         $script:profilePath = Join-Path $script:sandbox 'Profile.ps1'
 
-        # Use a small deterministic set so the test doesn't depend on
-        # whatever happens to be on the developer's PATH.
+        # Native-command fixture: emit deterministic per-CLI source so the
+        # test never depends on which CLIs happen to be on PATH or whether
+        # PSCompletions is installed.
+        function script:New-NativeFixture {
+            param([string]$Cli)
+            [scriptblock]::Create("Write-Output 'Register-ArgumentCompleter -CommandName $Cli -ScriptBlock { }'")
+        }
         $script:names = @('gh','rg','docker','copilot')
+
+        function script:Invoke-FixtureRegistration {
+            param([string]$ProfilePath, [string[]]$Names, [switch]$Force)
+            foreach ($n in $Names) {
+                $splat = @{
+                    Cli           = $n
+                    NativeCommand = (New-NativeFixture $n)
+                    ProfilePath   = $ProfilePath
+                    Confirm       = $false
+                }
+                if ($Force) { $splat['Force'] = $true }
+                Register-CliCompletion @splat | Out-Null
+            }
+        }
     }
 
     AfterAll {
@@ -24,9 +43,9 @@ Describe 'CliCompletion idempotency' -Tag 'Heavy','Idempotency' {
     }
 
     It 'two -Force runs produce byte-identical profile content' {
-        Register-AllCliCompletions -Force -ProfilePath $script:profilePath -Names $script:names | Out-Null
+        Invoke-FixtureRegistration -ProfilePath $script:profilePath -Names $script:names -Force
         $first = [System.IO.File]::ReadAllBytes($script:profilePath)
-        Register-AllCliCompletions -Force -ProfilePath $script:profilePath -Names $script:names | Out-Null
+        Invoke-FixtureRegistration -ProfilePath $script:profilePath -Names $script:names -Force
         $second = [System.IO.File]::ReadAllBytes($script:profilePath)
         $first.Length | Should -Be $second.Length
         for ($i = 0; $i -lt $first.Length; $i++) {
@@ -34,37 +53,28 @@ Describe 'CliCompletion idempotency' -Tag 'Heavy','Idempotency' {
         }
     }
 
-    It 'second run produces at most one :BEGIN block per CLI' {
+    It 'second run produces exactly one :BEGIN block per CLI' {
         $content = Get-Content -Raw -Path $script:profilePath
         foreach ($n in $script:names) {
             $pattern = "# ScoopBucket:CliCompletion:$n`:BEGIN"
             $count = ([regex]::Matches($content, [regex]::Escape($pattern))).Count
-            # Could be 0 (no native completion / no PSCompletions def) or
-            # exactly 1 — never more.
-            $count | Should -BeLessOrEqual 1
+            $count | Should -Be 1 -Because "every fixture CLI emits one and only one block per profile"
         }
     }
 
     It '-Force:$false preserves a manually-modified block' {
-        # Seed with -Force, then mutate the gh block, then re-run without
-        # -Force; the mutated block must survive.
-        Register-AllCliCompletions -Force -ProfilePath $script:profilePath -Names @('gh') | Out-Null
+        Invoke-FixtureRegistration -ProfilePath $script:profilePath -Names @('gh') -Force
         $content = Get-Content -Raw -Path $script:profilePath
-        if ($content -match '# ScoopBucket:CliCompletion:gh:BEGIN') {
-            $mutated = $content -replace 'Get-Command gh','Get-Command gh # USER MUTATION'
-            [System.IO.File]::WriteAllText($script:profilePath, $mutated, [System.Text.UTF8Encoding]::new($false))
-            Register-AllCliCompletions -ProfilePath $script:profilePath -Names @('gh') | Out-Null
-            $after = Get-Content -Raw -Path $script:profilePath
-            $after | Should -Match 'USER MUTATION'
-        }
-        else {
-            Set-ItResult -Skipped -Because "'gh' has no native completion available in this environment; mutation case n/a."
-        }
+        $mutated = $content -replace 'Register-ArgumentCompleter -CommandName gh','Register-ArgumentCompleter -CommandName gh # USER MUTATION'
+        [System.IO.File]::WriteAllText($script:profilePath, $mutated, [System.Text.UTF8Encoding]::new($false))
+        Invoke-FixtureRegistration -ProfilePath $script:profilePath -Names @('gh')   # no -Force
+        $after = Get-Content -Raw -Path $script:profilePath
+        $after | Should -Match 'USER MUTATION'
     }
 
     It '-WhatIf does not touch the profile file' {
         $tempProfile = Join-Path $script:sandbox 'WhatIfProfile.ps1'
-        Register-AllCliCompletions -Force -WhatIf -ProfilePath $tempProfile -Names @('gh') | Out-Null
+        Register-CliCompletion -Cli gh -NativeCommand (New-NativeFixture 'gh') -Force -WhatIf -ProfilePath $tempProfile -Confirm:$false | Out-Null
         (Test-Path $tempProfile) | Should -Be $false
     }
 }
