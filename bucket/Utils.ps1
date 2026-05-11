@@ -490,3 +490,361 @@ function Install-BucketApp {
         scoop install "MarkMichaelis/$Name"
     }
 }
+
+# ============================================================================
+# PowerShell tab-completion registration for installed CLI tools.
+#
+# Two-tier strategy per CLI:
+#   1. Native — emit the verbatim output of `<cli> completion powershell`
+#      (or the curated equivalent in $script:CliCompletionNativeMap) into
+#      a sentinel-delimited block in the AllUsersAllHosts profile.
+#   2. PSCompletions fallback — emit `Import-Module PSCompletions` (once)
+#      and call `psc add <cli>` at registration time so PSCompletions's
+#      own storage retains the binding for future sessions.
+#   3. Skip — no native command and no PSCompletions catalog entry.
+#
+# Persistence: the registration code is embedded directly in
+# `$PSHOME\Profile.ps1` (AllUsersAllHosts), so every PowerShell host for
+# every user picks it up on startup. Per-CLI sentinel blocks
+# (`# ScoopBucket:CliCompletion:<cli>:BEGIN v1` / `:END`) give
+# idempotent per-CLI replace/append semantics.
+#
+# All state-changing operations honour SupportsShouldProcess; the public
+# Completions.ps1 entry point propagates -WhatIf / -Confirm.
+# ============================================================================
+
+# Curated native-completion map. Each entry is the command this helper runs
+# to emit PowerShell registration source for the CLI. Add tools here as
+# they prove out — blind probing of unknown CLIs is intentionally avoided.
+$script:CliCompletionNativeMap = @{
+    'gh'      = { gh completion -s powershell 2>$null }
+    'rg'      = { rg --generate complete-powershell 2>$null }
+    'bw'      = { bw completion --shell powershell 2>$null }
+    'docker'  = { docker completion powershell 2>$null }
+    'copilot' = { copilot completion powershell 2>$null }
+    'gcloud'  = { gcloud --quiet --help-format=ps1 2>$null }  # gcloud ships its own; if this fails the CLI registers itself on shell init
+    'scoop'   = $null  # scoop-completion module handles this separately; treated as PSCompletions fallback
+}
+
+# Sentinel patterns. Bumping the trailing version invalidates older blocks
+# on the next force-refresh.
+$script:CompletionSentinelVersion = 'v1'
+
+function Test-IsElevated {
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param()
+    if (-not $IsWindows -and ($PSVersionTable.PSEdition -eq 'Core')) {
+        # Non-Windows: assume elevated if running as root.
+        return ((whoami) -eq 'root')
+    }
+    $current = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object System.Security.Principal.WindowsPrincipal($current)
+    return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-CompletionProfilePath {
+    <#
+    .SYNOPSIS
+        Return the AllUsersAllHosts profile path. Throws if not writable;
+        emits Write-Information and returns $null if the host has no
+        AllUsersAllHosts profile (rare; tracked as a separate issue).
+    .PARAMETER OverridePath
+        Test hook: bypass $PROFILE.AllUsersAllHosts and admin checks.
+        Used by Pester to redirect the helper to a sandbox file.
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param([string]$OverridePath)
+
+    if ($OverridePath) { return $OverridePath }
+
+    $target = $PROFILE.AllUsersAllHosts
+    if ([string]::IsNullOrWhiteSpace($target)) {
+        Write-Information "Host has no AllUsersAllHosts profile path; completion registration skipped. Filed as follow-up." -InformationAction Continue
+        return $null
+    }
+    if (-not (Test-IsElevated)) {
+        throw "Completion registration requires an elevated PowerShell session (target: $target). Re-run from an Administrator prompt."
+    }
+    # Probe writability by ensuring the parent exists and we can open the
+    # file for append. Don't actually write anything.
+    $dir = Split-Path -Parent $target
+    if (-not (Test-Path $dir)) {
+        try { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        catch { throw "Cannot create AllUsersAllHosts profile directory '$dir': $($_.Exception.Message)" }
+    }
+    try {
+        $fs = [System.IO.File]::Open($target, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::ReadWrite)
+        $fs.Dispose()
+    } catch {
+        throw "AllUsersAllHosts profile '$target' is not writable: $($_.Exception.Message). Re-run elevated."
+    }
+    return $target
+}
+
+function Resolve-CliCompletionSource {
+    <#
+    .SYNOPSIS
+        For a given CLI, return a hashtable describing how to register
+        completion: @{ Source='Native'|'PSCompletions'|'Skipped';
+                       Code=<powershell text or $null>;
+                       PSCompletionsName=<name or $null> }.
+    .DESCRIPTION
+        Native curated map → PSCompletions catalog probe → Skipped.
+        Catalog probe uses `psc list` if the module is loaded;
+        otherwise treats every unknown CLI as a candidate (PSCompletions
+        will simply error at registration time if it has no definition).
+    #>
+    [OutputType([hashtable])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Cli)
+
+    # Strategy 1: native curated map.
+    if ($script:CliCompletionNativeMap.ContainsKey($Cli)) {
+        $sb = $script:CliCompletionNativeMap[$Cli]
+        if ($sb) {
+            # Capture native output. If the CLI isn't installed, the
+            # subshell errors and we fall through; we still emit a
+            # guarded block so the profile re-evaluates on shell start.
+            $native = $null
+            try { $native = & $sb 2>$null | Out-String } catch { }
+            if ($native -and $native.Trim()) {
+                # Wrap with Get-Command guard so the profile is safe even
+                # when the CLI later gets uninstalled.
+                $guarded = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n$native}"
+                return @{ Source = 'Native'; Code = $guarded; PSCompletionsName = $null }
+            }
+        }
+    }
+
+    # Strategy 2: PSCompletions fallback.
+    $pscModule = Get-Module -ListAvailable -Name PSCompletions | Select-Object -First 1
+    if ($pscModule) {
+        # Best-effort: try to add the completion now. If PSCompletions
+        # has no definition for this CLI, the add call surfaces an error
+        # which we suppress and treat as "skipped".
+        try {
+            Import-Module PSCompletions -ErrorAction Stop
+            $listOutput = & psc list 2>$null | Out-String
+            if ($listOutput -match "(?im)^\s*$([regex]::Escape($Cli))(\s|$)") {
+                $code = "if (Get-Command psc -ErrorAction SilentlyContinue) {`r`n    Import-Module PSCompletions -ErrorAction SilentlyContinue`r`n}"
+                return @{ Source = 'PSCompletions'; Code = $code; PSCompletionsName = $Cli }
+            }
+        } catch { }
+    }
+
+    return @{ Source = 'Skipped'; Code = $null; PSCompletionsName = $null }
+}
+
+function Read-CompletionProfileContent {
+    [OutputType([string])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    if (Test-Path $Path) { return (Get-Content -Path $Path -Raw -Encoding UTF8) }
+    return ''
+}
+
+function Set-CompletionProfileBlock {
+    <#
+    .SYNOPSIS
+        Insert or replace a sentinel-delimited completion block for $Cli
+        in the profile $Content. Returns the new content. Idempotent:
+        identical inputs produce byte-identical output.
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
+        [Parameter(Mandatory)][string]$Cli,
+        [Parameter(Mandatory)][string]$Block,
+        [switch]$Force
+    )
+    $ver = $script:CompletionSentinelVersion
+    $begin = "# ScoopBucket:CliCompletion:$Cli`:BEGIN $ver"
+    $end   = "# ScoopBucket:CliCompletion:$Cli`:END"
+    $pattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:BEGIN \w+.*?^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:END\r?\n?"
+    $newBlock = "$begin`r`n$Block`r`n$end`r`n"
+    $match = [regex]::Match($Content, $pattern)
+    if ($match.Success) {
+        if (-not $Force) { return $Content }  # preserve existing
+        # String-concat (not regex Replace) so the new block can contain
+        # unescaped $ / \ without being interpreted as substitution syntax.
+        $before = $Content.Substring(0, $match.Index)
+        $after  = $Content.Substring($match.Index + $match.Length)
+        return $before + $newBlock + $after
+    }
+    # Append. Normalise trailing newlines to exactly one before the new block.
+    $trimmed = $Content.TrimEnd("`r","`n")
+    if ($trimmed) { return "$trimmed`r`n`r`n$newBlock" }
+    return $newBlock
+}
+
+function Register-CliCompletion {
+    <#
+    .SYNOPSIS
+        Register PowerShell tab-completion for a single CLI by embedding
+        a sentinel-delimited block in the AllUsersAllHosts profile.
+    .DESCRIPTION
+        Native curated commands preferred; PSCompletions fallback. Idempotent.
+        Honours -WhatIf / -Confirm via SupportsShouldProcess. Requires admin
+        (throws otherwise) unless -ProfilePath overrides.
+    .PARAMETER Cli
+        Bare command name (e.g. 'gh').
+    .PARAMETER Force
+        Overwrite an existing block for the same CLI. Without -Force,
+        existing blocks are preserved (no-op for already-registered CLIs).
+    .PARAMETER ProfilePath
+        Test hook: write to this file instead of AllUsersAllHosts.
+        Bypasses the elevation check.
+    .OUTPUTS
+        PSCustomObject with Cli, Source (Native/PSCompletions/Skipped),
+        Action (Added/Replaced/Preserved/Skipped/WhatIf), and ProfilePath.
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$Cli,
+        [switch]$Force,
+        [string]$ProfilePath
+    )
+
+    $target = Get-CompletionProfilePath -OverridePath $ProfilePath
+    if (-not $target) {
+        return [pscustomobject]@{
+            Cli = $Cli; Source = 'Skipped'; Action = 'Skipped'; ProfilePath = $null
+            Reason = 'No AllUsersAllHosts profile path available on this host.'
+        }
+    }
+
+    $resolved = Resolve-CliCompletionSource -Cli $Cli
+    if ($resolved.Source -eq 'Skipped') {
+        return [pscustomobject]@{
+            Cli = $Cli; Source = 'Skipped'; Action = 'Skipped'; ProfilePath = $target
+            Reason = "No native completion command in curated map and PSCompletions has no definition for '$Cli'."
+        }
+    }
+
+    # If PSCompletions, ask the module to add the binding now (idempotent
+    # via -Force in PSCompletions's storage).
+    if ($resolved.Source -eq 'PSCompletions') {
+        $pscAction = "psc add $Cli" + ($(if ($Force) { ' (re-add)' } else { '' }))
+        if ($PSCmdlet.ShouldProcess($Cli, $pscAction)) {
+            try {
+                Import-Module PSCompletions -ErrorAction Stop
+                # `psc add` doesn't expose a -Force switch; re-running it
+                # against an already-added CLI is a benign no-op, so a
+                # single unconditional call covers both Force and no-Force
+                # semantics for the PSCompletions side. The sentinel
+                # block in the profile still respects -Force for replace
+                # vs preserve.
+                & psc add $Cli 2>$null | Out-Null
+            } catch {
+                Write-Warning "psc add $Cli failed: $($_.Exception.Message)"
+            }
+        }
+    }
+
+    $content = Read-CompletionProfileContent -Path $target
+    $ver     = $script:CompletionSentinelVersion
+    $pattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:BEGIN \w+"
+    $existed = [regex]::IsMatch($content, $pattern)
+    if ($existed -and -not $Force) {
+        return [pscustomobject]@{
+            Cli = $Cli; Source = $resolved.Source; Action = 'Preserved'
+            ProfilePath = $target; Reason = 'Existing block preserved; pass -Force to overwrite.'
+        }
+    }
+
+    $shouldProcessAction = if ($existed) { "Replace completion block for '$Cli' ($($resolved.Source))" }
+                           else         { "Add completion block for '$Cli' ($($resolved.Source))" }
+    if (-not $PSCmdlet.ShouldProcess($target, $shouldProcessAction)) {
+        return [pscustomobject]@{
+            Cli = $Cli; Source = $resolved.Source; Action = 'WhatIf'
+            ProfilePath = $target; Reason = '-WhatIf or -Confirm declined.'
+        }
+    }
+
+    $newContent = Set-CompletionProfileBlock -Content $content -Cli $Cli -Block $resolved.Code -Force:$true
+    # Atomic write: temp file + Move-Item ensures we never leave the
+    # profile half-written on failure.
+    $tmp = "$target.tmp"
+    [System.IO.File]::WriteAllText($tmp, $newContent, [System.Text.UTF8Encoding]::new($false))
+    Move-Item -Path $tmp -Destination $target -Force
+
+    return [pscustomobject]@{
+        Cli = $Cli; Source = $resolved.Source
+        Action = $(if ($existed) { 'Replaced' } else { 'Added' })
+        ProfilePath = $target; Reason = $null
+    }
+}
+
+function Install-PSCompletionsModule {
+    <#
+    .SYNOPSIS
+        Idempotently ensure the PSCompletions PowerShell module is installed
+        at AllUsers scope. Skip if already present.
+    .PARAMETER Force
+        Pass -Force to Install-Module for an unconditional refresh.
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    param([switch]$Force)
+
+    if (-not $Force -and (Get-Module -ListAvailable -Name PSCompletions)) {
+        Write-Verbose 'PSCompletions module already installed; skipping.'
+        return
+    }
+    if ($PSCmdlet.ShouldProcess('PSCompletions module', "Install-Module -Scope AllUsers$(if ($Force) { ' -Force' })")) {
+        try {
+            $params = @{ Name = 'PSCompletions'; Scope = 'AllUsers'; AllowClobber = $true; ErrorAction = 'Stop' }
+            if ($Force) { $params['Force'] = $true }
+            Install-Module @params
+        } catch {
+            Write-Warning "Install-Module PSCompletions failed: $($_.Exception.Message). PSCompletions fallback will be unavailable."
+        }
+    }
+}
+
+function Register-AllCliCompletions {
+    <#
+    .SYNOPSIS
+        Enumerate every CLI on the machine (Get-Command -CommandType Application,
+        de-duped by base name) and call Register-CliCompletion for each.
+    .DESCRIPTION
+        Idempotent. Default behaviour: only register CLIs that don't already
+        have a profile block. Pass -Force to overwrite existing blocks.
+        Returns the per-CLI result objects for the summary table.
+    .PARAMETER Force
+        Forwarded to Register-CliCompletion. Default $false (no -Force flag).
+    .PARAMETER ProfilePath
+        Test hook for Pester: redirect writes to a sandbox file.
+    .PARAMETER Names
+        Test hook: bypass Get-Command enumeration and use this list instead.
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    [OutputType([pscustomobject[]])]
+    param(
+        [switch]$Force,
+        [string]$ProfilePath,
+        [string[]]$Names
+    )
+
+    if (-not $Names) {
+        $Names = Get-Command -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Name -Unique |
+            ForEach-Object { [System.IO.Path]::GetFileNameWithoutExtension($_) } |
+            Sort-Object -Unique
+    }
+
+    $results = foreach ($n in $Names) {
+        # Forward both Force and the parent's ShouldProcess preferences so
+        # -WhatIf / -Confirm propagate through.
+        Register-CliCompletion -Cli $n -Force:$Force -ProfilePath $ProfilePath `
+            -WhatIf:$WhatIfPreference -Confirm:$false
+    }
+
+    # Summary
+    $byAction = $results | Group-Object Action | ForEach-Object { "$($_.Name)=$($_.Count)" }
+    Write-Host "Completion registration summary: $($byAction -join ', ')"
+    return @($results)
+}

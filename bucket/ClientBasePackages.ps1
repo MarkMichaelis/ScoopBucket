@@ -90,3 +90,14 @@ Invoke-WebRequest -Uri 'https://readwise.io/read/download_latest/desktop/windows
 Add-AppxPackage -Path "$env:TEMP\ReadwiseReader.msix"
 Remove-Item "$env:TEMP\ReadwiseReader.msix" -ErrorAction Ignore
 
+
+
+# Tab-completion registration: idempotent best-effort. Skipped (with a
+# warning) when the session isn't elevated so a normal scoop reinstall
+# still succeeds for users without admin rights.
+try {
+    Register-AllCliCompletions -Force -Confirm:$false -ErrorAction Stop | Out-Null
+}
+catch {
+    Write-Warning "Skipping CLI tab-completion registration: $($_.Exception.Message)"
+}
