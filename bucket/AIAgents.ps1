@@ -326,3 +326,14 @@ if ($Reset) {
         Remove-McpServerFromCodex -ServerName $name
     }
 }
+
+
+# Tab-completion registration: idempotent best-effort. Skipped (with a
+# warning) when the session isn't elevated so a normal scoop reinstall
+# still succeeds for users without admin rights.
+try {
+    Register-AllCliCompletions -Force -Confirm:$false -ErrorAction Stop | Out-Null
+}
+catch {
+    Write-Warning "Skipping CLI tab-completion registration: $($_.Exception.Message)"
+}
