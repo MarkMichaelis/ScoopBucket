@@ -21,7 +21,9 @@ Describe "Install $name" -Tag 'Heavy', 'Install' {
     }
 
     It 'configures the bc difftool when Beyond Compare is installed' {
-        if (-not (Test-Path "${env:ProgramFiles}\Beyond Compare 4\BComp.exe")) {
+        . "$PSScriptRoot\GitConfigBeyondCompare.ps1" *>$null
+        $bcDir = Resolve-BeyondCompareDir
+        if (-not $bcDir) {
             Set-ItResult -Skipped -Because 'Beyond Compare not installed'
             return
         }

@@ -2,15 +2,36 @@
 . "$PSScriptRoot\Utils.ps1"
 
 
+Function Resolve-BeyondCompareDir {
+    # Returns the install directory containing BComp.exe for whichever
+    # Beyond Compare version is available, or $null when none is found.
+    # Probe order, newest first:
+    #   1. Scoop apps (beyondcompare5, beyondcompare4, beyondcompare)
+    #      against both per-user $env:SCOOP and global $env:SCOOP_GLOBAL.
+    #   2. Program Files (and Program Files (x86)) for Beyond Compare
+    #      {5,4} — covers manual / non-scoop installs.
+    #   3. BComp.exe already on PATH (handles scoop-shimmed shims, etc.).
+    $candidates = New-Object System.Collections.Generic.List[string]
+    foreach ($root in @($env:SCOOP, $env:SCOOP_GLOBAL, "$env:USERPROFILE\scoop", 'C:\ProgramData\scoop')) {
+        if (-not $root) { continue }
+        foreach ($app in 'beyondcompare5','beyondcompare4','beyondcompare') {
+            $candidates.Add("$root\apps\$app\current") | Out-Null
+        }
+    }
+    foreach ($pf in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if (-not $pf) { continue }
+        foreach ($v in 5,4) { $candidates.Add("$pf\Beyond Compare $v") | Out-Null }
+    }
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path (Join-Path $c 'BComp.exe'))) { return $c }
+    }
+    $cmd = Get-Command BComp.exe -ErrorAction Ignore
+    if ($cmd) { return (Split-Path -Parent $cmd.Source) }
+    return $null
+}
+
 Function Invoke-GitConfigBeyondCompare {
-    # Resolve Beyond Compare install directory: prefer Scoop, fall back to Program Files
-    $bcDir = $null
-    if ($env:SCOOP -and (Test-Path "$env:SCOOP\apps\beyondcompare\current\BComp.exe")) {
-        $bcDir = "$env:SCOOP\apps\beyondcompare\current"
-    }
-    elseif (Test-Path "${env:ProgramFiles}\Beyond Compare 4\BComp.exe") {
-        $bcDir = "${env:ProgramFiles}\Beyond Compare 4"
-    }
+    $bcDir = Resolve-BeyondCompareDir
 
     if ($bcDir -and (Get-Command git -ErrorAction Ignore)) {
         git config --global diff.tool bc
