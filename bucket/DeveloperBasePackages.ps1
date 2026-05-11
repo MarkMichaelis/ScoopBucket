@@ -16,6 +16,25 @@ Write-Host 'Installing and configuring OSBasePackages...'
     scoop install -g $_
 }
 
+# BeyondCompare CLI surface fix-up: scoop's `extras/beyondcompare` manifest
+# shims `BCompare.exe` (-> bcompare) and `BComp.exe` (-> bcomp).  But `BComp.exe`
+# is the *GUI* launcher that returns immediately; for a shell or VCS hook the
+# console-waiting `BComp.com` is what you want.  Replace the `bcomp` shim and
+# put the install dir on Machine PATH so `bcomp.exe` and `BCompare.exe` remain
+# reachable by explicit name.  Idempotent.
+$bcDir = $null
+try { $bcDir = (& scoop prefix beyondcompare 2>$null | Select-Object -First 1) } catch { }
+if ($bcDir -and (Test-Path (Join-Path $bcDir 'BComp.com'))) {
+    & scoop shim rm bcomp 2>&1 | Out-Null
+    & scoop shim add bcomp (Join-Path $bcDir 'BComp.com') 2>&1 | ForEach-Object { Write-Host "  $_" }
+    $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $alreadyPresent = ($machinePath -split ';' | Where-Object { $_.TrimEnd('\') -ieq $bcDir.TrimEnd('\') })
+    if (-not $alreadyPresent) {
+        [Environment]::SetEnvironmentVariable('Path', "$machinePath;$bcDir", 'Machine')
+        Write-Host "  Added BeyondCompare dir to Machine PATH: $bcDir"
+    }
+}
+
 $WingetPackages = @{
     'VisualStudioCode'=([PSCustomObject]@{ WingetName='Visual Studio Code'; WinGetID='Microsoft.VisualStudioCode'; })
 #    'Cursor'=([PSCustomObject]@{ WingetName='Cursor'; WinGetID='Anysphere.Cursor'; })

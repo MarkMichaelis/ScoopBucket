@@ -37,21 +37,27 @@ Describe 'DeveloperBasePackages bundle' -Tag 'Light','Bundle' {
 
     It 'invokes scoop install for each developer package' {
         # 3 globals (dotnet, VisualStudio2026Enterprise, extras/beyondcompare)
-        # + 1 per-user (MarkMichaelis/Aspire) = 4 scoop calls. Aspire is
-        # installed without -g because it shells out to `dotnet tool install
-        # --global` which already places the CLI on the user's PATH.
-        $script:scoopCalls.Count | Should -Be 4
-        $names = $script:scoopCalls | ForEach-Object { $_[-1] }
+        # + 1 per-user (MarkMichaelis/Aspire) = 4 scoop *install* calls. Aspire
+        # is installed without -g because it shells out to `dotnet tool install
+        # --global` which already places the CLI on the user's PATH.  The
+        # bundle also issues `scoop prefix beyondcompare` (and conditionally
+        # `scoop shim rm/add bcomp`) for the BComp.com remap; here the stub
+        # returns $null, so only the `prefix` call is observed.
+        $installCalls = $script:scoopCalls | Where-Object { $_[0] -eq 'install' }
+        @($installCalls).Count | Should -Be 4
+        $names = $installCalls | ForEach-Object { $_[-1] }
         $names | Should -Contain 'dotnet'
         $names | Should -Contain 'VisualStudio2026Enterprise'
         $names | Should -Contain 'extras/beyondcompare'
         $names | Should -Contain 'MarkMichaelis/Aspire'
 
-        $globalCalls = $script:scoopCalls | Where-Object { $_ -contains '-g' }
+        $globalCalls = $installCalls | Where-Object { $_ -contains '-g' }
         @($globalCalls).Count | Should -Be 3
-        foreach ($call in $script:scoopCalls) {
-            $call[0] | Should -Be 'install'
-        }
+    }
+
+    It 'queries scoop prefix beyondcompare for the BComp.com remap' {
+        $prefixCalls = $script:scoopCalls | Where-Object { $_[0] -eq 'prefix' -and $_[1] -eq 'beyondcompare' }
+        @($prefixCalls).Count | Should -BeGreaterOrEqual 1
     }
 
     It 'invokes winget install --scope machine for each winget package' {
@@ -76,7 +82,8 @@ Describe 'DeveloperBasePackages bundle' -Tag 'Light','Bundle' {
         $script:wingetCalls = @()
         { & $script:InvokeBundle } | Should -Not -Throw
         $script:chocoCalls.Count  | Should -Be 1
-        $script:scoopCalls.Count  | Should -Be 4
+        $installCalls = $script:scoopCalls | Where-Object { $_[0] -eq 'install' }
+        @($installCalls).Count | Should -Be 4
         $script:wingetCalls.Count | Should -Be 3
     }
 }

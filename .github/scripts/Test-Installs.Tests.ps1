@@ -395,8 +395,8 @@ Describe 'Get-PackagesFromScript — real bucket scripts' {
         }
 
         It 'should discover winget packages' {
-            $pkgs.Count | Should -BeGreaterOrEqual 10
-            $pkgs | ForEach-Object { $_.InstallerType | Should -Be 'winget' }
+            $wingetPkgs = $pkgs | Where-Object InstallerType -eq 'winget'
+            @($wingetPkgs).Count | Should -BeGreaterOrEqual 10
         }
 
         It 'should find 7-Zip' {
@@ -408,15 +408,24 @@ Describe 'Get-PackagesFromScript — real bucket scripts' {
         }
 
         It 'should find FFmpeg' {
-            ($pkgs | Where-Object PackageId -eq 'Gyan.FFmpeg') | Should -Not -BeNullOrEmpty
+            # Gyan.FFmpeg (winget) was retired in favour of `scoop install ffmpeg`
+            # because the winget manifest hash drifts on every upstream release.
+            ($pkgs | Where-Object { $_.PackageId -eq 'ffmpeg' -and $_.InstallerType -eq 'scoop' }) |
+                Should -Not -BeNullOrEmpty
         }
 
         It 'should find Google Cloud SDK' {
             ($pkgs | Where-Object PackageId -eq 'Google.CloudSDK') | Should -Not -BeNullOrEmpty
         }
 
-        It 'should have machine scope' {
-            $pkgs | ForEach-Object { $_.Scope | Should -Be 'machine' }
+        It 'should find sysinternals (scoop)' {
+            ($pkgs | Where-Object { $_.PackageId -eq 'extras/sysinternals' -and $_.InstallerType -eq 'scoop' }) |
+                Should -Not -BeNullOrEmpty
+        }
+
+        It 'should have machine scope for winget packages' {
+            $pkgs | Where-Object InstallerType -eq 'winget' |
+                ForEach-Object { $_.Scope | Should -Be 'machine' }
         }
 
         It 'should not include commented-out entries' {
