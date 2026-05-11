@@ -169,6 +169,18 @@ jobs:
           }
           $sb.ToString() | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
+      - name: CLI availability — pinned contract (enforcing)
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $result = Invoke-Pester -Path "${{ github.workspace }}\bucket\CliAvailabilityPinned.Tests.ps1" -Tag Heavy -Output Detailed -PassThru
+          if ($result.FailedCount -gt 0) {
+            Write-Host "::error::Pinned CLI contract regressed: $($result.FailedCount) of $($result.TotalCount) checks failed."
+            exit 1
+          }
+          Write-Host "Pinned CLI contract held: $($result.PassedCount)/$($result.TotalCount) checks passed."
+
       - name: Upload CLI availability artifact
         if: always()
         continue-on-error: true
