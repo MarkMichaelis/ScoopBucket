@@ -205,6 +205,18 @@ jobs:
           }
           Write-Host "CLI completion bundle tests passed: $($result.PassedCount)/$($result.TotalCount)."
 
+      - name: CLI completion — native command output (behavioural)
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $result = Invoke-Pester -Path "${{ github.workspace }}\bucket\CliCompletionOutput.Tests.ps1" -Tag Heavy,CompletionOutput -Output Detailed -PassThru
+          if ($result.FailedCount -gt 0) {
+            Write-Host "::error::CLI completion native-output tests failed: $($result.FailedCount) of $($result.TotalCount)."
+            exit 1
+          }
+          Write-Host "CLI completion native-output tests: $($result.PassedCount) passed, $($result.SkippedCount) skipped, $($result.TotalCount) total."
+
       - name: Upload CLI availability artifact
         if: always()
         continue-on-error: true
