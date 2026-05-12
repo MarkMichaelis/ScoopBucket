@@ -96,11 +96,10 @@ Remove-Item "$env:TEMP\ReadwiseReader.msix" -ErrorAction Ignore
 # warning) when the session isn't elevated so a normal scoop reinstall
 # still succeeds for users without admin rights.
 #
-# Per-CLI native registration commands are co-located with this bundle
-# (which owns the corresponding install). Adding or removing a CLI here
-# requires no edit to Utils.ps1.
+# `bw completion` only supports zsh, so there is no native PowerShell
+# completion command to wire. Completion for `bw` is delivered by the
+# PSCompletions fallback in Invoke-CliCompletionsSweep below. See #73.
 try {
-    Register-CliCompletion -Cli bw -NativeCommand { bw completion --shell powershell 2>$null } -Force -Confirm:$false -ErrorAction Stop | Out-Null
     Invoke-CliCompletionsSweep -Force -Confirm:$false -ErrorAction Stop | Out-Null
 }
 catch {

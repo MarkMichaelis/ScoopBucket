@@ -233,4 +233,41 @@ Describe 'Register-CliCompletion against a sandbox profile' -Tag 'Light','Comple
         $r.Action | Should -Be 'Preserved'
         (Get-Content -Raw -Path $script:profile) | Should -Match 'BODY'
     }
+
+    It 'emits a Write-Warning when a -NativeCommand produces empty output (#73)' {
+        # Regression guard: silent dead wiring must surface in install logs.
+        # An unknown CLI name is used so PSCompletions has no catalog entry,
+        # forcing the Skipped path. The scriptblock emits nothing, mimicking
+        # `bw completion --shell powershell` / `copilot completion powershell`
+        # / `gcloud --quiet --help-format=ps1` on real installs.
+        if (Test-Path $script:profile) { Remove-Item $script:profile -Force }
+        $warnings = @()
+        $r = Register-CliCompletion `
+                -Cli 'definitely-not-a-real-cli-xyz73' `
+                -NativeCommand { } `
+                -Force `
+                -ProfilePath $script:profile `
+                -WarningVariable warnings `
+                -WarningAction SilentlyContinue
+        $r.Action  | Should -Be 'Skipped'
+        $r.Source  | Should -Be 'Skipped'
+        $warnings  | Should -Not -BeNullOrEmpty
+        ($warnings -join "`n") | Should -Match 'Native command produced no output'
+    }
+
+    It 'does NOT emit a Write-Warning when no -NativeCommand is supplied and source is Skipped' {
+        # The warning should only fire when the caller-supplied NativeCommand
+        # itself is empty. PSCompletions-only fallthrough with no catalog
+        # entry is a normal best-effort outcome and should stay quiet.
+        if (Test-Path $script:profile) { Remove-Item $script:profile -Force }
+        $warnings = @()
+        $r = Register-CliCompletion `
+                -Cli 'definitely-not-a-real-cli-xyz73b' `
+                -Force `
+                -ProfilePath $script:profile `
+                -WarningVariable warnings `
+                -WarningAction SilentlyContinue
+        $r.Source  | Should -Be 'Skipped'
+        ($warnings | Where-Object { $_ -match 'Register-CliCompletion' }) | Should -BeNullOrEmpty
+    }
 }

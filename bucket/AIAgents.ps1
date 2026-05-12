@@ -332,11 +332,11 @@ if ($Reset) {
 # warning) when the session isn't elevated so a normal scoop reinstall
 # still succeeds for users without admin rights.
 #
-# Per-CLI native registration commands are co-located with this bundle
-# (which owns the corresponding install). Adding or removing a CLI here
-# requires no edit to Utils.ps1.
+# `copilot completion` only supports bash/zsh/fish, so there is no
+# native PowerShell completion command to wire. Completion for `copilot`
+# is delivered by the PSCompletions fallback in Invoke-CliCompletionsSweep
+# below. See #73.
 try {
-    Register-CliCompletion -Cli copilot -NativeCommand { copilot completion powershell 2>$null } -Force -Confirm:$false -ErrorAction Stop | Out-Null
     Invoke-CliCompletionsSweep -Force -Confirm:$false -ErrorAction Stop | Out-Null
 }
 catch {

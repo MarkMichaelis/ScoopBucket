@@ -19,12 +19,14 @@ Describe 'CliCompletion pinned contract -- per-bundle native registration' -Tag 
         . (Join-Path $PSScriptRoot 'Utils.ps1')
     }
 
+    # Only CLIs whose `<tool> completion powershell` (or equivalent) is known
+    # to emit a real Register-ArgumentCompleter script are pinned here. CLIs
+    # that lack a native PowerShell completion subcommand (bw, copilot,
+    # gcloud) deliver completion via Invoke-CliCompletionsSweep's PSCompletions
+    # fallback instead -- see #73.
     It '<Cli> is registered with -NativeCommand in <Bundle>' -ForEach @(
         @{ Cli = 'gh';      Bundle = 'GitConfigure.ps1' }
         @{ Cli = 'rg';      Bundle = 'OSBasePackages.ps1' }
-        @{ Cli = 'gcloud';  Bundle = 'OSBasePackages.ps1' }
-        @{ Cli = 'bw';      Bundle = 'ClientBasePackages.ps1' }
-        @{ Cli = 'copilot'; Bundle = 'AIAgents.ps1' }
     ) {
         param($Cli, $Bundle)
         $path = Join-Path $PSScriptRoot $Bundle
@@ -43,5 +45,27 @@ Describe 'CliCompletion pinned contract -- per-bundle native registration' -Tag 
     It 'Register-CliCompletion exposes the -NativeCommand parameter' {
         (Get-Command Register-CliCompletion).Parameters.ContainsKey('NativeCommand') | Should -BeTrue
         (Get-Command Register-CliCompletion).Parameters['NativeCommand'].ParameterType | Should -Be ([scriptblock])
+    }
+
+    # Regression guard for #73: these CLIs were intentionally dropped from
+    # per-bundle native registration because their `<tool> completion` (or
+    # equivalent) subcommand does not emit a PowerShell completion script.
+    # Re-adding a Register-CliCompletion -NativeCommand line for any of them
+    # would silently produce a dead block (Resolve-CliCompletionSource sees
+    # empty output and returns Skipped). Completion for these CLIs is
+    # delivered by Invoke-CliCompletionsSweep's PSCompletions fallback.
+    It '<Cli> has no per-bundle -NativeCommand wiring (#73)' -ForEach @(
+        @{ Cli = 'gcloud'  }
+        @{ Cli = 'bw'      }
+        @{ Cli = 'copilot' }
+    ) {
+        param($Cli)
+        $bundleScripts = Get-ChildItem -Path $PSScriptRoot -Filter '*.ps1' |
+            Where-Object { $_.Name -notlike '*.Tests.ps1' -and $_.Name -ne 'Utils.ps1' }
+        $pattern = "(?ms)Register-CliCompletion\b[^\r\n]*?-Cli\s+['`"]?$([regex]::Escape($Cli))['`"]?\b[^\r\n]*?-NativeCommand"
+        foreach ($f in $bundleScripts) {
+            $content = Get-Content -Raw -Path $f.FullName
+            $content | Should -Not -Match $pattern -Because "'$($f.Name)' must not wire a native PowerShell completion for $Cli (its CLI does not emit one; see #73)."
+        }
     }
 }

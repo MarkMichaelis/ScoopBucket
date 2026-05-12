@@ -745,6 +745,14 @@ function Register-CliCompletion {
         } else {
             "No -NativeCommand supplied and PSCompletions has no catalog entry for '$Cli'."
         }
+        # #73: make silent dead wiring visible in install logs. Without this
+        # warning, a caller-supplied -NativeCommand that emits nothing (e.g.
+        # because the CLI's `completion` subcommand doesn't support
+        # PowerShell, or because an older version is on PATH) returns
+        # Skipped with no surface signal that the bundle's wiring is dead.
+        if ($NativeCommand) {
+            Write-Warning "Register-CliCompletion: $reason"
+        }
         return [pscustomobject]@{
             Cli = $Cli; Source = 'Skipped'; Action = 'Skipped'; ProfilePath = $target
             Reason = $reason

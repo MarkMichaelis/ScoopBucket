@@ -181,6 +181,22 @@ with their install (e.g. `Register-CliCompletion -Cli gh -NativeCommand
 `GitConfigure.ps1`), so adding or dropping a CLI never requires editing
 `Utils.ps1`.
 
+Only CLIs whose first-party `<tool> completion powershell` (or
+equivalent) emits a real `Register-ArgumentCompleter` script are wired
+with `-NativeCommand`. The currently-pinned set is:
+
+| CLI | Owning bundle       | Native command                              |
+|-----|---------------------|---------------------------------------------|
+| gh  | `GitConfigure.ps1`  | `gh completion -s powershell`               |
+| rg  | `OSBasePackages.ps1`| `rg --generate complete-powershell` (≥ v14) |
+
+CLIs whose `completion` subcommand does **not** support PowerShell
+(currently `bw`, `copilot`, `gcloud` — see #73) deliberately have no
+`-NativeCommand` wiring. They receive completion via the PSCompletions
+fallback below, and `Register-CliCompletion` will emit a
+`Write-Warning` if a future change re-introduces a dead native
+command (silent dead wiring would otherwise hide).
+
 Bundles that install many CLIs (`AIAgents`, `ClientBasePackages`,
 `DeveloperBasePackages`) additionally call `Invoke-CliCompletionsSweep
 -Force` at the end of their install, which (a) ensures the
