@@ -271,3 +271,59 @@ Describe 'Register-CliCompletion against a sandbox profile' -Tag 'Light','Comple
         ($warnings | Where-Object { $_ -match 'Register-CliCompletion' }) | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Resolve-ScoopRoot' {
+    # Probe order is: existing $env:SCOOP -> $env:ProgramData\scoop ->
+    # $env:USERPROFILE\scoop -> scoop.ps1 shim parent. The tests below
+    # synthesise a temp filesystem layout with the canonical
+    # apps\scoop\current marker so Test-Path succeeds without an actual
+    # scoop install on the test box.
+    BeforeAll {
+        . "$PSScriptRoot\Utils.ps1"
+        function New-FakeScoopRoot {
+            param([string]$Path)
+            $marker = Join-Path $Path 'apps\scoop\current'
+            New-Item -ItemType Directory -Path $marker -Force | Out-Null
+            return $Path
+        }
+    }
+    BeforeEach {
+        $script:tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("scoop-root-test-" + [guid]::NewGuid())
+        New-Item -ItemType Directory -Path $script:tempRoot -Force | Out-Null
+        $script:savedScoop = $env:SCOOP
+        $script:savedProgramData = $env:ProgramData
+        $script:savedUserProfile = $env:USERPROFILE
+        $env:SCOOP = ''
+    }
+    AfterEach {
+        $env:SCOOP = $script:savedScoop
+        $env:ProgramData = $script:savedProgramData
+        $env:USERPROFILE = $script:savedUserProfile
+        if (Test-Path $script:tempRoot) {
+            Remove-Item $script:tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'returns $env:SCOOP when it points to a valid root' {
+        $root = New-FakeScoopRoot (Join-Path $script:tempRoot 'explicit')
+        $env:SCOOP = $root
+        $env:ProgramData = Join-Path $script:tempRoot 'pd-missing'
+        $env:USERPROFILE = Join-Path $script:tempRoot 'up-missing'
+        Resolve-ScoopRoot | Should -Be $root
+    }
+
+    It 'prefers $env:ProgramData\scoop (global install) over $env:USERPROFILE\scoop' {
+        $env:ProgramData = Join-Path $script:tempRoot 'pd'
+        $globalRoot = New-FakeScoopRoot (Join-Path $env:ProgramData 'scoop')
+        $env:USERPROFILE = $script:tempRoot
+        $null = New-FakeScoopRoot (Join-Path $env:USERPROFILE 'scoop')
+        Resolve-ScoopRoot | Should -Be $globalRoot
+    }
+
+    It 'falls back to $env:USERPROFILE\scoop when no global install exists' {
+        $env:ProgramData = Join-Path $script:tempRoot 'pd-missing'
+        $env:USERPROFILE = $script:tempRoot
+        $userRoot = New-FakeScoopRoot (Join-Path $env:USERPROFILE 'scoop')
+        Resolve-ScoopRoot | Should -Be $userRoot
+    }
+}

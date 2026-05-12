@@ -2,11 +2,53 @@
 # TODO: Generalize
 $UserBucket = "MarkMichaelis"
 
-if(!$env:SCOOP -and (test-path "$env:ProgramData\scoop\apps\scoop\current")) {
-    $env:SCOOP = "$env:ProgramData\scoop"
+# Resolve $env:SCOOP defensively. Scoop's installer only writes the env var
+# in some configurations (per-user defaults didn't always set it; an
+# elevated install can omit it), so we probe several candidate roots and
+# accept whichever has the canonical apps\scoop\current layout:
+#
+#   1. existing $env:SCOOP (caller already configured)
+#   2. the machine-wide install at $env:ProgramData\scoop (CI / scoop -RunAsAdmin)
+#   3. the default per-user install at $env:USERPROFILE\scoop
+#   4. derived from the scoop shim's own location on PATH -- the shim lives
+#      at <root>\shims\scoop.ps1, so walking up two parents yields <root>
+#      even for non-standard SCOOP_GLOBAL_INSTALL targets.
+function Resolve-ScoopRoot {
+    if ($env:SCOOP -and (Test-Path (Join-Path $env:SCOOP 'apps\scoop\current'))) {
+        return $env:SCOOP
+    }
+    $candidates = @(
+        (Join-Path $env:ProgramData 'scoop'),
+        (Join-Path $env:USERPROFILE 'scoop')
+    )
+    foreach ($root in $candidates) {
+        if ($root -and (Test-Path (Join-Path $root 'apps\scoop\current'))) {
+            return $root
+        }
+    }
+    # Last resort: derive from a scoop shim on PATH. Get-Command resolves
+    # the .ps1 shim before the function wrapper that scoop's profile
+    # registers, so -CommandType Application,ExternalScript skips the
+    # wrapper and lands on the real shim file.
+    $shim = Get-Command 'scoop.ps1' -CommandType ExternalScript -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+    if (-not $shim) {
+        $shim = Get-Command 'scoop.cmd' -CommandType Application -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+    }
+    if ($shim -and $shim.Source) {
+        # <root>\shims\scoop.ps1 -> <root>
+        $root = Split-Path -Parent (Split-Path -Parent $shim.Source)
+        if ($root -and (Test-Path (Join-Path $root 'apps\scoop\current'))) {
+            return $root
+        }
+    }
+    return $null
 }
 
-if($env:SCOOP) {
+$resolvedScoopRoot = Resolve-ScoopRoot
+if ($resolvedScoopRoot) {
+    $env:SCOOP = $resolvedScoopRoot
     $currentScoopDirectory = "$env:SCOOP\apps\scoop\current"
     # Internal scoop helpers used by the `scoop` wrapper below
     # (parse_app, Find-BucketDirectory, search_bucket). Their locations have
@@ -19,12 +61,16 @@ if($env:SCOOP) {
         )) {
         $p = Join-Path $currentScoopDirectory $rel
         if (Test-Path $p) {
-            . $p > $null 2>&1
+            # *>$null suppresses every stream (incl. Write-Host /
+            # Information) so scoop-search.ps1's top-level banner
+            # ("Results from local buckets...") doesn't bleed into the
+            # caller's session every time Utils.ps1 is dot-sourced.
+            . $p *>$null
         }
     }
 }
 else {
-    Write-Warning '$env:SCOOP not found.'
+    Write-Warning '$env:SCOOP not found and no scoop install detected at $env:ProgramData\scoop, $env:USERPROFILE\scoop, or via a scoop shim on PATH. Some Utils.ps1 helpers will degrade.'
 }
 
 Function Test-Command {
