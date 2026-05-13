@@ -62,6 +62,32 @@ member of that group (e.g. `ClientBasePackages.json` →
 etc.). Shared helpers live in `bucket/Utils.ps1`, which every bundle
 script dot-sources at the top.
 
+### `ScoopBucket` PowerShell module (in progress)
+
+The repo also ships a companion PowerShell module under
+`module/ScoopBucket/` that exposes a declarative `[Package]` class plus
+the helpers `Install-Package`, `Get-Package`, and `Invoke-PackageInstall`.
+The plan is to migrate each bundle to a declarative
+`$Packages = [Package[]]@( ... )` collection driven by
+`Invoke-PackageInstall`, replacing the per-bundle imperative install
+loops, ad-hoc completion try/catch boilerplate, and the text-parsing
+override map in `.github/scripts/Get-PackageCommands.ps1`. The scaffold
+(class + manifest + stub functions) is in place; the driver pipeline
+and bundle migrations land in subsequent commits.
+
+To use the module locally:
+
+```powershell
+& .\module\Install-Module.ps1
+Import-Module ScoopBucket -Force
+Get-Command -Module ScoopBucket
+```
+
+Note: `Install-Package` and `Get-Package` deliberately shadow the
+rarely-used built-in `PackageManagement` cmdlets of the same name. The
+OneGet cmdlets remain reachable as `PackageManagement\Install-Package`
+and `PackageManagement\Get-Package`.
+
 ## Authoring guidelines
 
 ### Manifest versioning
