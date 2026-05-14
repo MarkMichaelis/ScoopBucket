@@ -1,89 +1,59 @@
-# ----------------------------------------------------------------------------
-# DeveloperBasePackages bundle script tests (Pester v5).
-#
-# Stubs `choco`, `scoop`, and `winget`; verifies routing of each developer
-# tool to the right install engine. Globals (-g) for scoop installs that
-# need to land system-wide; per-user for MarkMichaelis/Aspire (which uses
-# `dotnet tool install --global` internally).
-# ----------------------------------------------------------------------------
+<#
+.SYNOPSIS
+    Light tests for the migrated (declarative) DeveloperBasePackages.ps1.
 
-Describe 'DeveloperBasePackages bundle' -Tag 'Light','Bundle' {
-    BeforeAll {
-        $script:sut = Join-Path $PSScriptRoot 'DeveloperBasePackages.ps1'
-        $script:chocoCalls  = @()
-        $script:scoopCalls  = @()
-        $script:wingetCalls = @()
+.DESCRIPTION
+    Asserts the bundle exposes the expected [Package[]] collection via
+    Get-Package without performing any real installs.
+#>
 
-        function choco  { $script:chocoCalls  += ,@($args) }
-        function scoop  { $script:scoopCalls  += ,@($args) }
-        function winget { $script:wingetCalls += ,@($args) }
-        # Install-BucketApp lives in Utils.ps1 (stripped below); route it to
-        # the production fallback so `scoop install MarkMichaelis/<App>`
-        # assertions still hold.
-        function Install-BucketApp { param($Name) scoop install "MarkMichaelis/$Name" }
+BeforeAll {
+    . (Join-Path $PSScriptRoot 'Utils.ps1')
+    Import-Module (Get-ScoopBucketModulePath) -Force
+    $script:pkgs = Get-Package -Bundle 'DeveloperBasePackages' -BucketPath $PSScriptRoot
+}
 
-        $script:InvokeBundle = {
-            $src = Get-Content -Raw -Path $script:sut
-            $src = $src -replace '(?m)^\s*\.\s+"\$PSScriptRoot\\Utils\.ps1".*$',''
-            . ([scriptblock]::Create($src))
-        }
-        & $script:InvokeBundle
+Describe 'DeveloperBasePackages bundle (declarative)' -Tag 'Light','Bundle' {
+
+    It 'declares Node.js via choco' {
+        $node = $script:pkgs | Where-Object Name -eq 'Node.js'
+        $node.Installer    | Should -Be 'choco'
+        $node.Id           | Should -Be 'nodejs'
+        $node.CliCommands  | Should -Contain 'node'
     }
 
-    It 'invokes choco install for nodejs' {
-        $script:chocoCalls.Count | Should -Be 1
-        ($script:chocoCalls[0] -join ' ') | Should -Be 'install -y nodejs'
-    }
-
-    It 'invokes scoop install for each developer package' {
-        # 3 globals (dotnet, VisualStudio2026Enterprise, extras/beyondcompare)
-        # + 1 per-user (MarkMichaelis/Aspire) = 4 scoop *install* calls. Aspire
-        # is installed without -g because it shells out to `dotnet tool install
-        # --global` which already places the CLI on the user's PATH.  The
-        # bundle also issues `scoop prefix beyondcompare` (and conditionally
-        # `scoop shim rm/add bcomp`) for the BComp.com remap; here the stub
-        # returns $null, so only the `prefix` call is observed.
-        $installCalls = $script:scoopCalls | Where-Object { $_[0] -eq 'install' }
-        @($installCalls).Count | Should -Be 4
-        $names = $installCalls | ForEach-Object { $_[-1] }
-        $names | Should -Contain 'dotnet'
-        $names | Should -Contain 'VisualStudio2026Enterprise'
-        $names | Should -Contain 'extras/beyondcompare'
-        $names | Should -Contain 'MarkMichaelis/Aspire'
-
-        $globalCalls = $installCalls | Where-Object { $_ -contains '-g' }
-        @($globalCalls).Count | Should -Be 3
-    }
-
-    It 'queries scoop prefix beyondcompare for the BComp.com remap' {
-        $prefixCalls = $script:scoopCalls | Where-Object { $_[0] -eq 'prefix' -and $_[1] -eq 'beyondcompare' }
-        @($prefixCalls).Count | Should -BeGreaterOrEqual 1
-    }
-
-    It 'invokes winget install --scope machine for each winget package' {
-        $script:wingetCalls.Count | Should -Be 3
-        $invokedIds = $script:wingetCalls | ForEach-Object {
-            $idIdx = [array]::IndexOf($_, '--id')
-            if ($idIdx -ge 0) { $_[$idIdx + 1] }
-        }
-        $invokedIds | Should -Contain 'Microsoft.VisualStudioCode'
-        $invokedIds | Should -Contain 'GitHub.Copilot'
-        $invokedIds | Should -Contain 'Python.Python.3.14'
-        foreach ($call in $script:wingetCalls) {
-            $call[0] | Should -Be 'install'
-            $call    | Should -Contain '--scope'
-            $call    | Should -Contain 'machine'
+    It 'declares dotnet, Visual Studio, Beyond Compare via scoop -g' {
+        foreach ($name in 'dotnet','Visual Studio','Beyond Compare') {
+            $p = $script:pkgs | Where-Object Name -eq $name
+            $p           | Should -Not -BeNullOrEmpty
+            $p.Installer | Should -Be 'scoop'
+            $p.Scope     | Should -Be 'global'
         }
     }
 
-    It 'is idempotent on re-run' {
-        $script:chocoCalls  = @()
-        $script:scoopCalls  = @()
-        $script:wingetCalls = @()
-        { & $script:InvokeBundle } | Should -Not -Throw
-        $script:chocoCalls.Count  | Should -Be 1
-        $installCalls = $script:scoopCalls | Where-Object { $_[0] -eq 'install' }
-        @($installCalls).Count | Should -Be 4
-        $script:wingetCalls.Count | Should -Be 3
+    It 'declares Beyond Compare with a PostInstallScript for the bcomp shim swap' {
+        $bc = $script:pkgs | Where-Object Name -eq 'Beyond Compare'
+        $bc.Id                     | Should -Be 'extras/beyondcompare'
+        $bc.HasPostInstallScript   | Should -BeTrue
+    }
+
+    It 'declares VS Code, GitHub Copilot CLI, and Python via winget' {
+        foreach ($name in 'Visual Studio Code','GitHub Copilot CLI','Python') {
+            $p = $script:pkgs | Where-Object Name -eq $name
+            $p.Installer | Should -Be 'winget'
+        }
+    }
+
+    It 'sets Completion=pscompletions for the GitHub Copilot CLI (no native PS completion)' {
+        $cop = $script:pkgs | Where-Object Name -eq 'GitHub Copilot CLI'
+        $cop.Completion | Should -Be 'pscompletions'
+    }
+
+    It 'declares Aspire via the MarkMichaelis scoop bucket with DependsOn dotnet+VS' {
+        $aspire = $script:pkgs | Where-Object Name -eq 'Aspire'
+        $aspire.Installer  | Should -Be 'scoop'
+        $aspire.Id         | Should -Be 'MarkMichaelis/Aspire'
+        $aspire.DependsOn  | Should -Contain 'dotnet'
+        $aspire.DependsOn  | Should -Contain 'Visual Studio'
     }
 }

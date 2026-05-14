@@ -101,6 +101,10 @@ function global:Invoke-PackageInstall {
             DependsOn   = @(`$p.DependsOn)
             CISkip      = `$p.CISkip
             Notes       = `$p.Notes
+            HasPostInstallScript   = [bool]`$p.PostInstallScript
+            HasCustomInstallScript = [bool]`$p.CustomInstallScript
+            HasVerifyScript        = [bool]`$p.VerifyScript
+            HasNativeCommandScript = [bool]`$p.NativeCommandScript
         }
     }
     Write-Output ('__SBPKG__' + (@{ Bundle = `$Bundle; Packages = @(`$exported) } | ConvertTo-Json -Depth 6 -Compress))

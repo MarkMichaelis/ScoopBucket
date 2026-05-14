@@ -35,9 +35,12 @@ Describe 'ScoopBucket module manifest' -Tag 'Light', 'Module' {
     It 'exports only the documented public functions' {
         $manifest = Test-ModuleManifest -Path $script:manifestPath
         ($manifest.ExportedFunctions.Keys | Sort-Object) | Should -Be @(
+            'Add-MachinePath',
             'Get-Package',
             'Install-Package',
-            'Invoke-PackageInstall'
+            'Invoke-PackageInstall',
+            'Test-IsElevated',
+            'Update-PathFromRegistry'
         )
     }
 
@@ -62,9 +65,12 @@ Describe 'ScoopBucket module import' -Tag 'Light', 'Module' {
 
     It 'exports the public functions after import' {
         (Get-Command -Module ScoopBucket | ForEach-Object Name | Sort-Object) | Should -Be @(
+            'Add-MachinePath',
             'Get-Package',
             'Install-Package',
-            'Invoke-PackageInstall'
+            'Invoke-PackageInstall',
+            'Test-IsElevated',
+            'Update-PathFromRegistry'
         )
     }
 

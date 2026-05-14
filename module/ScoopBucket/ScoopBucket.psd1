@@ -22,7 +22,10 @@
     FunctionsToExport = @(
         'Install-Package',
         'Get-Package',
-        'Invoke-PackageInstall'
+        'Invoke-PackageInstall',
+        'Add-MachinePath',
+        'Update-PathFromRegistry',
+        'Test-IsElevated'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()

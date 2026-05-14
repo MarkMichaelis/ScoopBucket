@@ -77,6 +77,10 @@ function Get-Package {
                 DependsOn   = @($p.DependsOn)
                 CISkip      = $p.CISkip
                 Notes       = $p.Notes
+                HasPostInstallScript   = [bool]$p.HasPostInstallScript
+                HasCustomInstallScript = [bool]$p.HasCustomInstallScript
+                HasVerifyScript        = [bool]$p.HasVerifyScript
+                HasNativeCommandScript = [bool]$p.HasNativeCommandScript
             }
             $flat.Add($obj)
         }

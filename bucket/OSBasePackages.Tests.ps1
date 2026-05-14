@@ -1,63 +1,56 @@
-# ----------------------------------------------------------------------------
-# OSBasePackages bundle script tests (Pester v5).
-#
-# The bundle invokes `winget install --id <Id> --scope machine` once per
-# entry in $OSPackages. We stub `winget` and assert cardinality and that
-# every $OSPackages WinGetID gets installed with --scope machine.
-# ----------------------------------------------------------------------------
+<#
+.SYNOPSIS
+    Light-suite tests for the migrated (declarative) OSBasePackages.ps1.
 
-Describe 'OSBasePackages bundle' -Tag 'Light','Bundle' {
-    BeforeAll {
-        $script:sut = Join-Path $PSScriptRoot 'OSBasePackages.ps1'
-        $script:wingetCalls = @()
+.DESCRIPTION
+    Asserts the bundle exposes the expected [Package[]] collection via
+    Get-Package (Bundle='OSBasePackages'). The collection is captured in
+    a child runspace by Get-BundlePackages so no engines actually run.
+#>
 
-        # PowerShell function lookup is case-insensitive, so this stub catches
-        # both `winget` and the bundle's `Winget` capitalization.
-        function winget { $script:wingetCalls += ,@($args) }
+BeforeAll {
+    . (Join-Path $PSScriptRoot 'Utils.ps1')
+    Import-Module (Get-ScoopBucketModulePath) -Force
+    $script:pkgs = Get-Package -Bundle 'OSBasePackages' -BucketPath $PSScriptRoot
+}
 
-        # The bundle script dot-sources Utils.ps1, which defines its own
-        # `choco`/`scoop` wrappers that would shadow our stubs and call the
-        # real binaries. Strip that one line before executing the body so
-        # our stubs intercept every call.
-        $script:InvokeBundle = {
-            $src = Get-Content -Raw -Path $script:sut
-            $src = $src -replace '(?m)^\s*\.\s+"\$PSScriptRoot\\Utils\.ps1".*$',''
-            . ([scriptblock]::Create($src))
-        }
-        & $script:InvokeBundle
+Describe 'OSBasePackages bundle (declarative)' -Tag 'Light','Bundle' {
 
-        # Re-parse the bundle just to read $OSPackages so the expected count /
-        # ID set comes from the same source the bundle iterates.
-        $script:expectedIds = & {
-            $src = Get-Content -Raw -Path $script:sut
-            $src = $src -replace '(?m)^\s*\.\s+"\$PSScriptRoot\\Utils\.ps1".*$',''
-            $src = $src -replace '(?ms)\$OSPackages\.VAlues.*$',''
-            . ([scriptblock]::Create($src))
-            $OSPackages.Values | ForEach-Object { $_.WinGetID }
+    It 'declares at least one package' {
+        @($script:pkgs).Count | Should -BeGreaterThan 0
+    }
+
+    It 'includes ripgrep with scoop main/ripgrep and native completion' {
+        $rg = $script:pkgs | Where-Object Name -eq 'ripgrep'
+        $rg                 | Should -Not -BeNullOrEmpty
+        $rg.Installer       | Should -Be 'scoop'
+        $rg.Id              | Should -Be 'main/ripgrep'
+        $rg.CliCommands     | Should -Contain 'rg'
+        $rg.Completion      | Should -Be 'native'
+    }
+
+    It 'includes ffmpeg via scoop main' {
+        $ffmpeg = $script:pkgs | Where-Object Name -eq 'ffmpeg'
+        $ffmpeg.Installer | Should -Be 'scoop'
+        $ffmpeg.Id        | Should -Be 'main/ffmpeg'
+    }
+
+    It 'includes the Sysinternals Suite via scoop extras' {
+        $si = $script:pkgs | Where-Object Name -eq 'Sysinternals Suite'
+        $si.Installer | Should -Be 'scoop'
+        $si.Id        | Should -Be 'extras/sysinternals'
+    }
+
+    It 'declares the legacy winget core OS packages' {
+        $names = $script:pkgs.Name
+        foreach ($expected in 'Windows Terminal', '7-Zip', 'Everything', 'Everything CLI',
+                              'Google Chrome', 'WinDirStat', 'bat', 'fzf', 'Google Cloud SDK') {
+            $names | Should -Contain $expected
         }
     }
 
-    It 'invokes winget install for each $OSPackages entry' {
-        $script:wingetCalls.Count | Should -Be $script:expectedIds.Count
-        foreach ($call in $script:wingetCalls) {
-            $call[0] | Should -Be 'install'
-            $call    | Should -Contain '--id'
-            $call    | Should -Contain '--scope'
-            $call    | Should -Contain 'machine'
-        }
-        # Every WinGetID from $OSPackages should appear in the recorded calls.
-        $invokedIds = $script:wingetCalls | ForEach-Object {
-            $idIdx = [array]::IndexOf($_, '--id')
-            if ($idIdx -ge 0) { $_[$idIdx + 1] }
-        }
-        foreach ($id in $script:expectedIds) {
-            $invokedIds | Should -Contain $id
-        }
-    }
-
-    It 'is idempotent on re-run' {
-        $script:wingetCalls = @()
-        { & $script:InvokeBundle } | Should -Not -Throw
-        $script:wingetCalls.Count | Should -Be $script:expectedIds.Count
+    It 'sets Completion=pscompletions for Google Cloud SDK (gcloud)' {
+        $gcloud = $script:pkgs | Where-Object Name -eq 'Google Cloud SDK'
+        $gcloud.Completion | Should -Be 'pscompletions'
     }
 }
