@@ -1,107 +1,75 @@
-
-Write-Host 'Installing and configuring OSBasePackages...'
 . "$PSScriptRoot\Utils.ps1"
+Import-Module (Get-ScoopBucketModulePath) -Force
 
-'exiftool','geosetter' | ForEach-Object {
-    Write-Host "Installing $_..."
-    choco install -y $_
-}
+# Refs:
+#   #5/#6/#7/#10/#12  scoop extras for apps with no machine-scope winget installer
+#   #8/#46            Pushbullet: no maintained installer; CISkip
+#   #9/#11            Snagit / Todoist via Microsoft Store (winget --source msstore)
+#   #13/#46           DbxCli delisted from choco; install via local bucket manifest
+#   #27               foxitreader choco package times out; use winget
+#   #73               bw completion only supports zsh -> PSCompletions fallback
 
-# dbxcli was delisted from the Chocolatey community repository (#13).
-# Install via this bucket's Scoop manifest (DbxCli.json), which fetches
-# the upstream GitHub release binary directly. See also #46.
-'MarkMichaelis/DbxCli' | ForEach-Object {
-    Write-Host "Installing $_..."
-    scoop install $_
-}
+$Packages = [Package[]]@(
+    [Package]@{ Name = 'exiftool';         Installer = 'choco';  Id = 'exiftool';                                CliCommands = @('exiftool') }
+    [Package]@{ Name = 'GeoSetter';        Installer = 'choco';  Id = 'geosetter' }
 
-# Claude for Excel must be installed after Microsoft Office (which is a
-# `depends` of this package) since it's an Office Web Add-in registered
-# under Excel's WEF (Web Extension Framework). It's installed here -
-# rather than as part of AIAgents - so the AIAgents bucket stays
-# Office-independent for users who only want the AI clients/CLIs.
-'ClaudeExcel' | ForEach-Object {
-    Write-Host "Installing $_..."
-    Install-BucketApp $_
-}
+    [Package]@{ Name = 'DbxCli';           Installer = 'scoop';  Id = 'MarkMichaelis/DbxCli';                    CliCommands = @('dbxcli')
+                Notes = 'dbxcli delisted from chocolatey (#13). Installed via this bucket''s DbxCli.json which pulls upstream GitHub release.' }
 
-'AIAgents' | ForEach-Object {
-    Write-Host "Installing $_..."
-    Install-BucketApp $_
-}
+    [Package]@{ Name = 'Claude for Excel'; Installer = 'scoop';  Id = 'MarkMichaelis/ClaudeExcel'
+                Notes = 'Office Web Add-in registered under Excel WEF; installed here so AIAgents stays Office-independent.' }
+    [Package]@{ Name = 'AIAgents bundle';  Installer = 'scoop';  Id = 'MarkMichaelis/AIAgents' }
 
-$WingetPackages = @{
-    'AmazonKindle'=([PSCustomObject]@{ WingetName='Amazon Kindle'; WinGetID='Amazon.Kindle'; })
-    'Bitwarden'=([PSCustomObject]@{ WingetName='Bitwarden'; WinGetID='Bitwarden.Bitwarden'; })
-    'BitwardenCLI'=([PSCustomObject]@{ WingetName='Bitwarden CLI'; WinGetID='Bitwarden.CLI'; })
-    'calibre'=([PSCustomObject]@{ WingetName='calibre'; WinGetID='calibre.calibre'; })
-#    'Comet'=([PSCustomObject]@{ WingetName='Comet (Perplexity)'; WinGetID='Perplexity.Comet'; })
-    'SoX'=([PSCustomObject]@{ WingetName='SoX'; WinGetID='ChrisBagwell.SoX';  })
-    'Dropbox'=([PSCustomObject]@{ WingetName='Dropbox'; WinGetID='Dropbox.Dropbox'; })
-    # foxitreader's choco package times out downloading the upstream
-    # installer in CI (#27). Foxit publishes a winget manifest, which is
-    # also the preferred install engine per the README.
-    'FoxitReader'=([PSCustomObject]@{ WingetName='Foxit PDF Reader'; WinGetID='Foxit.FoxitReader'; })
-#    'PowerAutomate'=([PSCustomObject]@{ WingetName='Power Automate'; WinGetID='Microsoft.PowerAutomateDesktop'; })
-    # Pushbullet: no machine-scope winget installer, no MS Store entry, no
-    # scoop manifest. The choco `pushbullet` package (v1.0.0, 2017) wraps
-    # the long-discontinued standalone desktop app. Left on CISkip until
-    # an upstream alternative appears. Refs #8/#46.
-    'Pushbullet'=([PSCustomObject]@{ WingetName='Pushbullet'; WinGetID='Pushbullet.Pushbullet'; })
-    'Signal'=([PSCustomObject]@{ WingetName='Signal'; WinGetID='OpenWhisperSystems.Signal'; })
-}
+    [Package]@{ Name = 'Claude Desktop';   Installer = 'scoop';  Id = 'extras/claude';     Scope = 'global' }
+    [Package]@{ Name = 'eSpeak NG';        Installer = 'scoop';  Id = 'main/espeak-ng';    Scope = 'global'; CliCommands = @('espeak-ng') }
+    [Package]@{ Name = 'Notion';           Installer = 'scoop';  Id = 'extras/notion';     Scope = 'global' }
+    [Package]@{ Name = 'Spotify';          Installer = 'scoop';  Id = 'extras/spotify';    Scope = 'global' }
+    [Package]@{ Name = 'Zoom';             Installer = 'scoop';  Id = 'extras/zoom';       Scope = 'global' }
 
-# Apps with no machine-scope winget installer and no Microsoft Store
-# alternative — install via the scoop `extras` bucket instead. See #5
-# (Claude), #6 (eSpeak NG), #7 (Notion), #10 (Spotify), #12 (Zoom).
-'extras/claude','espeak-ng','extras/notion','extras/spotify','extras/zoom' | ForEach-Object {
-    Write-Host "Installing $_..."
-    scoop install -g $_
-}
-
-$WingetPackages.Values | `
-    ForEach-Object { 
-        Write-Host "Installing $($_.WingetName)..."
-        winget install --scope machine --id $_.WinGetID
+    [Package]@{ Name = 'Amazon Kindle';    Installer = 'winget'; Id = 'Amazon.Kindle' }
+    [Package]@{ Name = 'Bitwarden';        Installer = 'winget'; Id = 'Bitwarden.Bitwarden' }
+    [Package]@{
+        Name        = 'Bitwarden CLI'
+        Installer   = 'winget'
+        Id          = 'Bitwarden.CLI'
+        CliCommands = @('bw')
+        Completion  = 'pscompletions'
+        DependsOn   = @('Bitwarden')
+        Notes       = '`bw completion` only supports zsh; no native PS completion. PSCompletions fallback (#73).'
     }
-
-# Microsoft Store apps (installed via winget --source msstore)
-$MicrosoftStorePackages = @{
-    'ChatGPT'=([PSCustomObject]@{ WingetName='ChatGPT'; WinGetID='9NT1R1C2HH7J'; })
-    'VPNUnlimited'=([PSCustomObject]@{ WingetName='VPN Unlimited'; WinGetID='9NRQBLR605RG'; })
-    'Grammarly'=([PSCustomObject]@{ WingetName='Grammarly'; WinGetID='XPDDXX9QW8N9D7'; })
-    'WhatsApp'=([PSCustomObject]@{ WingetName='WhatsApp'; WinGetID='9NKSQGP7F2NH'; })
-    # Snagit and Todoist publish only user-scope MSIX through winget's
-    # default source; the Microsoft Store listing is the cleanest fully
-    # automated path. Refs #9 (Snagit), #11 (Todoist).
-    'Snagit'=([PSCustomObject]@{ WingetName='Snagit'; WinGetID='XPDNSF6TXN2R6Z'; })
-    'Todoist'=([PSCustomObject]@{ WingetName='Todoist'; WinGetID='9MWF2DWS5Z9N'; })
-}
-
-$MicrosoftStorePackages.Values | `
-    ForEach-Object { 
-        Write-Host "Installing $($_.WingetName)..."
-        winget install --source msstore --id $_.WinGetID --accept-package-agreements --accept-source-agreements
+    [Package]@{ Name = 'calibre';          Installer = 'winget'; Id = 'calibre.calibre' }
+    [Package]@{ Name = 'SoX';              Installer = 'winget'; Id = 'ChrisBagwell.SoX';      CliCommands = @('sox') }
+    [Package]@{ Name = 'Dropbox';          Installer = 'winget'; Id = 'Dropbox.Dropbox' }
+    [Package]@{ Name = 'Foxit PDF Reader'; Installer = 'winget'; Id = 'Foxit.FoxitReader'
+                Notes = 'choco foxitreader times out downloading upstream installer (#27). winget is preferred per README.' }
+    [Package]@{
+        Name        = 'Pushbullet'
+        Installer   = 'winget'
+        Id          = 'Pushbullet.Pushbullet'
+        CISkip      = 'No machine-scope installer and no maintained alternative (#8/#46).'
     }
+    [Package]@{ Name = 'Signal';           Installer = 'winget'; Id = 'OpenWhisperSystems.Signal' }
 
-# Readwise Reader (sideloaded MSIX, not available in winget or Microsoft Store)
-Write-Host "Installing Readwise Reader..."
-Invoke-WebRequest -Uri 'https://readwise.io/read/download_latest/desktop/windows' -OutFile "$env:TEMP\ReadwiseReader.msix"
-Add-AppxPackage -Path "$env:TEMP\ReadwiseReader.msix"
-Remove-Item "$env:TEMP\ReadwiseReader.msix" -ErrorAction Ignore
+    [Package]@{ Name = 'ChatGPT (Store)';  Installer = 'winget'; Id = '9NT1R1C2HH7J'; Source = 'msstore' }
+    [Package]@{ Name = 'VPN Unlimited';    Installer = 'winget'; Id = '9NRQBLR605RG'; Source = 'msstore' }
+    [Package]@{ Name = 'Grammarly';        Installer = 'winget'; Id = 'XPDDXX9QW8N9D7'; Source = 'msstore' }
+    [Package]@{ Name = 'WhatsApp';         Installer = 'winget'; Id = '9NKSQGP7F2NH'; Source = 'msstore' }
+    [Package]@{ Name = 'Snagit';           Installer = 'winget'; Id = 'XPDNSF6TXN2R6Z'; Source = 'msstore'
+                Notes = 'winget default source ships user-scope MSIX only; ms-store is the automated path (#9).' }
+    [Package]@{ Name = 'Todoist';          Installer = 'winget'; Id = '9MWF2DWS5Z9N'; Source = 'msstore'
+                Notes = 'winget default source ships user-scope MSIX only; ms-store is the automated path (#11).' }
 
+    [Package]@{
+        Name        = 'Readwise Reader'
+        Installer   = 'custom'
+        Notes       = 'Sideloaded MSIX; not in winget or Microsoft Store.'
+        CustomInstallScript = {
+            $tmp = Join-Path $env:TEMP 'ReadwiseReader.msix'
+            Invoke-WebRequest -Uri 'https://readwise.io/read/download_latest/desktop/windows' -OutFile $tmp
+            try { Add-AppxPackage -Path $tmp } finally { Remove-Item $tmp -ErrorAction Ignore }
+        }
+        VerifyScript = { [bool](Get-AppxPackage -Name '*Readwise*' -ErrorAction SilentlyContinue) }
+    }
+)
 
-
-# Tab-completion registration: idempotent best-effort. Skipped (with a
-# warning) when the session isn't elevated so a normal scoop reinstall
-# still succeeds for users without admin rights.
-#
-# `bw completion` only supports zsh, so there is no native PowerShell
-# completion command to wire. Completion for `bw` is delivered by the
-# PSCompletions fallback in Invoke-CliCompletionsSweep below. See #73.
-try {
-    Invoke-CliCompletionsSweep -Force -Confirm:$false -ErrorAction Stop | Out-Null
-}
-catch {
-    Write-Warning "Skipping CLI tab-completion registration: $($_.Exception.Message)"
-}
+Invoke-PackageInstall -Packages $Packages -Bundle 'ClientBasePackages'
