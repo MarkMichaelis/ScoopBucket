@@ -272,8 +272,85 @@ $records = [System.Collections.Generic.List[object]]::new()
 $seen    = [System.Collections.Generic.HashSet[string]]::new(
     [System.StringComparer]::OrdinalIgnoreCase)
 
+# ---------------------------------------------------------------------------
+# Source 0: declarative [Package] arrays via the ScoopBucket module.
+# Walks every migrated bundle's $Packages collection and emits one record
+# per CliCommand. Bundles that have already moved to the declarative form
+# stop contributing to the text-parsed sources below (their bodies no
+# longer contain `winget install` / `scoop install` / `choco install` /
+# `Install-Module` lines), so no duplicates are produced.
+# ---------------------------------------------------------------------------
+
+$declarativeBundles = @{}
+try {
+    $modulePath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'module\ScoopBucket\ScoopBucket.psd1'
+    if (Test-Path $modulePath) {
+        Import-Module $modulePath -Force -ErrorAction Stop
+        $declarativePackages = Get-Package -BucketPath $BucketPath -ErrorAction Stop
+        foreach ($p in $declarativePackages) {
+            $declarativeBundles[$p.Bundle] = $true
+            # Map [Package].Installer to the discovery Source vocabulary.
+            $src = switch ($p.Installer) {
+                'winget'     { if ($p.Source -eq 'msstore') { 'winget-msstore' } else { 'winget' } }
+                'scoop'      { 'scoop' }
+                'choco'      { 'choco' }
+                'npmGlobal'  { 'npm' }
+                'dotnetTool' { 'dotnetTool' }
+                'custom'     { 'custom' }
+                default      { $p.Installer }
+            }
+            $bundleScript = "$($p.Bundle).ps1"
+            $clis = @($p.CliCommands)
+            if ($clis.Count -eq 0) {
+                # No expected CLI -- still record the package so coverage reflects it.
+                $key = "$src|$($p.Id)|$bundleScript|"
+                if ($seen.Add($key)) {
+                    $rec = New-Record -Package $p.Name -Source $src -PackageId ([string]$p.Id) -SourceScript $bundleScript -ParserNote 'declarative'
+                    # Override expected CLI when the declarative form said "none".
+                    $rec.ExpectedCli = $null
+                    $rec.Available   = $false
+                    $records.Add($rec) | Out-Null
+                }
+            } else {
+                foreach ($cli in $clis) {
+                    $key = "$src|$($p.Id)|$bundleScript|$cli"
+                    if (-not $seen.Add($key)) { continue }
+                    $rec = New-Record -Package $p.Name -Source $src -PackageId ([string]$p.Id) -SourceScript $bundleScript -ParserNote 'declarative'
+                    # CliCommands wins over the heuristic ExpectedCli that
+                    # New-Record computed from the engine identifier.
+                    if ($rec.ExpectedCli -ne $cli) {
+                        $rec.ExpectedCli = $cli
+                        $cmd = Get-Command $cli -ErrorAction Ignore | Select-Object -First 1
+                        if ($cmd) {
+                            $rec.Available = $true
+                            $rec.Path = if ($cmd.Source) { $cmd.Source } else { $cmd.Definition }
+                            $rec.OnDiskPath = $null
+                            $rec.HelpFlag = $null
+                            $rec.HelpExitCode = $null
+                        } else {
+                            $rec.Available = $false
+                        }
+                    }
+                    $records.Add($rec) | Out-Null
+                }
+            }
+        }
+    }
+} catch {
+    Write-Warning "ScoopBucket module Get-Package discovery failed: $($_.Exception.Message). Falling back to text parsing only."
+}
+
+# ---------------------------------------------------------------------------
+# Scan bucket\*.ps1 (excluding *.Tests.ps1) for install patterns.
+# Bundles already covered by the declarative source above are skipped.
+# ---------------------------------------------------------------------------
+
 $bundleScripts = Get-ChildItem -Path $BucketPath -Filter *.ps1 |
-    Where-Object { $_.Name -notlike '*.Tests.ps1' }
+    Where-Object { $_.Name -notlike '*.Tests.ps1' } |
+    Where-Object {
+        $stem = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
+        -not $declarativeBundles.ContainsKey($stem)
+    }
 
 foreach ($file in $bundleScripts) {
     $scriptName = $file.Name

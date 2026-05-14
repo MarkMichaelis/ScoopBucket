@@ -605,12 +605,51 @@ function Get-AllPackages {
     .SYNOPSIS
         Scans all PS1 scripts in the bucket directory and returns discovered packages.
     .DESCRIPTION
+        Source 0: declarative [Package] arrays via the ScoopBucket module.
+        Source 1: text-parsing legacy bundles that have not yet been migrated.
         Excludes Utils.ps1 (shared helpers) and *.Tests.ps1 (test files).
     #>
     param([string]$BucketPath)
 
     $allPackages = [System.Collections.ArrayList]::new()
-    $scriptFiles = Get-ChildItem (Join-Path $BucketPath '*') -Include '*.ps1' -Exclude 'Utils.ps1', '*.Tests.ps1'
+    $declarativeBundles = @{}
+
+    # --- Source 0: declarative bundles via Get-Package -----------------------
+    try {
+        $modulePath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'module\ScoopBucket\ScoopBucket.psd1'
+        if (Test-Path $modulePath) {
+            Import-Module $modulePath -Force -ErrorAction Stop
+            foreach ($p in (Get-Package -BucketPath $BucketPath -ErrorAction Stop)) {
+                $declarativeBundles[$p.Bundle] = $true
+                $installerType = switch ($p.Installer) {
+                    'winget'     { if ($p.Source -eq 'msstore') { 'winget-store' } else { 'winget' } }
+                    'scoop'      { 'scoop' }
+                    'choco'      { 'choco' }
+                    'npmGlobal'  { 'npm' }
+                    'dotnetTool' { 'dotnetTool' }
+                    'custom'     { 'custom' }
+                    default      { $p.Installer }
+                }
+                $null = $allPackages.Add([pscustomobject]@{
+                    Name           = $p.Name
+                    PackageId      = $p.Id
+                    InstallerType  = $installerType
+                    Scope          = if ($p.Scope) { $p.Scope } else { 'machine' }
+                    SourceScript   = "$($p.Bundle).ps1"
+                    AdditionalArgs = ''
+                })
+            }
+        }
+    } catch {
+        Write-Warning "Get-Package discovery failed: $($_.Exception.Message). Falling back to text parsing for all bundles."
+    }
+
+    # --- Source 1: legacy text-parsing for bundles not yet migrated ---------
+    $scriptFiles = Get-ChildItem (Join-Path $BucketPath '*') -Include '*.ps1' -Exclude 'Utils.ps1', '*.Tests.ps1' |
+        Where-Object {
+            $stem = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
+            -not $declarativeBundles.ContainsKey($stem)
+        }
 
     foreach ($file in $scriptFiles) {
         Write-Host "  Scanning $($file.Name)..." -ForegroundColor DarkGray

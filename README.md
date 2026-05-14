@@ -62,18 +62,46 @@ member of that group (e.g. `ClientBasePackages.json` →
 etc.). Shared helpers live in `bucket/Utils.ps1`, which every bundle
 script dot-sources at the top.
 
-### `ScoopBucket` PowerShell module (in progress)
+### `ScoopBucket` PowerShell module
 
-The repo also ships a companion PowerShell module under
-`module/ScoopBucket/` that exposes a declarative `[Package]` class plus
-the helpers `Install-Package`, `Get-Package`, and `Invoke-PackageInstall`.
-The plan is to migrate each bundle to a declarative
+The repo ships a companion PowerShell module under `module/ScoopBucket/`
+that exposes a declarative `[Package]` class plus the helpers
+`Install-Package`, `Get-Package`, and `Invoke-PackageInstall`. Most
+bundles have been migrated to a declarative
 `$Packages = [Package[]]@( ... )` collection driven by
-`Invoke-PackageInstall`, replacing the per-bundle imperative install
-loops, ad-hoc completion try/catch boilerplate, and the text-parsing
-override map in `.github/scripts/Get-PackageCommands.ps1`. The scaffold
-(class + manifest + stub functions) is in place; the driver pipeline
-and bundle migrations land in subsequent commits.
+`Invoke-PackageInstall`, replacing per-bundle imperative install loops,
+ad-hoc completion try/catch boilerplate, and the override map in
+`.github/scripts/Get-PackageCommands.ps1` (which now consumes
+`Get-Package` directly for migrated bundles and falls back to text
+parsing only for legacy ones).
+
+Each migrated bundle now looks like:
+
+```powershell
+. "$PSScriptRoot\Utils.ps1"
+Import-Module (Get-ScoopBucketModulePath) -Force
+
+$Packages = [Package[]]@(
+    [Package]@{
+        Name = 'ripgrep'; Installer = 'scoop'; Id = 'main/ripgrep'
+        CliCommands = @('rg'); Completion = 'native'
+        NativeCommandScript = { rg --generate complete-powershell }
+    }
+    # ...
+)
+
+Invoke-PackageInstall -Packages $Packages -Bundle 'OSBasePackages'
+```
+
+The `[Package]` class enforces enums on `Installer` / `Source` / `Scope` /
+`Completion` and rejects misspelled property names at load time. See
+`module/ScoopBucket/Classes/Package.ps1` for the full schema (also
+`Package.Validate()` for cross-field invariants).
+
+The driver pipeline (validate → topo sort by `DependsOn` → engine
+dispatch → `PostInstallScript` → completion register → completion verify
+via `[CommandCompletion]::CompleteInput`) closes the long-standing gap
+where tab-completion was registered but never end-to-end verified.
 
 To use the module locally:
 
@@ -83,10 +111,26 @@ Import-Module ScoopBucket -Force
 Get-Command -Module ScoopBucket
 ```
 
+Top-level helpers for cross-bundle queries:
+
+```powershell
+Get-Package                       # list every declared package, across bundles
+Get-Package -Installer scoop      # filter by engine
+Get-Package -Name 'rip*','Bit*'   # wildcard
+Install-Package -Name 'BitwardenCli'   # auto-pulls Bitwarden via DependsOn
+```
+
 Note: `Install-Package` and `Get-Package` deliberately shadow the
 rarely-used built-in `PackageManagement` cmdlets of the same name. The
 OneGet cmdlets remain reachable as `PackageManagement\Install-Package`
 and `PackageManagement\Get-Package`.
+
+**Migration status:** OSBasePackages, DeveloperBasePackages,
+ClientBasePackages, ChatGPT, and Aspire have been migrated to the
+declarative pattern. AIAgents (with its MCP-server matrix logic) and
+the small config-only bundles (`GitConfigVisualStudio`,
+`SetPowerConfiguration`, `McAfeeUninstall`) remain imperative for now;
+the discovery and validation tools handle both forms transparently.
 
 ## Authoring guidelines
 
