@@ -1,55 +1,234 @@
 function Invoke-PackageInstall {
     <#
     .SYNOPSIS
-        Install a collection of Package descriptors.
+        Drive a [Package[]] collection through validation, topological
+        sort, install, post-install hooks, completion registration, and
+        verification — emitting a structured per-package summary.
 
     .DESCRIPTION
-        Processes a [Package[]] collection: validates each entry, sorts by
-        DependsOn, then runs the install pipeline (AlreadyInstalled probe,
-        engine install or CustomInstallScript, PostInstallScript, CLI
-        verification, completion registration, VerifyScript) for each
-        package. Emits a structured summary report.
+        One mechanism replaces the per-bundle imperative install loops.
+        For each Package:
+          1. Validate cross-field invariants ($pkg.Validate()).
+          2. Filter by -Name (transitive closure) / -Skip / CISkip-in-CI.
+          3. Topologically sort by DependsOn (deterministic tie-break by
+             original array order).
+          4. AlreadyInstalled probe (engine-specific).
+          5. Install via engine dispatcher OR CustomInstallScript.
+          6. Refresh `$env:Path` from registry so freshly-installed shims
+             resolve.
+          7. Run PostInstallScript if present.
+          8. Verify install — every CliCommand resolves via Get-Command,
+             or run VerifyScript when provided.
+          9. Register tab-completion per Package.Completion.
+         10. Record an [installed | already-installed | skipped | failed]
+             entry on the summary.
 
-        NOTE: this is a stub. The full pipeline lands in the driver-core /
-        driver-completion phases of the refactor; for now it only validates
-        and topo-sorts.
+        Returns the array of summary records and stores it on
+        `$global:LASTINSTALLREPORT` for cross-bundle inspection.
 
     .PARAMETER Packages
-        The Package[] collection from a bundle.
+        The declarative [Package[]] collection for this bundle.
 
     .PARAMETER Bundle
-        Bundle name for logs and reporting.
+        Bundle name (e.g. 'OSBasePackages'). Appears in log lines and
+        the summary record's Bundle field.
 
     .PARAMETER Name
-        When set, filter to these package Names plus their transitive
-        DependsOn closure.
+        Selective install: only these packages (and their transitive
+        DependsOn closure) are processed.
 
     .PARAMETER Skip
-        Package Names to exclude.
+        Drop these packages. Packages that DependsOn-ed them log a warning.
 
-    .PARAMETER WhatIf
-        Dry-run: validate, sort, and log but do not install.
+    .PARAMETER DryRun
+        Plan only — log every action without invoking engines. Named
+        DryRun instead of WhatIf because SupportsShouldProcess already
+        steals -WhatIf for ShouldProcess prompts.
+
+    .PARAMETER SkipCompletion
+        Don't attempt completion registration (used by tests / CI when
+        the AllUsersAllHosts profile isn't writable).
+
+    .PARAMETER ForceCompletion
+        Pass -Force through to Register-PackageCompletion so existing
+        sentinel blocks are replaced rather than preserved.
     #>
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    [OutputType([object[]])]
     param(
-        [Parameter(Mandatory)][Package[]] $Packages,
-        [Parameter(Mandatory)][string]    $Bundle,
-        [string[]] $Name,
-        [string[]] $Skip
+        [Parameter(Mandatory)][object[]]$Packages,
+        [Parameter(Mandatory)][string]$Bundle,
+        [string[]]$Name,
+        [string[]]$Skip,
+        [switch]$DryRun,
+        [switch]$SkipCompletion,
+        [switch]$ForceCompletion
     )
 
-    foreach ($pkg in $Packages) { $pkg.Validate() }
+    foreach ($pkg in $Packages) {
+        if ($null -eq $pkg) {
+            throw "Invoke-PackageInstall: Packages array contains a null entry."
+        }
+        if ($pkg.GetType().Name -ne 'Package') {
+            throw "Invoke-PackageInstall: every element must be a [Package]; got [$($pkg.GetType().FullName)]."
+        }
+        $pkg.Validate()
+    }
 
-    $sorted = Resolve-PackageOrder -Packages $Packages -Name $Name -Skip $Skip
+    $sortArgs = @{ Packages = $Packages }
+    if ($Name) { $sortArgs['Name'] = $Name }
+    if ($Skip) { $sortArgs['Skip'] = $Skip }
+    $ordered = Resolve-PackageOrder @sortArgs
 
-    foreach ($pkg in $sorted) {
-        if ($pkg.CISkip -and ($env:CI -or $env:GITHUB_ACTIONS -eq 'true')) {
-            Write-Host "[$Bundle] Skipping $($pkg.Name) in CI: $($pkg.CISkip)"
+    Write-Host ""
+    Write-Host "=== Invoke-PackageInstall: $Bundle ($($ordered.Count) packages) ==="
+
+    $summary = New-Object System.Collections.Generic.List[object]
+    $isCi = [bool]$env:CI
+
+    foreach ($pkg in $ordered) {
+        $record = [pscustomobject]@{
+            Bundle      = $Bundle
+            Name        = $pkg.Name
+            Installer   = $pkg.Installer
+            Id          = $pkg.Id
+            Scope       = $pkg.Scope
+            CliCommands = $pkg.CliCommands
+            State       = 'Pending'
+            Reason      = $null
+            Verified    = $null
+            Completion  = $null
+        }
+
+        if ($pkg.CISkip -and $isCi) {
+            $record.State  = 'Skipped'
+            $record.Reason = "CISkip: $($pkg.CISkip)"
+            Write-Host "[skip] $($pkg.Name) -- $($record.Reason)"
+            $summary.Add($record)
             continue
         }
 
-        if ($PSCmdlet.ShouldProcess($pkg.Name, "Install ($($pkg.Installer))")) {
-            throw "Invoke-PackageInstall: install pipeline not yet implemented (driver-core phase). Bundle='$Bundle' Package='$($pkg.Name)'."
+        Write-Host ""
+        Write-Host "[install] $pkg"
+
+        try {
+            if ($pkg.CustomInstallScript) {
+                if ($DryRun) {
+                    Write-Host "  [DryRun] CustomInstallScript"
+                    $result = @{ State = 'Installed'; Reason = '(DryRun)' }
+                } else {
+                    & $pkg.CustomInstallScript $pkg
+                    $result = @{ State = 'Installed'; Reason = $null }
+                }
+            } else {
+                $result = switch ($pkg.Installer) {
+                    'winget'      { Install-WingetPackage     -Package $pkg -WhatIf:$DryRun }
+                    'scoop'       { Install-ScoopPackage      -Package $pkg -WhatIf:$DryRun }
+                    'choco'       { Install-ChocoPackage      -Package $pkg -WhatIf:$DryRun }
+                    'npmGlobal'   { Install-NpmGlobalPackage  -Package $pkg -WhatIf:$DryRun }
+                    'dotnetTool'  { Install-DotnetToolPackage -Package $pkg -WhatIf:$DryRun }
+                    default       { throw "Invoke-PackageInstall: unknown Installer '$($pkg.Installer)' for '$($pkg.Name)'." }
+                }
+            }
+            $record.State  = $result.State
+            $record.Reason = $result.Reason
+        } catch {
+            $record.State  = 'Failed'
+            $record.Reason = "Install threw: $($_.Exception.Message)"
+            Write-Warning "  $($pkg.Name): $($record.Reason)"
+            $summary.Add($record)
+            continue
+        }
+
+        if (-not $DryRun) { Update-PathFromRegistry }
+
+        if ($pkg.PostInstallScript -and $record.State -ne 'Failed') {
+            if ($DryRun) {
+                Write-Host "  [DryRun] PostInstallScript"
+            } else {
+                try {
+                    & $pkg.PostInstallScript $pkg
+                    Update-PathFromRegistry
+                } catch {
+                    $record.State  = 'Failed'
+                    $record.Reason = "PostInstallScript threw: $($_.Exception.Message)"
+                    Write-Warning "  $($pkg.Name): $($record.Reason)"
+                    $summary.Add($record)
+                    continue
+                }
+            }
+        }
+
+        if (-not $DryRun -and $record.State -ne 'Failed') {
+            $record.Verified = Test-PackageInstalled -Package $pkg
+            if (-not $record.Verified -and ($pkg.CliCommands.Count -gt 0 -or $pkg.VerifyScript)) {
+                Write-Warning "  $($pkg.Name): verification failed (CliCommands not on PATH and/or VerifyScript=false)."
+            }
+        }
+
+        if (-not $SkipCompletion -and -not $DryRun -and
+            $pkg.Completion -ne 'none' -and $pkg.CliCommands.Count -gt 0) {
+            $completionResults = New-Object System.Collections.Generic.List[object]
+            foreach ($cli in $pkg.CliCommands) {
+                $registerArgs = @{ Cli = $cli; Mode = $pkg.Completion; Force = $ForceCompletion }
+                if ($pkg.NativeCommandScript) { $registerArgs['NativeCommand'] = $pkg.NativeCommandScript }
+                try {
+                    $r = Register-PackageCompletion @registerArgs
+                    $completionResults.Add($r)
+                } catch {
+                    Write-Warning "  $($pkg.Name)/$cli completion registration failed: $($_.Exception.Message)"
+                    $completionResults.Add([pscustomobject]@{
+                        Cli = $cli; Source = 'Skipped'; Action = 'Skipped'
+                        Reason = $_.Exception.Message
+                    })
+                }
+            }
+            $record.Completion = $completionResults.ToArray()
+        }
+
+        $summary.Add($record)
+    }
+
+    $arr = $summary.ToArray()
+    $global:LASTINSTALLREPORT = $arr
+
+    Write-Host ""
+    Write-Host "=== $Bundle summary ==="
+    $arr | ForEach-Object {
+        $line = "  {0,-18} {1,-12} {2}" -f $_.State, $_.Installer, $_.Name
+        if ($_.Reason) { $line += "  -- $($_.Reason)" }
+        Write-Host $line
+    }
+    Write-Host ""
+
+    return ,$arr
+}
+
+function Test-PackageInstalled {
+    <#
+    .SYNOPSIS
+        Default install verification: every Package.CliCommands entry
+        resolves via Get-Command, or — when set — Package.VerifyScript
+        returns truthy.
+    #>
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Package)
+
+    if ($Package.VerifyScript) {
+        try { return [bool](& $Package.VerifyScript $Package) }
+        catch {
+            Write-Verbose "VerifyScript for '$($Package.Name)' threw: $($_.Exception.Message)"
+            return $false
         }
     }
+
+    if ($Package.CliCommands.Count -eq 0) {
+        return $true
+    }
+
+    foreach ($cli in $Package.CliCommands) {
+        if (-not (Get-Command $cli -ErrorAction SilentlyContinue)) { return $false }
+    }
+    return $true
 }

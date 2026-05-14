@@ -1,31 +1,101 @@
 function Get-Package {
     <#
     .SYNOPSIS
-        List packages defined across all bundles in this ScoopBucket.
+        List every package declared by every bundle in this bucket.
 
     .DESCRIPTION
-        Cross-bundle aggregator. Scans every bucket/*.ps1 for Package
-        entries and returns a flat list with Name / Bundle / Installer /
-        CliCommands / Installed columns. Supports wildcard search by Name
-        and an -Installed filter that uses each engine's list query.
+        Walks `bucket/*.ps1` in a fresh child runspace and captures the
+        `[Package[]]` collection each migrated bundle assigns to
+        `$Packages` before its `Invoke-PackageInstall` call. Returns the
+        flattened list with the originating bundle's name attached so
+        cross-bundle tooling (Test-Installs.ps1 verification,
+        CLI-availability discovery) can collapse onto a single source
+        of truth.
 
-        Deliberately shadows the built-in PackageManagement\Get-Package
-        cmdlet.
+        Filters:
+          -Name <wildcards…>      Match Package.Name (case-insensitive).
+          -Installer <enum…>      Filter by engine: winget/scoop/choco/
+                                  npmGlobal/dotnetTool/custom.
+          -Bundle <names…>        Restrict to specific bundles.
 
-        NOTE: this is a stub. The full implementation lands in the
-        install-package-helper phase.
+        Note: this Get-Package shadows
+        `PackageManagement\Get-Package` for the current session. The
+        OneGet cmdlet remains reachable via its full module-qualified
+        name.
 
     .PARAMETER Name
-        Name or wildcard pattern to filter by.
+        One or more wildcard patterns matched against Package.Name.
 
-    .PARAMETER Installed
-        Return only packages whose engine reports them as installed.
+    .PARAMETER Installer
+        Filter by engine type.
+
+    .PARAMETER Bundle
+        Restrict to one or more bundle names (file stem without .ps1).
+
+    .PARAMETER BucketPath
+        Override the auto-detected bucket directory.
+
+    .OUTPUTS
+        PSCustomObject[] with Bundle, Name, Installer, Id, Source, Scope,
+        CliCommands, Completion, DependsOn, CISkip, Notes.
+
+    .EXAMPLE
+        Get-Package -Installer scoop
+        # List every scoop-installed package across all bundles.
+
+    .EXAMPLE
+        Get-Package -Name 'rip*','Bit*'
+        # Wildcard match across all bundles.
     #>
     [CmdletBinding()]
+    [OutputType([pscustomobject[]])]
     param(
-        [Parameter(Position = 0)][string] $Name = '*',
-        [switch] $Installed
+        [string[]]$Name,
+        [ValidateSet('winget','scoop','choco','npmGlobal','dotnetTool','custom')]
+        [string[]]$Installer,
+        [string[]]$Bundle,
+        [string]$BucketPath
     )
 
-    throw "Get-Package: not yet implemented (install-package-helper phase). Requested pattern: '$Name'"
+    $bundleArgs = @{}
+    if ($BucketPath) { $bundleArgs['BucketPath'] = $BucketPath }
+    $bundles = Get-BundlePackages @bundleArgs
+
+    $flat = New-Object System.Collections.Generic.List[object]
+    foreach ($b in $bundles) {
+        if ($Bundle -and ($b.Bundle -notin $Bundle)) { continue }
+        foreach ($p in $b.Packages) {
+            $obj = [pscustomobject]@{
+                Bundle      = $b.Bundle
+                Name        = $p.Name
+                Installer   = $p.Installer
+                Id          = $p.Id
+                Source      = $p.Source
+                Scope       = $p.Scope
+                CliCommands = @($p.CliCommands)
+                Completion  = $p.Completion
+                DependsOn   = @($p.DependsOn)
+                CISkip      = $p.CISkip
+                Notes       = $p.Notes
+            }
+            $flat.Add($obj)
+        }
+    }
+
+    $results = $flat.ToArray()
+
+    if ($Name) {
+        $results = $results | Where-Object {
+            $candidate = $_
+            foreach ($pattern in $Name) {
+                if ($candidate.Name -like $pattern) { return $true }
+            }
+            $false
+        }
+    }
+    if ($Installer) {
+        $results = $results | Where-Object { $_.Installer -in $Installer }
+    }
+
+    return ,@($results)
 }
