@@ -983,3 +983,96 @@ function Invoke-CliCompletionsSweep {
 
     return @($results)
 }
+
+
+function Get-ScoopBucketModulePath {
+    <#
+    .SYNOPSIS
+        Locate the ScoopBucket module's .psd1 manifest so a bundle script
+        can Import-Module it from its own scope (preserves the
+        ScriptsToProcess injection of [Package] into the caller).
+
+    .DESCRIPTION
+        Discovery order:
+          1. Already loaded -> return that module's manifest path.
+          2. Available on $env:PSModulePath -> resolve via Get-Module -ListAvailable.
+          3. Sibling layout next to Utils.ps1 ($PSScriptRoot\ScoopBucket\ScoopBucket.psd1).
+          4. Working-tree layout (..\module\ScoopBucket\ScoopBucket.psd1).
+        Throws if none of those find it.
+
+    .NOTES
+        Callers should `Import-Module (Get-ScoopBucketModulePath) -Force`
+        at script scope. Wrapping Import-Module inside a helper function
+        would put [Package] in the helper's scope instead of the bundle.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    $loaded = Get-Module ScoopBucket -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($loaded -and $loaded.Path) { return $loaded.Path }
+
+    $available = Get-Module -ListAvailable -Name ScoopBucket -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+    if ($available -and $available.Path) { return $available.Path }
+
+    $candidates = @(
+        (Join-Path $PSScriptRoot 'ScoopBucket\ScoopBucket.psd1'),
+        (Join-Path (Split-Path -Parent $PSScriptRoot) 'module\ScoopBucket\ScoopBucket.psd1')
+    )
+    foreach ($psd1 in $candidates) {
+        if (Test-Path -LiteralPath $psd1 -PathType Leaf) { return $psd1 }
+    }
+
+    throw "ScoopBucket module not found on PSModulePath or alongside Utils.ps1. Run 'module/Install-Module.ps1' from the repo, or 'Install-Module ScoopBucket' once published."
+}
+
+function Import-ScoopBucketModule {
+    <#
+    .SYNOPSIS
+        Ensure the ScoopBucket PowerShell module is importable, then import
+        it. Bundle scripts call this before declaring their [Package[]]
+        manifest.
+
+    .DESCRIPTION
+        Discovery order (first match wins):
+          1. Already loaded -> no-op.
+          2. Available on $env:PSModulePath -> Import-Module ScoopBucket.
+          3. Sibling layout next to Utils.ps1 -- when scoop drops the bundle
+             files into $dir, we look for $PSScriptRoot\ScoopBucket\
+             ScoopBucket.psd1. The bundle's .json url list is the place
+             that vendors the module files alongside Utils.ps1.
+          4. Working-tree layout (repo dev / CI) -- look for
+             ..\module\ScoopBucket relative to Utils.ps1.
+        If none of those find it, throw with guidance pointing the user at
+        module\Install-Module.ps1.
+    .PARAMETER Force
+        Re-import even if the module is already loaded.
+    #>
+    [CmdletBinding()]
+    param([switch]$Force)
+
+    if (-not $Force -and (Get-Module ScoopBucket -ErrorAction SilentlyContinue)) {
+        return
+    }
+
+    # 2. PSModulePath
+    if (Get-Module -ListAvailable -Name ScoopBucket -ErrorAction SilentlyContinue) {
+        Import-Module ScoopBucket -Force:$Force -ErrorAction Stop
+        return
+    }
+
+    # 3 + 4. Filesystem fallbacks
+    $candidates = @(
+        (Join-Path $PSScriptRoot 'ScoopBucket\ScoopBucket.psd1'),
+        (Join-Path (Split-Path -Parent $PSScriptRoot) 'module\ScoopBucket\ScoopBucket.psd1')
+    )
+    foreach ($psd1 in $candidates) {
+        if (Test-Path -LiteralPath $psd1 -PathType Leaf) {
+            Import-Module $psd1 -Force:$Force -ErrorAction Stop
+            return
+        }
+    }
+
+    throw "ScoopBucket module not found on PSModulePath or alongside Utils.ps1. Run 'module/Install-Module.ps1' from the repo, or 'Install-Module ScoopBucket' once published."
+}

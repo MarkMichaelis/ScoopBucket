@@ -54,22 +54,40 @@ function Get-BundlePackages {
 
     $modulePsd1 = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'ScoopBucket\ScoopBucket.psd1'
 
+    $packageClass = Join-Path (Split-Path -Parent $PSScriptRoot) 'Classes\Package.ps1'
+
     $results = New-Object System.Collections.Generic.List[object]
     foreach ($bundle in $bundles) {
         $bundleName = [System.IO.Path]::GetFileNameWithoutExtension($bundle.Name)
         $captured = $null
 
-        # Run the bundle in a child pwsh -NoProfile so it can't disturb
-        # the current session, with a wrapper that overrides
-        # Invoke-PackageInstall to capture instead of execute.
+        # Fast pre-filter: only dot-source bundles that look migrated —
+        # i.e. their source text mentions `Invoke-PackageInstall`. Running
+        # a legacy imperative bundle in a child runspace would trigger
+        # real installs (winget/scoop/choco), so skip them outright.
+        $bundleText = Get-Content -Raw -LiteralPath $bundle.FullName -ErrorAction SilentlyContinue
+        if (-not $bundleText -or $bundleText -notmatch '(?m)^\s*Invoke-PackageInstall\b') {
+            $results.Add([pscustomobject]@{
+                Bundle     = $bundleName
+                BundlePath = $bundle.FullName
+                Packages   = @()
+            })
+            continue
+        }
+
+        # Run the bundle in a child pwsh -NoProfile. We deliberately do
+        # NOT Import-Module ScoopBucket in the probe because the module's
+        # exported `Invoke-PackageInstall` would shadow any local
+        # override. Instead we dot-source just the Package class (needed
+        # so `[Package]@{...}` parses) and inject our own
+        # Invoke-PackageInstall + Get-ScoopBucketModulePath shims.
         $probe = @"
 `$ErrorActionPreference='SilentlyContinue'
-Import-Module '$modulePsd1' -ErrorAction SilentlyContinue
+. '$packageClass'
+function Import-Module { param([Parameter(ValueFromRemainingArguments)]`$Args) }   # no-op shim
+function Get-ScoopBucketModulePath { return '$packageClass' }
 
-# Override the public driver in this child session so the bundle's
-# installers never actually run. Capture the [Package[]] collection and
-# emit JSON we can deserialize back in the parent.
-function Invoke-PackageInstall {
+function global:Invoke-PackageInstall {
     param([Parameter(Mandatory)][object[]]`$Packages, [Parameter(Mandatory)][string]`$Bundle, [Parameter(ValueFromRemainingArguments)]`$Remaining)
     `$exported = foreach (`$p in `$Packages) {
         @{
@@ -85,22 +103,26 @@ function Invoke-PackageInstall {
             Notes       = `$p.Notes
         }
     }
-    @{ Bundle = `$Bundle; Packages = @(`$exported) } | ConvertTo-Json -Depth 6 -Compress
-    # Never call any real engine.
+    Write-Output ('__SBPKG__' + (@{ Bundle = `$Bundle; Packages = @(`$exported) } | ConvertTo-Json -Depth 6 -Compress))
     return @()
 }
 
-# Stub helpers some bundles dot-source.
+# Stub helpers and engine CLIs some bundles dot-source / invoke so we
+# never trigger real installs while just inventorying packages.
 function Test-Command { param([string]`$c) `$null -ne (Get-Command `$c -ErrorAction SilentlyContinue) }
 function Install-BucketApp { param([Parameter(Mandatory)][string]`$Name) }
 function Install-LocalManifest { param() }
 function Invoke-CliCompletionsSweep { param() }
 function Register-CliCompletion { param() }
+function winget { }
+function scoop  { }
+function choco  { }
+function npm    { }
+function dotnet { }
 
 try {
     & '$($bundle.FullName)' 2>`$null
 } catch {
-    # Swallow bundle errors — we only care about the JSON capture.
     Write-Host '__SCOOPBUCKET_BUNDLE_ERROR__'
 }
 "@
@@ -111,9 +133,9 @@ try {
             $pwsh = (Get-Process -Id $PID).Path
             if (-not $pwsh) { $pwsh = 'pwsh' }
             $output = & $pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tmp 2>$null
-            $jsonLine = $output | Where-Object { $_ -match '^\s*\{' } | Select-Object -First 1
+            $jsonLine = $output | Where-Object { $_ -is [string] -and $_.StartsWith('__SBPKG__') } | Select-Object -First 1
             if ($jsonLine) {
-                $captured = $jsonLine | ConvertFrom-Json -ErrorAction SilentlyContinue
+                $captured = $jsonLine.Substring('__SBPKG__'.Length) | ConvertFrom-Json -ErrorAction SilentlyContinue
             }
         } catch {
             Write-Verbose "Get-BundlePackages: $bundleName probe threw: $($_.Exception.Message)"

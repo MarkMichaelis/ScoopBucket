@@ -1,5 +1,5 @@
-
 . "$PSScriptRoot\Utils.ps1"
+Import-Module (Get-ScoopBucketModulePath) -Force
 
 # OpenAI ships the official ChatGPT desktop app via the Microsoft Store
 # (Publisher: OpenAI, ProductId: 9NT1R1C2HH7J). winget's `msstore` source
@@ -10,39 +10,19 @@
 # fingerprint gets through, and even then chatgpt.com/download/ is a
 # JS-rendered SPA with no static .exe URL).
 
-Function Install-ChatGPT {
-    Write-Host "Running $($MyInvocation.MyCommand.Name)..."
+$Packages = [Package[]]@(
+    [Package]@{
+        Name        = 'ChatGPT'
+        Installer   = 'winget'
+        Id          = '9NT1R1C2HH7J'
+        Source      = 'msstore'
+        CliCommands = @()
+        VerifyScript = {
+            [bool](Get-AppxPackage -Name 'OpenAI.ChatGPT-Desktop' -ErrorAction SilentlyContinue) -or
+            (Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\ChatGPT\ChatGPT.exe'))
+        }
+        Notes       = 'Official MS Store listing (publisher: OpenAI). chatgpt.com/download/ is JS-rendered SPA + JA3-fingerprinted.'
+    }
+)
 
-    if (Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\ChatGPT\ChatGPT.exe')) {
-        Write-Host 'ChatGPT desktop already installed (squirrel/legacy); skipping.'
-        return
-    }
-    if (Get-AppxPackage -Name 'OpenAI.ChatGPT-Desktop' -ErrorAction SilentlyContinue) {
-        Write-Host 'ChatGPT desktop (MS Store) already installed; skipping.'
-        return
-    }
-
-    if (-not (Test-Command -Name winget)) {
-        Write-Warning 'winget is not installed; cannot fetch ChatGPT from the Microsoft Store. Install App Installer from the Store, then re-run.'
-        return
-    }
-
-    $msStoreId = '9NT1R1C2HH7J'
-    Write-Host "Installing ChatGPT from Microsoft Store (id: $msStoreId, publisher: OpenAI) via winget..."
-    $args = @(
-        'install', '--id', $msStoreId,
-        '--exact',
-        '--source', 'msstore',
-        '--accept-source-agreements',
-        '--accept-package-agreements',
-        '--silent',
-        '--disable-interactivity'
-    )
-    & winget @args
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "winget exited with code $LASTEXITCODE while installing ChatGPT (id $msStoreId). You may need to be signed in with a Microsoft account, or install manually from https://apps.microsoft.com/detail/$msStoreId."
-        return
-    }
-    Write-Host 'ChatGPT desktop installed.'
-}
-Install-ChatGPT
+Invoke-PackageInstall -Packages $Packages -Bundle 'ChatGPT'
