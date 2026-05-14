@@ -43,8 +43,12 @@ Describe 'ChatGPT.ps1 declarative migration' -Tag 'Light','Module' {
         $script:bundle = Join-Path $PSScriptRoot 'ChatGPT.ps1'
     }
 
-    It 'discovers a single ChatGPT [Package] via Get-Package' {
-        $pkgs = Get-Package -Name 'ChatGPT' -BucketPath $PSScriptRoot
+    It 'discovers the canonical ChatGPT [Package] from ChatGPT.ps1 via Get-Package' {
+        # ChatGPT now also appears in AIAgents (as a scoop install of
+        # MarkMichaelis/ChatGPT, which executes ChatGPT.ps1). Scope the
+        # assertion to the bundle that owns the canonical declaration.
+        $pkgs = Get-Package -Name 'ChatGPT' -BucketPath $PSScriptRoot |
+            Where-Object Bundle -eq 'ChatGPT'
         @($pkgs).Count         | Should -Be 1
         $pkgs[0].Name          | Should -Be 'ChatGPT'
         $pkgs[0].Installer     | Should -Be 'winget'
