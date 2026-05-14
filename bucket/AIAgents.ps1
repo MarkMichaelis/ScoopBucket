@@ -10,67 +10,117 @@ param(
 
 Write-Host 'Installing and configuring AIAgents...'
 . "$PSScriptRoot\Utils.ps1"
+Import-Module (Get-ScoopBucketModulePath) -Force
 
-# All MCP servers configured below are launched via `npx`. Make sure Node.js
-# (and therefore npx) is on PATH before AIAgents finishes — otherwise the
-# generated MCP configs would point at a command the agents cannot resolve at
-# runtime. Node is installed by DeveloperBasePackages, but AIAgents shouldn't
-# require that heavier package, so install it on demand here.
-if (-not (Get-Command npx -ErrorAction SilentlyContinue)) {
-    Write-Host 'npx not found; installing Node.js via choco (required for MCP servers)...'
-    choco install -y nodejs
-    $nodePath = Join-Path $env:ProgramFiles 'nodejs'
-    if ((Test-Path $nodePath) -and ($env:Path -notlike "*$nodePath*")) {
-        $env:Path = "$env:Path;$nodePath"
+# ---------------------------------------------------------------------------
+# Package list.
+#
+# AIAgents owns:
+#   - the agent apps themselves (Claude Desktop + every chat/CLI agent we
+#     publish a bucket manifest for)
+#   - the runtimes those MCP servers need at runtime (Node.js so `npx` is on
+#     PATH; PoshMcp pulled in via dotnetTool when the .NET SDK is present)
+# The MCP-server JSON/TOML wiring is config state, not a package, so it
+# runs as a tail block below.
+# ---------------------------------------------------------------------------
+
+$Packages = [Package[]]@(
+    # Runtime prerequisites first so MCP-server entries written below
+    # actually resolve at agent start-up. DependsOn pulls these in
+    # transitively when -Name selects an agent.
+    [Package]@{
+        Name        = 'Node.js'
+        Installer   = 'choco'
+        Id          = 'nodejs'
+        CliCommands = @('node','npm','npx')
+        Notes       = 'Required for every npx-based MCP server (context7, playwright, filesystem, github).'
     }
-}
 
-# The Playwright MCP server (@playwright/mcp) drives a browser via the
-# Playwright runtime, but Playwright separates its browser binaries from the
-# npm package — they only land on disk when `playwright install` is run.
-# Without this step, the MCP server starts cleanly but fails the first time
-# an agent asks it to open a page. Install just chromium (~150MB) since it's
-# the default Playwright browser and is sufficient for the MCP use case.
-Write-Host 'Ensuring Playwright chromium browser is installed (required by @playwright/mcp)...'
-# Install @playwright/test globally so `playwright` is on PATH. This avoids
-# running `npx playwright install` from a directory with no package.json,
-# which emits a noisy "running 'npx playwright install' without first
-# installing your project's dependencies" warning. `npm install --global` is
-# idempotent — npm short-circuits if the package is already installed at the
-# requested version — and `playwright install chromium` itself skips browsers
-# that are already on disk, satisfying the bucket's idempotency contract.
-if (-not (Get-Command playwright -ErrorAction SilentlyContinue)) {
-    & npm.cmd install --global '@playwright/test'
+    # Agent apps.
+    [Package]@{
+        Name        = 'Claude Desktop'
+        Installer   = 'winget'
+        Id          = 'Anthropic.Claude'
+        Notes       = 'MCP-capable desktop client. Local Claude.json manifest also installs this via winget; keeping the declarative entry here is the canonical home for the package.'
+    }
+    [Package]@{
+        Name      = 'ChatGPT'
+        Installer = 'scoop'
+        Id        = 'MarkMichaelis/ChatGPT'
+    }
+    [Package]@{
+        Name      = 'Gemini'
+        Installer = 'scoop'
+        Id        = 'MarkMichaelis/Gemini'
+        CISkip    = 'Browser-watch installer requires interactive Download click; see #25/#26.'
+    }
+    [Package]@{
+        Name      = 'Microsoft Copilot'
+        Installer = 'scoop'
+        Id        = 'MarkMichaelis/MicrosoftCopilot'
+    }
+    [Package]@{
+        Name        = 'Claude Code CLI'
+        Installer   = 'scoop'
+        Id          = 'MarkMichaelis/ClaudeCode'
+        CliCommands = @('claude')
+        DependsOn   = @('Node.js')
+    }
+    [Package]@{
+        Name        = 'Codex CLI'
+        Installer   = 'scoop'
+        Id          = 'MarkMichaelis/Codex'
+        CliCommands = @('codex')
+        DependsOn   = @('Node.js')
+    }
+    [Package]@{
+        Name        = 'Gemini CLI'
+        Installer   = 'scoop'
+        Id          = 'MarkMichaelis/GeminiCli'
+        CliCommands = @('gemini')
+        DependsOn   = @('Node.js')
+    }
+    [Package]@{
+        Name        = 'GitHub Copilot CLI'
+        Installer   = 'scoop'
+        Id          = 'MarkMichaelis/GitHubCopilotCli'
+        CliCommands = @('copilot')
+        Completion  = 'pscompletions'
+        DependsOn   = @('Node.js')
+        Notes       = '`copilot completion` only supports bash/zsh/fish; no native PowerShell completion command. PSCompletions fallback (#73).'
+    }
+)
+
+Invoke-PackageInstall -Packages $Packages -Bundle 'AIAgents'
+
+# ---------------------------------------------------------------------------
+# MCP server prerequisites that are NOT npm-based.
+# ---------------------------------------------------------------------------
+
+# Playwright separates its browser binaries from the npm package; the MCP
+# server starts cleanly without them but fails the first time an agent
+# asks it to open a page. Install `@playwright/test` globally so the
+# `playwright` shim lands on PATH, then install just chromium (~150 MB).
+if (Get-Command npm -ErrorAction SilentlyContinue) {
+    if (-not (Get-Command playwright -ErrorAction SilentlyContinue)) {
+        & npm.cmd install --global '@playwright/test'
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "npm install --global @playwright/test exited with code $LASTEXITCODE; falling back to npx for browser install."
+        }
+    }
+    if (Get-Command playwright -ErrorAction SilentlyContinue) {
+        & playwright.cmd install chromium
+    }
+    else {
+        & npx.cmd -y '@playwright/test' install chromium
+    }
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "npm install --global @playwright/test exited with code $LASTEXITCODE; falling back to npx for browser install."
+        Write-Warning "playwright install chromium exited with code $LASTEXITCODE; the Playwright MCP server may fail at runtime."
     }
-}
-if (Get-Command playwright -ErrorAction SilentlyContinue) {
-    & playwright.cmd install chromium
 }
 else {
-    & npx.cmd -y '@playwright/test' install chromium
+    Write-Warning 'npm not found after package pass; skipping Playwright browser install.'
 }
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning "playwright install chromium exited with code $LASTEXITCODE; the Playwright MCP server may fail at runtime."
-}
-
-# Install each AI agent (and CLI) via its own bucket manifest.
-'Claude',
-'ChatGPT',
-'Gemini',
-'MicrosoftCopilot',
-'ClaudeCode',
-'Codex',
-'GeminiCli',
-'GitHubCopilotCli' | ForEach-Object {
-    Write-Host "Installing $_..."
-    Install-BucketApp $_
-}
-
-# ---------------------------------------------------------------------------
-# Install MCP server prerequisites that are NOT npm-based.
-# ---------------------------------------------------------------------------
 
 # PoshMcp ships as a .NET global tool. Skip silently if dotnet isn't on the
 # machine — installing the .NET 10+ SDK from this script would be too heavy
@@ -96,9 +146,7 @@ else {
 }
 
 # Auto-detect a GitHub PAT for the GitHub MCP server. Prefer an explicit env
-# var; fall back to the gh CLI's stored token if available. The MCP entry is
-# written either way — a missing token only matters at runtime — but we log
-# whether we found one so users can debug.
+# var; fall back to the gh CLI's stored token if available.
 $GithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
 if ([string]::IsNullOrWhiteSpace($GithubToken) -and (Get-Command gh -ErrorAction SilentlyContinue)) {
     try {
@@ -118,11 +166,6 @@ if ([string]::IsNullOrWhiteSpace($GithubToken)) {
 # Configure MCP servers for every MCP-capable agent.
 # Idempotent: re-running just overwrites the named entries; other MCP servers
 # in the same config are preserved.
-#
-# $DeprecatedMcpServers lists names this script previously configured but has
-# since retired. They are NOT removed by default (a routine reinstall must
-# never silently delete a server the user may rely on); pass -Reset to prune
-# them from existing configs.
 # ---------------------------------------------------------------------------
 
 $DeprecatedMcpServers = @('shell')
@@ -235,7 +278,6 @@ args = [$argsToml]
         $envLines = foreach ($k in $Server.Env.Keys) {
             $v = $Server.Env[$k]
             if ($null -eq $v) { $v = '' }
-            # Escape backslashes and double-quotes for TOML basic string values.
             $vEsc = $v -replace '\\','\\\\' -replace '"','\\"'
             "$k = `"$vEsc`""
         }
@@ -247,7 +289,6 @@ args = [$argsToml]
 
     if (Test-Path $path) {
         $content = Get-Content -Path $path -Raw
-        # Remove any prior entry (main + env subsection) for this server, then append.
         $content = [regex]::Replace($content, $envSectionPattern, '')
         $content = [regex]::Replace($content, $sectionPattern, '')
         $content = $content.TrimEnd() + "`r`n`r`n" + $section + "`r`n"
@@ -327,15 +368,9 @@ if ($Reset) {
     }
 }
 
-
 # Tab-completion registration: idempotent best-effort. Skipped (with a
 # warning) when the session isn't elevated so a normal scoop reinstall
 # still succeeds for users without admin rights.
-#
-# `copilot completion` only supports bash/zsh/fish, so there is no
-# native PowerShell completion command to wire. Completion for `copilot`
-# is delivered by the PSCompletions fallback in Invoke-CliCompletionsSweep
-# below. See #73.
 try {
     Invoke-CliCompletionsSweep -Force -Confirm:$false -ErrorAction Stop | Out-Null
 }

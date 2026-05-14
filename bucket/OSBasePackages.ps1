@@ -19,6 +19,12 @@ $Packages = [Package[]]@(
     [Package]@{ Name = 'fzf';                           Installer = 'winget'; Id = 'junegunn.fzf';                                       CliCommands = @('fzf') }
     [Package]@{ Name = 'Google Cloud SDK';              Installer = 'winget'; Id = 'Google.CloudSDK';                                    CliCommands = @('gcloud'); Completion = 'pscompletions' }
 
+    # Editor included in the OS baseline so a freshly imaged box has a
+    # text editor available before DeveloperBasePackages runs. The winget
+    # engine's AlreadyInstalled probe makes the duplicate declaration in
+    # DeveloperBasePackages a no-op on a second pass.
+    [Package]@{ Name = 'Visual Studio Code';            Installer = 'winget'; Id = 'Microsoft.VisualStudioCode';                          CliCommands = @('code') }
+
     # scoop replacements for winget entries with upstream drift
     [Package]@{ Name = 'ffmpeg';                        Installer = 'scoop';  Id = 'main/ffmpeg';                                         CliCommands = @('ffmpeg') }
     [Package]@{
@@ -34,20 +40,7 @@ $Packages = [Package[]]@(
         Name        = 'Sysinternals Suite'
         Installer   = 'scoop'
         Id          = 'extras/sysinternals'
-        CliCommands = @()
-        Notes       = 'extras/sysinternals does not shim individual tools — append the install dir to Machine PATH. See #44.'
-        PostInstallScript = {
-            try {
-                $dir = (& scoop prefix sysinternals 2>$null | Select-Object -First 1)
-                if ($dir -and (Test-Path $dir)) {
-                    Add-MachinePath -Path $dir -Confirm:$false
-                } else {
-                    Write-Warning "Could not resolve sysinternals install dir via 'scoop prefix sysinternals'"
-                }
-            } catch {
-                Write-Warning "sysinternals PATH update failed: $($_.Exception.Message)"
-            }
-        }
+        Notes       = 'extras/sysinternals declares every tool in its manifest "bin" list, so scoop creates a shim per tool (procexp, autoruns, accesschk, ...) automatically. No PATH update required. See #44.'
     }
 )
 

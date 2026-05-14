@@ -16,15 +16,13 @@ $Packages = [Package[]]@(
     [Package]@{ Name = 'DbxCli';           Installer = 'scoop';  Id = 'MarkMichaelis/DbxCli';                    CliCommands = @('dbxcli')
                 Notes = 'dbxcli delisted from chocolatey (#13). Installed via this bucket''s DbxCli.json which pulls upstream GitHub release.' }
 
-    [Package]@{ Name = 'Claude for Excel'; Installer = 'scoop';  Id = 'MarkMichaelis/ClaudeExcel'
-                Notes = 'Office Web Add-in registered under Excel WEF; installed here so AIAgents stays Office-independent.' }
-    [Package]@{ Name = 'AIAgents bundle';  Installer = 'scoop';  Id = 'MarkMichaelis/AIAgents' }
+    [Package]@{ Name = 'AIAgents bundle';  Installer = 'scoop';  Id = 'MarkMichaelis/AIAgents'
+                Notes = 'Pulls every AI agent + Claude Desktop and configures MCP servers; see AIAgents.ps1.' }
 
-    [Package]@{ Name = 'Claude Desktop';   Installer = 'scoop';  Id = 'extras/claude';     Scope = 'global' }
-    [Package]@{ Name = 'eSpeak NG';        Installer = 'scoop';  Id = 'main/espeak-ng';    Scope = 'global'; CliCommands = @('espeak-ng') }
-    [Package]@{ Name = 'Notion';           Installer = 'scoop';  Id = 'extras/notion';     Scope = 'global' }
-    [Package]@{ Name = 'Spotify';          Installer = 'scoop';  Id = 'extras/spotify';    Scope = 'global' }
-    [Package]@{ Name = 'Zoom';             Installer = 'scoop';  Id = 'extras/zoom';       Scope = 'global' }
+    [Package]@{ Name = 'eSpeak NG';        Installer = 'scoop';  Id = 'main/espeak-ng';    CliCommands = @('espeak-ng') }
+    [Package]@{ Name = 'Notion';           Installer = 'scoop';  Id = 'extras/notion' }
+    [Package]@{ Name = 'Spotify';          Installer = 'scoop';  Id = 'extras/spotify' }
+    [Package]@{ Name = 'Zoom';             Installer = 'scoop';  Id = 'extras/zoom' }
 
     [Package]@{ Name = 'Amazon Kindle';    Installer = 'winget'; Id = 'Amazon.Kindle' }
     [Package]@{ Name = 'Bitwarden';        Installer = 'winget'; Id = 'Bitwarden.Bitwarden' }
@@ -48,7 +46,8 @@ $Packages = [Package[]]@(
         Id          = 'Pushbullet.Pushbullet'
         CISkip      = 'No machine-scope installer and no maintained alternative (#8/#46).'
     }
-    [Package]@{ Name = 'Signal';           Installer = 'winget'; Id = 'OpenWhisperSystems.Signal' }
+    [Package]@{ Name = 'Signal';           Installer = 'winget'; Id = 'OpenWhisperSystems.Signal'
+                Notes = 'Upstream MSI occasionally crashes on the CI runner with ACCESS_VIOLATION (#22/#65/#66/#75); Install-WingetPackage retries up to 3x before reporting failure.' }
 
     [Package]@{ Name = 'ChatGPT (Store)';  Installer = 'winget'; Id = '9NT1R1C2HH7J'; Source = 'msstore' }
     [Package]@{ Name = 'VPN Unlimited';    Installer = 'winget'; Id = '9NRQBLR605RG'; Source = 'msstore' }

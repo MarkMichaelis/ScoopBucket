@@ -1,15 +1,21 @@
 function Install-Package {
     <#
     .SYNOPSIS
-        Install a single named package (and its transitive DependsOn
-        closure) by looking it up across every bundle in this bucket.
+        User-facing helper: install one (or a few) named packages from any
+        bundle in this bucket, with full DependsOn closure.
 
     .DESCRIPTION
-        Walks the declarative `$Packages` collections of every migrated
-        bundle (via Get-BundlePackages) to find the named entry, then
-        loads just that bundle and runs Invoke-PackageInstall with the
-        -Name filter so the transitive DependsOn closure auto-pulls in
-        prerequisites.
+        Use Install-Package when you know what you want to install ("give
+        me ripgrep") but don't care which bundle declared it. It walks
+        every migrated bundle via Get-BundlePackages, finds the entry
+        whose Name matches, and runs that bundle's Invoke-PackageInstall
+        with the -Name filter so DependsOn pulls in prerequisites.
+
+        Use Invoke-PackageInstall (the underlying driver) only from a
+        bundle's `.ps1` file — that's where the declarative `[Package[]]`
+        collection lives. Bundle scripts call it once at the bottom to
+        install everything they declare; end-users should reach for
+        Install-Package instead, which is bundle-agnostic.
 
         Unlike `PackageManagement\Install-Package` (OneGet) this helper:
           - only installs packages declared in this bucket's `$Packages`
@@ -17,7 +23,7 @@ function Install-Package {
           - takes our refactor's option shape, not OneGet's
             -ProviderName / -RequiredVersion / etc.;
           - the OneGet cmdlet remains reachable via its full
-            module-qualified name.
+            module-qualified name (PackageManagement\Install-Package).
 
     .PARAMETER Name
         One or more package names (matched case-insensitively against

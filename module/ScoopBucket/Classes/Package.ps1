@@ -20,8 +20,12 @@ class Package {
     [ValidateSet('', 'msstore')]
     [string]   $Source = ''
 
+    # 'global' is the default everywhere (machine-wide install requiring
+    # admin). Bundles only specify Scope explicitly to opt into 'user' for
+    # the rare per-user-only package. ('machine' is a legacy alias for
+    # 'global' kept so existing winget-only entries keep parsing.)
     [ValidateSet('machine', 'global', 'user')]
-    [string]   $Scope = 'machine'
+    [string]   $Scope = 'global'
 
     [string[]] $CliCommands = @()
 

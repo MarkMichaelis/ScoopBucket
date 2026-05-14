@@ -1,13 +1,24 @@
 function Invoke-PackageInstall {
     <#
     .SYNOPSIS
-        Drive a [Package[]] collection through validation, topological
-        sort, install, post-install hooks, completion registration, and
-        verification — emitting a structured per-package summary.
+        Bundle entry-point: drive a full [Package[]] collection through
+        validation, topological sort, install, post-install hooks,
+        completion registration, and verification.
 
     .DESCRIPTION
-        One mechanism replaces the per-bundle imperative install loops.
-        For each Package:
+        This is the function every migrated bundle script calls at the
+        bottom of its file — once, with its full declarative `$Packages`
+        collection — to actually perform the installs. It is exported
+        only because Scoop runs each `bucket\<Bundle>.ps1` in a separate
+        PowerShell process (via the manifest installer.script), and that
+        process needs a public name to import.
+
+        End users / interactive callers should use **Install-Package**
+        instead, which targets a specific Name (or names), discovers the
+        owning bundle automatically, and routes a minimal slice through
+        this driver.
+
+        Pipeline for each Package:
           1. Validate cross-field invariants ($pkg.Validate()).
           2. Filter by -Name (transitive closure) / -Skip / CISkip-in-CI.
           3. Topologically sort by DependsOn (deterministic tie-break by

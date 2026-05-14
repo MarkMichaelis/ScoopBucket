@@ -8,25 +8,26 @@ Import-Module (Get-ScoopBucketModulePath) -Force
 $Packages = [Package[]]@(
     [Package]@{ Name = 'Node.js';                       Installer = 'choco';  Id = 'nodejs';                                              CliCommands = @('node','npm') }
 
-    [Package]@{ Name = 'dotnet';                        Installer = 'scoop';  Id = 'main/dotnet';                          Scope = 'global'; CliCommands = @('dotnet') }
-    [Package]@{ Name = 'Visual Studio';                 Installer = 'scoop';  Id = 'MarkMichaelis/VisualStudio2026Enterprise'; Scope = 'global'; CliCommands = @('devenv') }
+    [Package]@{ Name = 'dotnet';                        Installer = 'scoop';  Id = 'main/dotnet';                                          CliCommands = @('dotnet') }
+    [Package]@{ Name = 'Visual Studio';                 Installer = 'scoop';  Id = 'MarkMichaelis/VisualStudio2026Enterprise';             CliCommands = @('devenv') }
     [Package]@{
         Name        = 'Beyond Compare'
         Installer   = 'scoop'
         Id          = 'extras/beyondcompare'
-        Scope       = 'global'
         CliCommands = @('bcomp','bcompare')
-        Notes       = 'Replace scoop bcomp shim (which points at BComp.exe, the GUI launcher) with one that points at the console-waiting BComp.com. Refs #14/#46.'
+        Notes       = 'Keep scoop default bcomp shim (BComp.exe, GUI launcher). Add a separate bcompc shim for BComp.com (console-waiting variant) so git/scripted callers can request blocking semantics on demand. Refs #14/#46.'
         PostInstallScript = {
             try {
                 $dir = (& scoop prefix beyondcompare 2>$null | Select-Object -First 1)
-                if ($dir -and (Test-Path (Join-Path $dir 'BComp.com'))) {
-                    & scoop shim rm bcomp 2>&1 | Out-Null
-                    & scoop shim add bcomp (Join-Path $dir 'BComp.com') 2>&1 | ForEach-Object { Write-Host "  $_" }
-                    Add-MachinePath -Path $dir -Confirm:$false
+                $bcompCom = if ($dir) { Join-Path $dir 'BComp.com' } else { $null }
+                if ($bcompCom -and (Test-Path $bcompCom)) {
+                    # Drop any prior bcompc shim before re-adding so the
+                    # PostInstallScript stays idempotent across re-runs.
+                    & scoop shim rm bcompc 2>&1 | Out-Null
+                    & scoop shim add bcompc $bcompCom 2>&1 | ForEach-Object { Write-Host "  $_" }
                 }
             } catch {
-                Write-Warning "BeyondCompare PostInstallScript failed: $($_.Exception.Message)"
+                Write-Warning "Beyond Compare bcompc shim setup failed: $($_.Exception.Message)"
             }
         }
     }

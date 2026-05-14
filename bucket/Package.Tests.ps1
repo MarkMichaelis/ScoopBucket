@@ -96,7 +96,7 @@ Describe 'Package class — construction and defaults' -Tag 'Light', 'Module' {
         $p.Name        | Should -Be 'demo'
         $p.Installer   | Should -Be 'scoop'
         $p.Id          | Should -Be 'main/demo'
-        $p.Scope       | Should -Be 'machine'
+        $p.Scope       | Should -Be 'global'
         $p.Completion  | Should -Be 'none'
         $p.CliCommands | Should -Be @()
         $p.DependsOn   | Should -Be @()

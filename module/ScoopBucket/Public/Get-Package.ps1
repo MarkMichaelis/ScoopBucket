@@ -101,5 +101,9 @@ function Get-Package {
         $results = $results | Where-Object { $_.Installer -in $Installer }
     }
 
-    return ,@($results)
+    # Return the flat list. Callers should still wrap in @() if they
+    # need a strict array (e.g. for .Count when 0/1 results are possible);
+    # we deliberately do NOT pre-wrap with `,$results` because that would
+    # add an extra outer array layer once the caller's own @() applies.
+    return $results
 }
