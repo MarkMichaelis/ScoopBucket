@@ -22,6 +22,16 @@ $Packages = [Package[]]@(
         VerifyScript        = {
             [bool](Get-Module -ListAvailable -Name PSCompletions)
         }
+        # Once PSCompletions is in place, retroactively register
+        # sentinel blocks for any CLI that was installed BEFORE
+        # PSCompletions existed (the `bw <Tab>` repair scenario from #73).
+        PostInstallScript   = {
+            try {
+                Update-PackageCompletion | Out-Null
+            } catch {
+                Write-Warning "PSCompletions PostInstallScript: Update-PackageCompletion failed: $($_.Exception.Message)"
+            }
+        }
     }
 )
 

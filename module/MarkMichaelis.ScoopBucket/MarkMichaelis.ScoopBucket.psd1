@@ -23,6 +23,7 @@
         'Install-Package',
         'Get-Package',
         'Invoke-PackageInstall',
+        'Update-PackageCompletion',
         'Add-MachinePath',
         'Update-PathFromRegistry',
         'Test-IsElevated',

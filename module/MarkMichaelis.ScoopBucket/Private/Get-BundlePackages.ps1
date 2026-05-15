@@ -123,7 +123,7 @@ try {
 
         $tmp = Join-Path $env:TEMP "ScoopBucket-getbundle-$bundleName-$PID.ps1"
         try {
-            Set-Content -Path $tmp -Value $probe -Encoding UTF8
+            Set-Content -Path $tmp -Value $probe -Encoding UTF8 -WhatIf:$false
             $pwsh = (Get-Process -Id $PID).Path
             if (-not $pwsh) { $pwsh = 'pwsh' }
             $output = & $pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tmp 2>$null
