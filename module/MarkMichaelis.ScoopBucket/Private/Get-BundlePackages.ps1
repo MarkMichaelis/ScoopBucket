@@ -30,17 +30,7 @@ function Get-BundlePackages {
     )
 
     if (-not $BucketPath) {
-        if ($env:SCOOPBUCKET_BUCKET_PATH) {
-            $BucketPath = $env:SCOOPBUCKET_BUCKET_PATH
-        } else {
-            # Module lives at <repo>/module/MarkMichaelis.ScoopBucket/. Walk up two.
-            $moduleDir = $PSScriptRoot                                # …/Private
-            $moduleRoot = Split-Path -Parent $moduleDir               # …/ScoopBucket
-            $modulesParent = Split-Path -Parent $moduleRoot           # …/module
-            $repoRoot = Split-Path -Parent $modulesParent             # …
-            $candidate = Join-Path $repoRoot 'bucket'
-            if (Test-Path $candidate) { $BucketPath = $candidate }
-        }
+        $BucketPath = Resolve-BucketPath -BucketPath $BucketPath -CallerScriptRoot $PSScriptRoot
     }
 
     if (-not $BucketPath -or -not (Test-Path $BucketPath)) {
