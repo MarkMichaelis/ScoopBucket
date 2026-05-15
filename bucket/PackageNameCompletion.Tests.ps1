@@ -67,4 +67,37 @@ Describe 'Install-Package / Get-Package -Name argument completer' -Tag 'Light' {
             $m.CompletionText | Should -Match "^'.*'$"
         }
     }
+
+    It "doubles embedded single quotes so apostrophe names parse" {
+        # The completer runs through the bucket index and we don't
+        # ship any apostrophe names today, so exercise the registered
+        # scriptblock directly with a synthetic suggester to prove the
+        # escaping logic itself.
+        $sb = (Get-Command Register-ArgumentCompleter -ErrorAction Ignore)
+        $module = Get-Module MarkMichaelis.ScoopBucket
+        $module | Should -Not -BeNullOrEmpty
+
+        # Pull the registered completer's scriptblock and invoke it with
+        # a synthetic name list via a temporary override of
+        # Get-PackageNameSuggestion in module scope.
+        $result = & $module {
+            $original = Get-Item Function:\Get-PackageNameSuggestion -ErrorAction Ignore
+            try {
+                Set-Item Function:\Get-PackageNameSuggestion -Value { param($WordToComplete) "O'Reilly Books" }
+                $line = "Install-Package -Name oreilly"
+                TabExpansion2 -inputScript $line -cursorColumn $line.Length
+            } finally {
+                if ($original) {
+                    Set-Item Function:\Get-PackageNameSuggestion -Value $original.ScriptBlock
+                }
+            }
+        }
+        $texts = $result.CompletionMatches.CompletionText
+        $texts | Should -Contain "'O''Reilly Books'"
+        # And the suggestion must actually parse as a single string
+        # token — round-trip via Invoke-Expression.
+        foreach ($t in $texts) {
+            { Invoke-Expression "`$null = $t" } | Should -Not -Throw
+        }
+    }
 }

@@ -23,10 +23,15 @@ function Register-PackageNameCompleter {
             return
         }
         foreach ($name in $suggestions) {
-            # Quote names that contain whitespace so PowerShell parses
-            # them as a single argument.
-            if ($name -match '\s') {
-                $completionText = "'$name'"
+            # Quote names that contain whitespace (or apostrophes) so
+            # PowerShell parses them as a single argument. Inside a
+            # single-quoted string, an embedded `'` must be escaped as
+            # `''` per the PowerShell language spec — without that,
+            # completing a name like O'Reilly produces a parse error
+            # the moment the user accepts the suggestion.
+            if ($name -match "[\s']") {
+                $escaped = $name -replace "'", "''"
+                $completionText = "'$escaped'"
             } else {
                 $completionText = $name
             }
