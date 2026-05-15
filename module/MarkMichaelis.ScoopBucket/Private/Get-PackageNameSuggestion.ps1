@@ -48,12 +48,13 @@ function Get-PackageNameSuggestion {
 
     if ($script:PackageNameCacheKey -ne $cacheKey) {
         $names = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-        # Match `Name = 'value'` or `Name = "value"`. We intentionally
-        # don't try to scope to the inside of a [Package]@{...} literal —
-        # the only place `Name = '...'` appears in bundles in practice
-        # is inside Package literals; any false positives would just be
-        # ignored by Install-Package's strict name match at run time.
-        $rx = [regex]'(?m)^\s*Name\s*=\s*[''"]([^''"]+)[''"]'
+        # Match `Name = 'value'` or `Name = "value"` anywhere on a line.
+        # Bundles use both multi-line literals (Name on its own line) and
+        # one-line `[Package]@{ Name = '...'; ...}` literals — anchoring
+        # to ^ excluded the one-liners. The `\b` keeps us off the middle
+        # of identifiers (e.g. `BundleName=`). False positives are
+        # harmless: Install-Package's strict name match ignores them.
+        $rx = [regex]'(?m)\bName\s*=\s*[''"]([^''"]+)[''"]'
         foreach ($f in $bundleFiles) {
             $text = Get-Content -Raw -LiteralPath $f.FullName -ErrorAction SilentlyContinue
             if (-not $text) { continue }

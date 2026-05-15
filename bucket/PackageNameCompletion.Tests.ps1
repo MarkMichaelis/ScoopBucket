@@ -20,6 +20,19 @@ Describe 'Get-PackageNameSuggestion' -Tag 'Light' {
         $names | Should -Contain 'Beyond Compare'
     }
 
+    It 'includes packages declared via one-line [Package]@{ Name = ...; ... } literals' {
+        # Regression: the prior `^\s*Name\s*=\s*` anchor only matched
+        # multi-line literals (Name on its own line). One-liners like
+        # `[Package]@{ Name = 'Visual Studio Code'; ... }` were silently
+        # absent from completion.
+        $names = & (Get-Module MarkMichaelis.ScoopBucket) { Get-PackageNameSuggestion }
+        $names | Should -Contain 'Visual Studio Code'
+        $names | Should -Contain 'Visual Studio'
+        $names | Should -Contain 'Bitwarden'
+        $names | Should -Contain '7-Zip'
+        $names | Should -Contain 'Windows Terminal'
+    }
+
     It 'narrows by case-insensitive prefix' {
         $matches = & (Get-Module MarkMichaelis.ScoopBucket) { Get-PackageNameSuggestion -WordToComplete 'beyon' }
         $matches | Should -Contain 'Beyond Compare'
