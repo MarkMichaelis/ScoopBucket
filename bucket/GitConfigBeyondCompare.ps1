@@ -110,20 +110,46 @@ Function Resolve-BeyondCompareDir {
 Function Invoke-GitConfigBeyondCompare {
     $bcDir = Resolve-BeyondCompareDir
 
-    if ($bcDir -and (Get-Command git -ErrorAction Ignore)) {
-        git config --global diff.tool bc
-        git config --global difftool.bc.path "$bcDir\BComp.exe"
-        git config --global difftool.prompt false
-        git config --global merge.tool bc
-        git config --global mergetool.bc.path "$bcDir\BComp.exe"
-        git config --global mergetool.bc.trustexitcode true
-        git config --global mergetool.keepBackup false
-        git config --global mergetool.prompt false
-        git config --global alias.dt "difftool --dir-diff"
-        Write-Host "Beyond Compare configured for git diff/merge: $bcDir"
+    if (-not (Get-Command git -ErrorAction Ignore)) {
+        Write-Warning "git not found. Skipping Beyond Compare git configuration."
+        return
     }
-    else {
-        Write-Warning "Beyond Compare or git not found. Skipping configuration."
+    if (-not $bcDir) {
+        Write-Warning "Beyond Compare not found. Skipping git configuration."
+        return
     }
+
+    # Use BComp.com (console-waiting variant), not BComp.exe (GUI launcher
+    # which returns immediately). git difftool/mergetool need the caller to
+    # block until the compare window closes. See #14/#46.
+    $bcomp = Join-Path $bcDir 'BComp.com'
+    if (-not (Test-Path $bcomp)) {
+        # Older builds may only ship BComp.exe; fall back rather than fail.
+        $bcomp = Join-Path $bcDir 'BComp.exe'
+    }
+
+    # Always register the `bc` tool config so it's available on demand
+    # via `git difftool --tool=bc`, regardless of which tool is the default.
+    git config --global difftool.bc.path $bcomp
+    git config --global difftool.bc.trustExitCode true
+    git config --global difftool.prompt false
+    git config --global mergetool.bc.path $bcomp
+    git config --global mergetool.bc.trustExitCode true
+    git config --global mergetool.keepBackup false
+    git config --global mergetool.prompt false
+
+    # First-writer-wins for the global default so install order doesn't
+    # silently flip a deliberately-chosen tool. To switch defaults manually:
+    #   git config --global diff.tool <name>
+    #   git config --global merge.tool <name>
+    if (-not (git config --global --get diff.tool))  { git config --global diff.tool  bc }
+    if (-not (git config --global --get merge.tool)) { git config --global merge.tool bc }
+
+    # Aliases — `dt` honors the current default tool; `dtbc` always uses BC
+    # explicitly, so the user can invoke either without changing the default.
+    if (-not (git config --global --get alias.dt))   { git config --global alias.dt   'difftool --dir-diff' }
+    git config --global alias.dtbc 'difftool --tool=bc --dir-diff'
+
+    Write-Host "Beyond Compare configured for git diff/merge: $bcomp"
 }
 Invoke-GitConfigBeyondCompare
