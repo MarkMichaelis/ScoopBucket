@@ -7,8 +7,8 @@
 Describe 'CliCompletion idempotency' -Tag 'Heavy','Idempotency' {
 
     BeforeAll {
-        $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
-        if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force } 
+        $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+        if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force } 
         $script:sandbox = Join-Path ([System.IO.Path]::GetTempPath()) ("CC-idem-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $script:sandbox -Force | Out-Null
         $script:profilePath = Join-Path $script:sandbox 'Profile.ps1'

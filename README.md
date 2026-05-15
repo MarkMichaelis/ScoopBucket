@@ -60,11 +60,11 @@ installation work. A single JSON manifest typically corresponds to a
 member of that group (e.g. `ClientBasePackages.json` →
 `ClientBasePackages.ps1`, which installs Kindle, Bitwarden, Dropbox,
 etc.). Shared helpers live in the `ScoopBucket` PowerShell module under
-`module/ScoopBucket/`, which every bundle script imports at the top.
+`module/MarkMichaelis.ScoopBucket/`, which every bundle script imports at the top.
 
 ### `ScoopBucket` PowerShell module
 
-The repo ships a companion PowerShell module under `module/ScoopBucket/`
+The repo ships a companion PowerShell module under `module/MarkMichaelis.ScoopBucket/`
 that exposes a declarative `[Package]` class plus the helpers
 `Install-Package`, `Get-Package`, and `Invoke-PackageInstall`. Most
 bundles have been migrated to a declarative
@@ -78,8 +78,8 @@ parsing only for legacy ones).
 Each migrated bundle now looks like:
 
 ```powershell
-$scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
-if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force }
+$scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
 
 $Packages = [Package[]]@(
     [Package]@{
@@ -95,7 +95,7 @@ Invoke-PackageInstall -Packages $Packages -Bundle 'OSBasePackages'
 
 The `[Package]` class enforces enums on `Installer` / `Source` / `Scope` /
 `Completion` and rejects misspelled property names at load time. See
-`module/ScoopBucket/Classes/Package.ps1` for the full schema (also
+`module/MarkMichaelis.ScoopBucket/Classes/Package.ps1` for the full schema (also
 `Package.Validate()` for cross-field invariants).
 
 The driver pipeline (validate → topo sort by `DependsOn` → engine
@@ -107,8 +107,8 @@ To use the module locally:
 
 ```powershell
 & .\module\Install-Module.ps1
-Import-Module ScoopBucket -Force
-Get-Command -Module ScoopBucket
+Import-Module MarkMichaelis.ScoopBucket -Force
+Get-Command -Module MarkMichaelis.ScoopBucket
 ```
 
 Top-level helpers for cross-bundle queries:
@@ -276,7 +276,7 @@ on `PATH` whose owning bundle didn't supply a native command. To
 re-run the sweep manually after installing other tools by hand:
 
 ```powershell
-Import-Module D:\Git\ScoopBucket\module\ScoopBucket\ScoopBucket.psd1 -Force
+Import-Module D:\Git\ScoopBucket\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1 -Force
 Invoke-CliCompletionsSweep -Force
 ```
 

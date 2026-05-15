@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Light-suite Pester coverage for the ScoopBucket module's engine
+    Light-suite Pester coverage for the MarkMichaelis.ScoopBucket module's engine
     dispatchers, completion registration, and Invoke-PackageInstall
     pipeline.
 
@@ -21,7 +21,7 @@
 #>
 
 BeforeAll {
-    $script:moduleManifest = Resolve-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'module\ScoopBucket\ScoopBucket.psd1')
+    $script:moduleManifest = Resolve-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1')
     Import-Module $script:moduleManifest -Force
 }
 
@@ -30,11 +30,11 @@ Describe 'Engine dispatchers' -Tag 'Light','Module' {
     Context 'Install-WingetPackage' {
         BeforeAll {
             # Reach into the module scope to invoke the Private function.
-            $script:Engine = & (Get-Module ScoopBucket) { Get-Command Install-WingetPackage }
+            $script:Engine = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Install-WingetPackage }
         }
 
         It 'returns AlreadyInstalled when winget list returns 0' {
-            Mock -ModuleName ScoopBucket winget {
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget {
                 if ($args[0] -eq 'list') {
                     $global:LASTEXITCODE = 0
                     return 'Name Id Version'
@@ -50,7 +50,7 @@ Describe 'Engine dispatchers' -Tag 'Light','Module' {
 
         It 'returns Installed and passes --scope machine when not installed' {
             $script:capturedArgs = $null
-            Mock -ModuleName ScoopBucket winget {
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget {
                 $script:capturedArgs = $args
                 if ($args[0] -eq 'list') { $global:LASTEXITCODE = 1; return '' }
                 $global:LASTEXITCODE = 0
@@ -63,7 +63,7 @@ Describe 'Engine dispatchers' -Tag 'Light','Module' {
         }
 
         It 'returns Installed and adds --source msstore when Source=msstore' {
-            Mock -ModuleName ScoopBucket winget {
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget {
                 if ($args[0] -eq 'list') { $global:LASTEXITCODE = 1; return '' }
                 $script:installArgs = $args
                 $global:LASTEXITCODE = 0
@@ -81,7 +81,7 @@ Describe 'Engine dispatchers' -Tag 'Light','Module' {
         }
 
         It 'returns Failed when winget exits non-zero' {
-            Mock -ModuleName ScoopBucket winget {
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget {
                 if ($args[0] -eq 'list') { $global:LASTEXITCODE = 1; return '' }
                 $global:LASTEXITCODE = 5
                 return 'error'
@@ -96,11 +96,11 @@ Describe 'Engine dispatchers' -Tag 'Light','Module' {
 
     Context 'Install-ChocoPackage' {
         BeforeAll {
-            $script:Engine = & (Get-Module ScoopBucket) { Get-Command Install-ChocoPackage }
+            $script:Engine = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Install-ChocoPackage }
         }
 
         It 'returns Installed when choco exits 0' {
-            Mock -ModuleName ScoopBucket choco {
+            Mock -ModuleName MarkMichaelis.ScoopBucket choco {
                 if ($args[0] -eq 'list') { return '' }
                 $global:LASTEXITCODE = 0
                 return 'Installed.'
@@ -112,7 +112,7 @@ Describe 'Engine dispatchers' -Tag 'Light','Module' {
         }
 
         It 'returns AlreadyInstalled when choco list shows the package' {
-            Mock -ModuleName ScoopBucket choco {
+            Mock -ModuleName MarkMichaelis.ScoopBucket choco {
                 if ($args[0] -eq 'list') { return 'nodejs 18.0.0' }
                 $global:LASTEXITCODE = 0
                 return 'Installed.'
@@ -124,7 +124,7 @@ Describe 'Engine dispatchers' -Tag 'Light','Module' {
         }
 
         It 'treats exit 3010 (reboot pending) as Installed' {
-            Mock -ModuleName ScoopBucket choco {
+            Mock -ModuleName MarkMichaelis.ScoopBucket choco {
                 if ($args[0] -eq 'list') { return '' }
                 $global:LASTEXITCODE = 3010
                 return 'Reboot required.'
@@ -139,12 +139,12 @@ Describe 'Engine dispatchers' -Tag 'Light','Module' {
 
     Context 'Install-NpmGlobalPackage' {
         BeforeAll {
-            $script:Engine = & (Get-Module ScoopBucket) { Get-Command Install-NpmGlobalPackage }
+            $script:Engine = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Install-NpmGlobalPackage }
         }
 
         It 'returns Failed when npm not on PATH' {
             # Override the Get-Command lookup in module scope.
-            Mock -ModuleName ScoopBucket Get-Command { return $null } -ParameterFilter { $Name -in @('npm','npm.cmd') }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return $null } -ParameterFilter { $Name -in @('npm','npm.cmd') }
             $pkg = [Package]@{ Name='claude-code'; Installer='npmGlobal'; Id='@anthropic-ai/claude-code' }
             $r = & $script:Engine -Package $pkg
             $r.State | Should -Be 'Failed'
@@ -154,11 +154,11 @@ Describe 'Engine dispatchers' -Tag 'Light','Module' {
 
     Context 'Install-DotnetToolPackage' {
         BeforeAll {
-            $script:Engine = & (Get-Module ScoopBucket) { Get-Command Install-DotnetToolPackage }
+            $script:Engine = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Install-DotnetToolPackage }
         }
 
         It 'returns Failed when dotnet not on PATH' {
-            Mock -ModuleName ScoopBucket Get-Command { return $null } -ParameterFilter { $Name -eq 'dotnet' }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return $null } -ParameterFilter { $Name -eq 'dotnet' }
             $pkg = [Package]@{ Name='poshmcp'; Installer='dotnetTool'; Id='poshmcp' }
             $r = & $script:Engine -Package $pkg
             $r.State | Should -Be 'Failed'
@@ -175,11 +175,11 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
     }
 
     BeforeEach {
-        Mock -ModuleName ScoopBucket Install-WingetPackage     { return @{State='Installed'; Reason=$null} }
-        Mock -ModuleName ScoopBucket Install-ScoopPackage      { return @{State='Installed'; Reason=$null} }
-        Mock -ModuleName ScoopBucket Install-ChocoPackage      { return @{State='Installed'; Reason=$null} }
-        Mock -ModuleName ScoopBucket Install-NpmGlobalPackage  { return @{State='Installed'; Reason=$null} }
-        Mock -ModuleName ScoopBucket Install-DotnetToolPackage { return @{State='Installed'; Reason=$null} }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Install-WingetPackage     { return @{State='Installed'; Reason=$null} }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Install-ScoopPackage      { return @{State='Installed'; Reason=$null} }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Install-ChocoPackage      { return @{State='Installed'; Reason=$null} }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Install-NpmGlobalPackage  { return @{State='Installed'; Reason=$null} }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Install-DotnetToolPackage { return @{State='Installed'; Reason=$null} }
     }
 
     It 'dispatches packages to the correct engine' {
@@ -192,9 +192,9 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
         $r.Count | Should -Be 3
         ($r | ForEach-Object State) -join ',' | Should -Be 'Installed,Installed,Installed'
         # Verify each engine got called exactly once.
-        Should -Invoke -ModuleName ScoopBucket Install-WingetPackage -Times 1 -Exactly
-        Should -Invoke -ModuleName ScoopBucket Install-ChocoPackage  -Times 1 -Exactly
-        Should -Invoke -ModuleName ScoopBucket Install-ScoopPackage  -Times 1 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Install-WingetPackage -Times 1 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Install-ChocoPackage  -Times 1 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Install-ScoopPackage  -Times 1 -Exactly
     }
 
     It 'honors DependsOn ordering' {
@@ -256,7 +256,7 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
     }
 
     It 'records Failed and continues when the engine returns Failed' {
-        Mock -ModuleName ScoopBucket Install-WingetPackage {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Install-WingetPackage {
             return @{ State = 'Failed'; Reason = 'simulated' }
         }
         $pkgs = [Package[]]@(
@@ -294,15 +294,15 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
         $r[0].State | Should -Be 'Installed'
         # Dispatcher is still invoked (to emit "[WhatIf] ..." log lines), it
         # just must not run the underlying engine.
-        Should -Invoke -ModuleName ScoopBucket Install-WingetPackage -Times 1 -Exactly -ParameterFilter { $WhatIf -eq $true }
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Install-WingetPackage -Times 1 -Exactly -ParameterFilter { $WhatIf -eq $true }
     }
 }
 
 Describe 'Completion registration' -Tag 'Light','Module' {
 
     BeforeAll {
-        $script:RegisterFn = & (Get-Module ScoopBucket) { Get-Command Register-PackageCompletion }
-        $script:SetBlockFn = & (Get-Module ScoopBucket) { Get-Command Set-PackageCompletionProfileBlock }
+        $script:RegisterFn = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Register-PackageCompletion }
+        $script:SetBlockFn = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Set-PackageCompletionProfileBlock }
         $script:profileDir = Join-Path $TestDrive 'profile-dir'
         New-Item -ItemType Directory -Path $script:profileDir -Force | Out-Null
     }
@@ -358,7 +358,7 @@ Describe 'Completion registration' -Tag 'Light','Module' {
 Describe 'Test-PackageCompletionWorks (end-to-end probe)' -Tag 'Light','Module' {
 
     BeforeAll {
-        $script:ProbeFn = & (Get-Module ScoopBucket) { Get-Command Test-PackageCompletionWorks }
+        $script:ProbeFn = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Test-PackageCompletionWorks }
     }
 
     It 'returns Verified=$false with a reason when the profile is missing' {

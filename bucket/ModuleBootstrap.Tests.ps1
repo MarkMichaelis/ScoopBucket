@@ -1,32 +1,32 @@
 <#
 .SYNOPSIS
-    Light-suite test for ScoopBucket module bootstrap.
+    Light-suite test for MarkMichaelis.ScoopBucket module bootstrap.
 
 .DESCRIPTION
     Asserts that:
-      - The ScoopBucket module loads from its working-tree manifest.
+      - The MarkMichaelis.ScoopBucket module loads from its working-tree manifest.
       - The migrated [Package] surface (class, Install-Package, Get-Package,
         Invoke-PackageInstall) is importable in the caller's scope after a
-        plain `Import-Module ScoopBucket`.
+        plain `Import-Module MarkMichaelis.ScoopBucket`.
       - ChatGPT.ps1 contributes its canonical declarative entry to
         Get-Package output.
 #>
 
 BeforeAll {
     $script:repoRoot   = Split-Path -Parent $PSScriptRoot
-    $script:moduleRoot = Join-Path $script:repoRoot 'module\ScoopBucket'
-    $script:psd1       = Join-Path $script:moduleRoot 'ScoopBucket.psd1'
+    $script:moduleRoot = Join-Path $script:repoRoot 'module\MarkMichaelis.ScoopBucket'
+    $script:psd1       = Join-Path $script:moduleRoot 'MarkMichaelis.ScoopBucket.psd1'
 }
 
-Describe 'ScoopBucket module bootstrap' -Tag 'Light', 'Module' {
+Describe 'MarkMichaelis.ScoopBucket module bootstrap' -Tag 'Light', 'Module' {
     It 'imports cleanly from the working-tree manifest' {
         { Import-Module $script:psd1 -Force -ErrorAction Stop } | Should -Not -Throw
-        Get-Module ScoopBucket | Should -Not -BeNullOrEmpty
+        Get-Module MarkMichaelis.ScoopBucket | Should -Not -BeNullOrEmpty
     }
 
     It 'exports the declarative public surface' {
         Import-Module $script:psd1 -Force
-        $exports = (Get-Module ScoopBucket).ExportedFunctions.Keys
+        $exports = (Get-Module MarkMichaelis.ScoopBucket).ExportedFunctions.Keys
         foreach ($fn in @('Install-Package', 'Get-Package', 'Invoke-PackageInstall',
                           'Register-CliCompletion', 'Test-ScoopPackageInstalled')) {
             $exports | Should -Contain $fn

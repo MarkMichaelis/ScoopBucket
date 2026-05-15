@@ -2,12 +2,12 @@
 #requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
 # Pester tests for the internal Resolve-PackageOrder helper in the
-# ScoopBucket module: validation of DependsOn references, transitive
-# closure when filtering by -Name, -Skip handling, topological sort,
-# cycle detection.
+# MarkMichaelis.ScoopBucket module: validation of DependsOn references,
+# transitive closure when filtering by -Name, -Skip handling, topological
+# sort, cycle detection.
 
 BeforeAll {
-    $script:moduleRoot = Resolve-Path (Join-Path $PSScriptRoot '..\module\ScoopBucket')
+    $script:moduleRoot = Resolve-Path (Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket')
     $script:classPath  = Join-Path $script:moduleRoot 'Classes\Package.ps1'
     $script:resolvePath = Join-Path $script:moduleRoot 'Private\Resolve-PackageOrder.ps1'
 

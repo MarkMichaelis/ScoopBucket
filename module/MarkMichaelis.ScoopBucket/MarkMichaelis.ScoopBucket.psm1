@@ -1,8 +1,8 @@
 # Root module for ScoopBucket.
 #
 # The [Package] class is loaded into the *caller* scope via the manifest's
-# ScriptsToProcess entry (see ScoopBucket.psd1) so that bundle scripts can
-# write `[Package]@{ ... }` after a plain `Import-Module ScoopBucket`,
+# ScriptsToProcess entry (see MarkMichaelis.ScoopBucket.psd1) so that bundle scripts can
+# write `[Package]@{ ... }` after a plain `Import-Module MarkMichaelis.ScoopBucket`,
 # without the strict-load semantics of `using module`.
 #
 # This .psm1 then dot-sources the rest of the module's surface area into

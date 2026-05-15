@@ -273,7 +273,7 @@ $seen    = [System.Collections.Generic.HashSet[string]]::new(
     [System.StringComparer]::OrdinalIgnoreCase)
 
 # ---------------------------------------------------------------------------
-# Source 0: declarative [Package] arrays via the ScoopBucket module.
+# Source 0: declarative [Package] arrays via the MarkMichaelis.ScoopBucket module.
 # Walks every migrated bundle's $Packages collection and emits one record
 # per CliCommand. Bundles that have already moved to the declarative form
 # stop contributing to the text-parsed sources below (their bodies no
@@ -283,7 +283,7 @@ $seen    = [System.Collections.Generic.HashSet[string]]::new(
 
 $declarativeBundles = @{}
 try {
-    $modulePath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'module\ScoopBucket\ScoopBucket.psd1'
+    $modulePath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
     if (Test-Path $modulePath) {
         Import-Module $modulePath -Force -ErrorAction Stop
         $declarativePackages = Get-Package -BucketPath $BucketPath -ErrorAction Stop
@@ -337,7 +337,7 @@ try {
         }
     }
 } catch {
-    Write-Warning "ScoopBucket module Get-Package discovery failed: $($_.Exception.Message). Falling back to text parsing only."
+    Write-Warning "MarkMichaelis.ScoopBucket module Get-Package discovery failed: $($_.Exception.Message). Falling back to text parsing only."
 }
 
 # ---------------------------------------------------------------------------

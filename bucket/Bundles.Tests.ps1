@@ -26,8 +26,8 @@
 #>
 
 BeforeAll {
-    $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
-    if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force } 
+    $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+    if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force } 
     $script:allPkgs = @(Get-Package -BucketPath $PSScriptRoot)
     $script:byName  = @{}
     foreach ($p in $script:allPkgs) {
@@ -141,8 +141,8 @@ Describe 'Declarative bundles (data-driven)' -Tag 'Light','Bundle' {
 
 Describe 'Specific cross-bundle placement contracts' -Tag 'Light','Bundle' {
     BeforeAll {
-        $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
-        if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force } 
+        $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+        if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force } 
         $script:byBundle = @{}
         foreach ($p in @(Get-Package -BucketPath $PSScriptRoot)) {
             if (-not $script:byBundle.ContainsKey($p.Bundle)) {
@@ -173,7 +173,7 @@ Describe 'Specific cross-bundle placement contracts' -Tag 'Light','Bundle' {
         $si.HasPostInstallScript | Should -BeFalse
     }
 
-    It 'Beyond Compare has a PostInstallScript for the bcompc shim' {
+    It 'Beyond Compare has a PostInstallScript for the bcomp.com shim' {
         $bc = $script:byBundle.DeveloperBasePackages | Where-Object Name -eq 'Beyond Compare'
         $bc.HasPostInstallScript | Should -BeTrue
     }

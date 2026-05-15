@@ -93,7 +93,7 @@ function Install-Package {
 
         $pwsh = (Get-Process -Id $PID).Path
         if (-not $pwsh) { $pwsh = 'pwsh' }
-        $modulePsd1 = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'ScoopBucket\ScoopBucket.psd1'
+        $modulePsd1 = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
         $namesJson = ($entry.Names | ConvertTo-Json -Compress)
         $flags = @()
         if ($DryRun)         { $flags += '-DryRun' }
@@ -104,7 +104,7 @@ function Install-Package {
 `$ErrorActionPreference='Continue'
 Import-Module '$modulePsd1' -Force
 `$names = '$namesJson' | ConvertFrom-Json
-`$realDriver = Get-Command Invoke-PackageInstall -Module ScoopBucket
+`$realDriver = Get-Command Invoke-PackageInstall -Module MarkMichaelis.ScoopBucket
 function Invoke-PackageInstall {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object[]]`$Packages, [Parameter(Mandatory)][string]`$Bundle, [Parameter(ValueFromRemainingArguments)]`$Remaining)

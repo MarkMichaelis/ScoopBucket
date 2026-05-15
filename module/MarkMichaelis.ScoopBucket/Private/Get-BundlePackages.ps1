@@ -33,7 +33,7 @@ function Get-BundlePackages {
         if ($env:SCOOPBUCKET_BUCKET_PATH) {
             $BucketPath = $env:SCOOPBUCKET_BUCKET_PATH
         } else {
-            # Module lives at <repo>/module/ScoopBucket/. Walk up two.
+            # Module lives at <repo>/module/MarkMichaelis.ScoopBucket/. Walk up two.
             $moduleDir = $PSScriptRoot                                # …/Private
             $moduleRoot = Split-Path -Parent $moduleDir               # …/ScoopBucket
             $modulesParent = Split-Path -Parent $moduleRoot           # …/module
@@ -52,7 +52,7 @@ function Get-BundlePackages {
         Where-Object { $_.Name -notmatch '\.Tests\.ps1$' } |
         Where-Object { $_.Name -ne 'Utils.ps1' -and $_.Name -ne 'Invoke-Tests.ps1' }
 
-    $modulePsd1 = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'ScoopBucket\ScoopBucket.psd1'
+    $modulePsd1 = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
 
     $packageClass = Join-Path (Split-Path -Parent $PSScriptRoot) 'Classes\Package.ps1'
 
@@ -76,7 +76,7 @@ function Get-BundlePackages {
         }
 
         # Run the bundle in a child pwsh -NoProfile. We deliberately do
-        # NOT Import-Module ScoopBucket in the probe because the module's
+        # NOT Import-Module MarkMichaelis.ScoopBucket in the probe because the module's
         # exported `Invoke-PackageInstall` would shadow any local
         # override. Instead we dot-source just the Package class (needed
         # so `[Package]@{...}` parses) and inject our own

@@ -2,8 +2,8 @@
 #
 # Top-level setup (resolving $env:SCOOP and dot-sourcing scoop's internal
 # libraries) is wrapped in Initialize-ScoopEnvironment and invoked from
-# ScoopBucket.psm1 on module load. Other helpers are plain functions and
-# the public ones are listed in ScoopBucket.psd1's FunctionsToExport.
+# MarkMichaelis.ScoopBucket.psm1 on module load. Other helpers are plain functions and
+# the public ones are listed in MarkMichaelis.ScoopBucket.psd1's FunctionsToExport.
 #
 # Resolve-ScoopRoot, Test-IsElevated, Add-MachinePath and
 # Update-PathFromRegistry live in PathUtilities.ps1 (not duplicated here).
@@ -17,7 +17,7 @@ function Initialize-ScoopEnvironment {
         Resolve $env:SCOOP defensively and dot-source the scoop internal
         libraries (`parse_app`, `Find-BucketDirectory`, `search_bucket`) so
         the `scoop` / `Get-LocalBucket` wrappers in this module can call
-        them. Called once by ScoopBucket.psm1 on module load.
+        them. Called once by MarkMichaelis.ScoopBucket.psm1 on module load.
     #>
     [CmdletBinding()]
     param()

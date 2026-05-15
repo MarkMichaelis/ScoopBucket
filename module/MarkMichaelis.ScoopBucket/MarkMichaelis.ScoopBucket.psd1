@@ -8,8 +8,8 @@
 # after a plain Import-Module without `using module`.
 #
 @{
-    RootModule        = 'ScoopBucket.psm1'
-    ModuleVersion     = '0.4.0'
+    RootModule        = 'MarkMichaelis.ScoopBucket.psm1'
+    ModuleVersion     = '1.0.0'
     GUID              = 'b7e8a4c2-9f3d-4b76-8e6a-1c5d2f7b9e10'
     Author            = 'Mark Michaelis'
     CompanyName       = 'IntelliTect'
@@ -52,7 +52,7 @@
             Tags         = @('Scoop', 'Winget', 'Chocolatey', 'PackageManagement', 'Install')
             LicenseUri   = 'https://github.com/MarkMichaelis/ScoopBucket/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/MarkMichaelis/ScoopBucket'
-            ReleaseNotes = '0.4.0 — Consolidated bucket/Utils.ps1 into the module (Private/Legacy.ps1); helpers (choco, scoop, Test-*PackageInstalled, Install-LocalManifest, Install-BucketApp, Register-CliCompletion, Invoke-CliCompletionsSweep, etc.) are now exported from ScoopBucket and discovered via PSModulePath. Bundle scripts replace `. Utils.ps1` + `Get-ScoopBucketModulePath` plumbing with a 2-line module bootstrap. Utils.ps1 retired.'
+            ReleaseNotes = '1.0.0 — Module renamed from `ScoopBucket` to `MarkMichaelis.ScoopBucket` to namespace it against any future user-bucket modules and avoid collision with generic Scoop tooling. Public surface unchanged; bundle scripts now Import-Module MarkMichaelis.ScoopBucket. The console-waiting Beyond Compare shim is renamed from `bcompc` to `bcomp.com`.'
         }
     }
 }

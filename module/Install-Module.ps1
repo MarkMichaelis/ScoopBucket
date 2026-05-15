@@ -5,16 +5,18 @@ param(
 
 <#
 .SYNOPSIS
-    Symlink the ScoopBucket module into the current user's PSModulePath so
-    `Import-Module ScoopBucket` (and auto-loading of `Install-Package`,
-    `Get-Package`, `Invoke-PackageInstall`) works from any PowerShell
-    session on this machine.
+    Symlink the MarkMichaelis.ScoopBucket module into the current user's
+    PSModulePath so `Import-Module MarkMichaelis.ScoopBucket` (and
+    auto-loading of `Install-Package`, `Get-Package`,
+    `Invoke-PackageInstall`) works from any PowerShell session on this
+    machine.
 
 .DESCRIPTION
     Creates a junction (no admin required for user-scope module paths)
-    from $HOME\Documents\PowerShell\Modules\ScoopBucket to this repo's
-    module/ScoopBucket folder. Re-running is idempotent; pass -Force to
-    replace an existing entry (file, real directory, or stale junction).
+    from $HOME\Documents\PowerShell\Modules\MarkMichaelis.ScoopBucket
+    to this repo's module/MarkMichaelis.ScoopBucket folder. Re-running
+    is idempotent; pass -Force to replace an existing entry (file, real
+    directory, or stale junction).
 
 .NOTES
     PowerShell auto-imports modules located on $env:PSModulePath the first
@@ -24,7 +26,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$source = Join-Path $PSScriptRoot 'ScoopBucket'
+$source = Join-Path $PSScriptRoot 'MarkMichaelis.ScoopBucket'
 if (-not (Test-Path -LiteralPath $source -PathType Container)) {
     throw "Source module folder not found: $source"
 }
@@ -48,13 +50,13 @@ if (-not (Test-Path -LiteralPath $userModulePath -PathType Container)) {
     }
 }
 
-$target = Join-Path $userModulePath 'ScoopBucket'
+$target = Join-Path $userModulePath 'MarkMichaelis.ScoopBucket'
 
 if (Test-Path -LiteralPath $target) {
     $existing = Get-Item -LiteralPath $target -Force
     $isJunction = ($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
     if ($isJunction -and $existing.Target -and ((Resolve-Path -LiteralPath $existing.Target).Path -eq (Resolve-Path -LiteralPath $source).Path)) {
-        Write-Host "ScoopBucket module already linked at: $target"
+        Write-Host "MarkMichaelis.ScoopBucket module already linked at: $target"
         return
     }
     if (-not $Force) {
@@ -67,6 +69,6 @@ if (Test-Path -LiteralPath $target) {
 
 if ($PSCmdlet.ShouldProcess("$target -> $source", 'New-Item -ItemType Junction')) {
     New-Item -ItemType Junction -Path $target -Target $source | Out-Null
-    Write-Host "Linked ScoopBucket module: $target -> $source"
-    Write-Host "Test with: Import-Module ScoopBucket -Force; Get-Command -Module ScoopBucket"
+    Write-Host "Linked MarkMichaelis.ScoopBucket module: $target -> $source"
+    Write-Host "Test with: Import-Module MarkMichaelis.ScoopBucket -Force; Get-Command -Module MarkMichaelis.ScoopBucket"
 }

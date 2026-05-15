@@ -1,19 +1,19 @@
 #requires -Version 7.0
 #requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
-# Pester tests for the ScoopBucket module: covers the manifest, module
+# Pester tests for the MarkMichaelis.ScoopBucket module: covers the manifest, module
 # import (including [Package] class projection into caller scope via
 # ScriptsToProcess), exported surface, and the Package class invariants
 # enforced by Validate(). All tagged Light so they run on every PR.
 
 BeforeAll {
-    $script:moduleRoot   = Resolve-Path (Join-Path $PSScriptRoot '..\module\ScoopBucket')
-    $script:manifestPath = Join-Path $script:moduleRoot 'ScoopBucket.psd1'
+    $script:moduleRoot   = Resolve-Path (Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket')
+    $script:manifestPath = Join-Path $script:moduleRoot 'MarkMichaelis.ScoopBucket.psd1'
     $script:classPath    = Join-Path $script:moduleRoot 'Classes\Package.ps1'
 
     # Remove any leftover module from a previous test run so each test
     # starts from a clean slate.
-    Get-Module ScoopBucket -All | Remove-Module -Force -ErrorAction SilentlyContinue
+    Get-Module MarkMichaelis.ScoopBucket -All | Remove-Module -Force -ErrorAction SilentlyContinue
 
     # Dot-source the class so [Package] is reachable in test scope without
     # depending on `using module` (which has parse-time semantics that
@@ -22,13 +22,13 @@ BeforeAll {
 }
 
 AfterAll {
-    Get-Module ScoopBucket -All | Remove-Module -Force -ErrorAction SilentlyContinue
+    Get-Module MarkMichaelis.ScoopBucket -All | Remove-Module -Force -ErrorAction SilentlyContinue
 }
 
-Describe 'ScoopBucket module manifest' -Tag 'Light', 'Module' {
+Describe 'MarkMichaelis.ScoopBucket module manifest' -Tag 'Light', 'Module' {
     It 'has a valid manifest' {
         $manifest = Test-ModuleManifest -Path $script:manifestPath -ErrorAction Stop
-        $manifest.Name      | Should -Be 'ScoopBucket'
+        $manifest.Name      | Should -Be 'MarkMichaelis.ScoopBucket'
         $manifest.Version   | Should -BeGreaterOrEqual ([version]'0.1.0')
     }
 
@@ -62,21 +62,21 @@ Describe 'ScoopBucket module manifest' -Tag 'Light', 'Module' {
     }
 }
 
-Describe 'ScoopBucket module import' -Tag 'Light', 'Module' {
+Describe 'MarkMichaelis.ScoopBucket module import' -Tag 'Light', 'Module' {
     BeforeAll {
         Import-Module $script:manifestPath -Force -ErrorAction Stop
     }
 
     AfterAll {
-        Remove-Module ScoopBucket -Force -ErrorAction SilentlyContinue
+        Remove-Module MarkMichaelis.ScoopBucket -Force -ErrorAction SilentlyContinue
     }
 
     It 'imports cleanly' {
-        Get-Module ScoopBucket | Should -Not -BeNullOrEmpty
+        Get-Module MarkMichaelis.ScoopBucket | Should -Not -BeNullOrEmpty
     }
 
     It 'exports the public functions after import' {
-        $commands = Get-Command -Module ScoopBucket | ForEach-Object Name
+        $commands = Get-Command -Module MarkMichaelis.ScoopBucket | ForEach-Object Name
         foreach ($fn in @(
             'Add-MachinePath',
             'Get-Package',

@@ -2,7 +2,7 @@
 #
 # Mirrors the well-tested bucket/Utils.ps1 implementation but lives
 # inside the module so a migrated bundle can simply
-# `Import-Module ScoopBucket` and let Invoke-PackageInstall route
+# `Import-Module MarkMichaelis.ScoopBucket` and let Invoke-PackageInstall route
 # completion through Register-PackageCompletion below.
 #
 # Strategy:

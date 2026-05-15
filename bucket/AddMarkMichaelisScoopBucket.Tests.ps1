@@ -1,7 +1,7 @@
 Describe "Install AddMarkMichaelisScoopBucket" -Tag 'Light', 'Install' {
     BeforeAll {
-        $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
-        if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force }
+        $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+        if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
         $manifest = Get-Content "$PSScriptRoot\AddMarkMichaelisScoopBucket.json" -Raw | ConvertFrom-Json
         $script:installScript = $manifest.installer.script -join "`n"
         # Most users running these tests already have the MarkMichaelis bucket

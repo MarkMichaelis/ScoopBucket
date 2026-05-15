@@ -1,5 +1,5 @@
-$scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
-if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force }
+$scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
 
 # Refs:
 #   #14/#46  BeyondCompare: winget MSIX is user-scope only -> scoop extras
@@ -15,19 +15,19 @@ $Packages = [Package[]]@(
         Installer   = 'scoop'
         Id          = 'extras/beyondcompare'
         CliCommands = @('bcomp','bcompare')
-        Notes       = 'Keep scoop default bcomp shim (BComp.exe, GUI launcher). Add a separate bcompc shim for BComp.com (console-waiting variant) so git/scripted callers can request blocking semantics on demand. Refs #14/#46.'
+        Notes       = 'Keep scoop default bcomp shim (BComp.exe, GUI launcher). Add a separate bcomp.com shim for BComp.com (console-waiting variant) so git/scripted callers can request blocking semantics on demand. Refs #14/#46.'
         PostInstallScript = {
             try {
                 $dir = (& scoop prefix beyondcompare 2>$null | Select-Object -First 1)
                 $bcompCom = if ($dir) { Join-Path $dir 'BComp.com' } else { $null }
                 if ($bcompCom -and (Test-Path $bcompCom)) {
-                    # Drop any prior bcompc shim before re-adding so the
+                    # Drop any prior bcomp.com shim before re-adding so the
                     # PostInstallScript stays idempotent across re-runs.
-                    & scoop shim rm bcompc 2>&1 | Out-Null
-                    & scoop shim add bcompc $bcompCom 2>&1 | ForEach-Object { Write-Host "  $_" }
+                    & scoop shim rm bcomp.com 2>&1 | Out-Null
+                    & scoop shim add bcomp.com $bcompCom 2>&1 | ForEach-Object { Write-Host "  $_" }
                 }
             } catch {
-                Write-Warning "Beyond Compare bcompc shim setup failed: $($_.Exception.Message)"
+                Write-Warning "Beyond Compare bcomp.com shim setup failed: $($_.Exception.Message)"
             }
         }
     }

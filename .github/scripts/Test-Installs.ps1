@@ -605,7 +605,7 @@ function Get-AllPackages {
     .SYNOPSIS
         Scans all PS1 scripts in the bucket directory and returns discovered packages.
     .DESCRIPTION
-        Source 0: declarative [Package] arrays via the ScoopBucket module.
+        Source 0: declarative [Package] arrays via the MarkMichaelis.ScoopBucket module.
         Source 1: text-parsing legacy bundles that have not yet been migrated.
         Excludes Utils.ps1 (shared helpers) and *.Tests.ps1 (test files).
     #>
@@ -616,7 +616,7 @@ function Get-AllPackages {
 
     # --- Source 0: declarative bundles via Get-Package -----------------------
     try {
-        $modulePath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'module\ScoopBucket\ScoopBucket.psd1'
+        $modulePath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
         if (Test-Path $modulePath) {
             Import-Module $modulePath -Force -ErrorAction Stop
             foreach ($p in (Get-Package -BucketPath $BucketPath -ErrorAction Stop)) {
