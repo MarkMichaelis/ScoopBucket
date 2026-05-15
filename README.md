@@ -316,11 +316,69 @@ Behavior:
 
 ## Testing
 
-A per-package functional-test framework based on Pester is in development
-(see `*.Tests.ps1` files alongside each manifest). Until the shared helper
-lands, the simplest pre-push check is:
+Package install tests use Pester. Most single-package manifests share the
+same install-then-verify shape, so they're driven by a **data-driven
+harness** rather than one file per manifest:
+
+- `bucket/ManifestInstall.Tests.ps1` — discovers every `<name>.json`
+  manifest in `bucket/`, then for each one declared in the hints table
+  emits three test cases: *installs from the local manifest*, *is
+  idempotent on re-run*, *passes the post-install verification*.
+- `bucket/ManifestTestHints.ps1` — declarative table mapping each
+  manifest to a verification strategy. Supported verifiers:
+  - `Cli` — `Test-Command '<cli>'`
+  - `GetProgram` — `Get-Program -Filter '<pattern>'`
+  - `Choco` — `Test-ChocolateyPackageInstalled '<id>'`
+  - `Custom` — arbitrary scriptblock returning truthy
+  - `Scoop` (default) — `Test-ScoopPackageInstalled '<name>'`
+  
+  Optional per-entry knobs: `Manual` (adds the `Manual` tag),
+  `PreserveIfInstalled` (skip the destructive `scoop uninstall` in
+  `BeforeAll` and skip the install assertion when the package is already
+  present), `Reason` (free-text rationale).
+
+**Adding a new package**
+
+1. Drop `<Name>.json` + `<Name>.ps1` in `bucket/`.
+2. Add a `<Name> = @{ Verify = '...'; ... }` line to
+   `bucket/ManifestTestHints.ps1`. Manifests with no entry fall through
+   to the `Scoop` default, but a hint is preferred so the post-install
+   contract is explicit.
+3. A `Light`-tag drift test in `ManifestInstall.Tests.ps1` enforces that
+   every manifest is accounted for and every hint targets a real
+   manifest, so a missing or stale entry fails fast.
+
+**Bespoke per-package tests** still live in their own `*.Tests.ps1`
+files when the shape doesn't fit "install + idempotent + verify":
+
+- `McAfeeUninstall.Tests.ps1` — uninstaller flow.
+- `AddLocalRepoBucket.Tests.ps1`, `AddMarkMichaelisScoopBucket.Tests.ps1`
+  — `scoop bucket add`, not `scoop install`.
+- `GitConfigBeyondCompare.Tests.ps1`, `GitConfigVSCode.Tests.ps1`,
+  `GitConfigVisualStudio.Tests.ps1`, `GitConfigure.Tests.ps1` —
+  multi-assertion `git config` checks; the VSCode file also carries
+  `Light/Unit` coverage for `Resolve-VSCodeCommand` / `Invoke-GitDiffCode`.
+
+**Module-level tests** (`Package.Tests.ps1`, `PackageInstall.Tests.ps1`,
+`PackageOrder.Tests.ps1`, `PackageNameCompletion.Tests.ps1`,
+`InstallPackageFilter.Tests.ps1`, `Bundles.Tests.ps1`,
+`ModuleBootstrap.Tests.ps1`, `PSCompletionsAutoInstall.Tests.ps1`,
+`Completion*.Tests.ps1`, `CliAvailabilityPinned.Tests.ps1`,
+`Save-Artifact.Tests.ps1`, `ManifestVersionBumps.Tests.ps1`,
+`PackageCommands.Tests.ps1`, `CliCompletionOutput.Tests.ps1`) exercise
+the `MarkMichaelis.ScoopBucket` module itself rather than individual
+package installs.
+
+**Quick local check** for a single manifest:
 
 ```powershell
 pwsh -NoProfile -File D:\Git\ScoopBucket\bucket\<Name>.ps1   # 1st run
 pwsh -NoProfile -File D:\Git\ScoopBucket\bucket\<Name>.ps1   # 2nd run — must succeed
 ```
+
+Or run only the harness's drift checks (fast; no installs):
+
+```powershell
+Invoke-Pester -Path bucket\ManifestInstall.Tests.ps1 -Tag Light
+```
+
