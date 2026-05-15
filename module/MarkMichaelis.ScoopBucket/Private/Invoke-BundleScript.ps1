@@ -30,7 +30,7 @@ function Invoke-BundleScript {
     .PARAMETER Names
         Optional -Name filter. When omitted the whole bundle installs.
 
-    .PARAMETER DryRun, SkipCompletion
+    .PARAMETER DryRun, SkipCompletion, ForceCompletion
         Passed through to `Invoke-PackageInstall`.
     #>
     [CmdletBinding()]
@@ -39,7 +39,8 @@ function Invoke-BundleScript {
         [Parameter(Mandatory)][string]$Bundle,
         [string[]]$Names,
         [switch]$DryRun,
-        [switch]$SkipCompletion
+        [switch]$SkipCompletion,
+        [switch]$ForceCompletion
     )
 
     if ($Names -and $Names.Count -gt 0) {
@@ -52,8 +53,9 @@ function Invoke-BundleScript {
     $modulePsd1 = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
 
     $flags = @()
-    if ($DryRun)         { $flags += '-DryRun' }
-    if ($SkipCompletion) { $flags += '-SkipCompletion' }
+    if ($DryRun)          { $flags += '-DryRun' }
+    if ($SkipCompletion)  { $flags += '-SkipCompletion' }
+    if ($ForceCompletion) { $flags += '-ForceCompletion' }
     $flagsStr = $flags -join ' '
 
     $nameFilterLiteral = ''
