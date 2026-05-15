@@ -126,3 +126,37 @@ Describe 'Resolve-PackageOrder — error cases' -Tag 'Light', 'Module' {
             Should -Throw -ExpectedMessage "*cycle or unresolved*"
     }
 }
+
+Describe 'Resolve-PackageOrder  cross-scope [Package] identity' -Tag 'Light', 'Module' {
+    It 'accepts [Package] instances created in a different scope chain' {
+        # Regression for the dual-class-identity bug: the [Package] class
+        # is loaded once via the module manifest's ScriptsToProcess (into
+        # the caller scope) and again by the psm1 (into module scope), so
+        # a [Package] from scope A is NOT assignment-compatible with
+        # [Package] in scope B. Internal helpers must therefore type
+        # their array parameters as [object[]], not [Package[]].
+        $foreignClassPath = Join-Path ([System.IO.Path]::GetTempPath()) "Package-foreign-$PID-$([guid]::NewGuid().ToString('N')).ps1"
+        Copy-Item -LiteralPath $script:classPath -Destination $foreignClassPath -Force
+        try {
+            $foreignPkgs = & {
+                . $foreignClassPath
+                ,@(
+                    [Package]@{ Name = 'a'; Installer = 'scoop'; Id = 'main/a' },
+                    [Package]@{ Name = 'b'; Installer = 'scoop'; Id = 'main/b'; DependsOn = @('a') }
+                )
+            }
+
+            # Sanity: $foreignPkgs and our local [Package] are different
+            # type identities (same simple Name 'Package').
+            $foreignType = $foreignPkgs[0].GetType()
+            $foreignType.Name | Should -Be 'Package'
+
+            # The fix under test: [object[]] parameter accepts them.
+            $result = Resolve-PackageOrder -Packages $foreignPkgs
+            ($result | ForEach-Object Name) -join ',' | Should -Be 'a,b'
+        }
+        finally {
+            Remove-Item -LiteralPath $foreignClassPath -ErrorAction Ignore
+        }
+    }
+}
