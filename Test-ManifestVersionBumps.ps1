@@ -7,7 +7,7 @@
     Enforces the rule documented in README -> Manifest versioning:
 
         Whenever any file referenced by a bundle's manifest is modified
-        (its .ps1, helpers it dot-sources such as Utils.ps1, embedded
+        (its .ps1, helpers it dot-sources, embedded
         configs, anything in the manifest's `url` array), the
         major.minor.patch `version` field in the .json must be bumped:
 

@@ -1,5 +1,6 @@
 
-. "$PSScriptRoot\Utils.ps1"
+$scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
+if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force }
 
 # Claude for Excel is an Office Web Add-in (Microsoft 365 only), distributed
 # exclusively through Microsoft AppSource as asset id WA200010001 - it has no

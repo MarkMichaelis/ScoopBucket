@@ -9,7 +9,7 @@
 #
 @{
     RootModule        = 'ScoopBucket.psm1'
-    ModuleVersion     = '0.3.0'
+    ModuleVersion     = '0.4.0'
     GUID              = 'b7e8a4c2-9f3d-4b76-8e6a-1c5d2f7b9e10'
     Author            = 'Mark Michaelis'
     CompanyName       = 'IntelliTect'
@@ -25,7 +25,23 @@
         'Invoke-PackageInstall',
         'Add-MachinePath',
         'Update-PathFromRegistry',
-        'Test-IsElevated'
+        'Test-IsElevated',
+        'Test-Command',
+        'Test-ChocolateyPackageInstalled',
+        'Test-ScoopPackageInstalled',
+        'choco',
+        'scoop',
+        'Get-LocalBucket',
+        'Get-InstallArgs',
+        'Get-Program',
+        'Install-WebDownload',
+        'Install-WebDownloadOfZip',
+        'Install-LocalManifest',
+        'Install-BucketApp',
+        'Register-CliCompletion',
+        'Install-PSCompletionsModule',
+        'Register-AllCliCompletions',
+        'Invoke-CliCompletionsSweep'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
@@ -36,7 +52,7 @@
             Tags         = @('Scoop', 'Winget', 'Chocolatey', 'PackageManagement', 'Install')
             LicenseUri   = 'https://github.com/MarkMichaelis/ScoopBucket/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/MarkMichaelis/ScoopBucket'
-            ReleaseNotes = '0.3.0 — Default Scope=global across the schema; winget engine retries transient installer failures (Signal MSI ACCESS_VIOLATION, #75); Beyond Compare keeps the stock bcomp->BComp.exe shim and adds a separate bcompc shim for BComp.com; AIAgents + MicrosoftOffice365 migrated to declarative; Claude for Excel relocated to Office, Claude Desktop relocated to AIAgents; per-bundle hardcoded Pester tests collapsed to a single data-driven Bundles.Tests.ps1.'
+            ReleaseNotes = '0.4.0 — Consolidated bucket/Utils.ps1 into the module (Private/Legacy.ps1); helpers (choco, scoop, Test-*PackageInstalled, Install-LocalManifest, Install-BucketApp, Register-CliCompletion, Invoke-CliCompletionsSweep, etc.) are now exported from ScoopBucket and discovered via PSModulePath. Bundle scripts replace `. Utils.ps1` + `Get-ScoopBucketModulePath` plumbing with a 2-line module bootstrap. Utils.ps1 retired.'
         }
     }
 }

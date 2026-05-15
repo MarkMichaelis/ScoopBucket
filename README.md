@@ -59,8 +59,8 @@ installation work. A single JSON manifest typically corresponds to a
 *group* of packages, and the matching `.ps1` enumerates and installs each
 member of that group (e.g. `ClientBasePackages.json` →
 `ClientBasePackages.ps1`, which installs Kindle, Bitwarden, Dropbox,
-etc.). Shared helpers live in `bucket/Utils.ps1`, which every bundle
-script dot-sources at the top.
+etc.). Shared helpers live in the `ScoopBucket` PowerShell module under
+`module/ScoopBucket/`, which every bundle script imports at the top.
 
 ### `ScoopBucket` PowerShell module
 
@@ -78,8 +78,8 @@ parsing only for legacy ones).
 Each migrated bundle now looks like:
 
 ```powershell
-. "$PSScriptRoot\Utils.ps1"
-Import-Module (Get-ScoopBucketModulePath) -Force
+$scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
+if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force }
 
 $Packages = [Package[]]@(
     [Package]@{
@@ -145,12 +145,12 @@ to **3 digits** (e.g. `1.01.000`, `1.12.007`):
   correcting a parameter).
 - **minor** (2 digits) — bump when a package is added, removed, or
   otherwise changed (including upgrades, flag changes, or edits to any
-  file the manifest references — `.ps1`, `Utils.ps1`, embedded configs,
+  file the manifest references — `.ps1`, embedded configs,
   anything in the manifest's `url` array). Reset patch to `000`.
 - **major** — reserved for breaking changes to a bundle's contract.
 
-If a single change touches files referenced by multiple manifests (e.g.
-`Utils.ps1`), bump every affected manifest. The version bump must be in
+If a single change touches files referenced by multiple manifests, bump
+every affected manifest. The version bump must be in
 the same commit as the change, so `scoop update` picks it up.
 
 **This rule is auto-enforced and auto-fixed by CI.** A `verify-versions`
@@ -173,7 +173,7 @@ The hook runs the same helper (`Test-ManifestVersionBumps.ps1 -Amend`)
 and folds any needed bump into the commit being pushed.
 
 > **Note.** For the auto-fix to cover a helper that your bundle's
-> `.ps1` dot-sources (e.g. `Utils.ps1`), the helper must be declared in
+> `.ps1` dot-sources, the helper must be declared in
 > the manifest's `url` array. Files outside the `url` set are
 > deliberately not tracked.
 
@@ -249,7 +249,7 @@ for the CLIs it owns. Per-CLI native-completion commands are co-located
 with their install (e.g. `Register-CliCompletion -Cli gh -NativeCommand
 { gh completion -s powershell }` next to the `gh` install in
 `GitConfigure.ps1`), so adding or dropping a CLI never requires editing
-`Utils.ps1`.
+the shared module.
 
 Only CLIs whose first-party `<tool> completion powershell` (or
 equivalent) emits a real `Register-ArgumentCompleter` script are wired
@@ -276,7 +276,7 @@ on `PATH` whose owning bundle didn't supply a native command. To
 re-run the sweep manually after installing other tools by hand:
 
 ```powershell
-. D:\Git\ScoopBucket\bucket\Utils.ps1
+Import-Module D:\Git\ScoopBucket\module\ScoopBucket\ScoopBucket.psd1 -Force
 Invoke-CliCompletionsSweep -Force
 ```
 

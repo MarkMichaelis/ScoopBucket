@@ -24,3 +24,8 @@ foreach ($dir in @('Private', 'Public')) {
         . $file.FullName
     }
 }
+
+# Resolve $env:SCOOP and dot-source scoop's internal libraries
+# (parse_app / Find-BucketDirectory / search_bucket) into module scope
+# so the `scoop` / `Get-LocalBucket` wrappers can call them.
+try { Initialize-ScoopEnvironment } catch { Write-Verbose "Initialize-ScoopEnvironment: $($_.Exception.Message)" }

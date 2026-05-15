@@ -1,6 +1,7 @@
 Describe "Install AddLocalRepoBucket" -Tag 'Light', 'Install' {
     BeforeAll {
-        . "$PSScriptRoot\Utils.ps1"
+        $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
+        if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force }
         $manifest = Get-Content "$PSScriptRoot\AddLocalRepoBucket.json" -Raw | ConvertFrom-Json
         $script:installScript = $manifest.installer.script -join "`n"
         $script:uninstallScript = $manifest.uninstaller.script -join "`n"

@@ -26,8 +26,8 @@
 #>
 
 BeforeAll {
-    . (Join-Path $PSScriptRoot 'Utils.ps1')
-    Import-Module (Get-ScoopBucketModulePath) -Force
+    $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
+    if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force } 
     $script:allPkgs = @(Get-Package -BucketPath $PSScriptRoot)
     $script:byName  = @{}
     foreach ($p in $script:allPkgs) {
@@ -141,8 +141,8 @@ Describe 'Declarative bundles (data-driven)' -Tag 'Light','Bundle' {
 
 Describe 'Specific cross-bundle placement contracts' -Tag 'Light','Bundle' {
     BeforeAll {
-        . (Join-Path $PSScriptRoot 'Utils.ps1')
-        Import-Module (Get-ScoopBucketModulePath) -Force
+        $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
+        if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force } 
         $script:byBundle = @{}
         foreach ($p in @(Get-Package -BucketPath $PSScriptRoot)) {
             if (-not $script:byBundle.ContainsKey($p.Bundle)) {

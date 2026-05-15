@@ -1,5 +1,5 @@
-. "$PSScriptRoot\Utils.ps1"
-Import-Module (Get-ScoopBucketModulePath) -Force
+$scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
+if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force }
 
 # Refs:
 #   #5/#6/#7/#10/#12  scoop extras for apps with no machine-scope winget installer

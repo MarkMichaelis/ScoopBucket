@@ -1,5 +1,6 @@
 
-. "$PSScriptRoot\Utils.ps1"
+$scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
+if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force }
 
 # Google's "Google app for desktop" (which embeds Gemini and binds Alt+Space)
 # is the only official Windows-native Gemini surface. Google does not publish

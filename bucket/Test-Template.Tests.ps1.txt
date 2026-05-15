@@ -15,7 +15,8 @@
 #        pwsh -NoProfile -File .\Invoke-Tests.ps1 -Pattern <Name> -Tag All
 # ----------------------------------------------------------------------------
 
-. "$PSScriptRoot\Utils.ps1"
+$scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\ScoopBucket\ScoopBucket.psd1'
+if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module ScoopBucket -Force }
 
 # Derive the package/script name from this file's name. e.g.,
 #   "Claude.Tests.ps1" -> "Claude"

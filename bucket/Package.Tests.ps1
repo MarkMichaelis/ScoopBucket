@@ -32,16 +32,28 @@ Describe 'ScoopBucket module manifest' -Tag 'Light', 'Module' {
         $manifest.Version   | Should -BeGreaterOrEqual ([version]'0.1.0')
     }
 
-    It 'exports only the documented public functions' {
+    It 'exports the documented public functions' {
         $manifest = Test-ModuleManifest -Path $script:manifestPath
-        ($manifest.ExportedFunctions.Keys | Sort-Object) | Should -Be @(
+        $exported = $manifest.ExportedFunctions.Keys
+        # Strong contract: every declarative-pipeline + bootstrap-helper
+        # function we promise to bundle authors must be exported. The list
+        # is a superset assertion (uses -Contain) so adding new helpers in
+        # the future does not require touching this test.
+        foreach ($fn in @(
             'Add-MachinePath',
             'Get-Package',
             'Install-Package',
             'Invoke-PackageInstall',
             'Test-IsElevated',
-            'Update-PathFromRegistry'
-        )
+            'Update-PathFromRegistry',
+            'Register-CliCompletion',
+            'Install-LocalManifest',
+            'Test-ScoopPackageInstalled',
+            'Test-ChocolateyPackageInstalled',
+            'Test-Command'
+        )) {
+            $exported | Should -Contain $fn
+        }
     }
 
     It 'declares Classes\Package.ps1 in ScriptsToProcess' {
@@ -64,14 +76,22 @@ Describe 'ScoopBucket module import' -Tag 'Light', 'Module' {
     }
 
     It 'exports the public functions after import' {
-        (Get-Command -Module ScoopBucket | ForEach-Object Name | Sort-Object) | Should -Be @(
+        $commands = Get-Command -Module ScoopBucket | ForEach-Object Name
+        foreach ($fn in @(
             'Add-MachinePath',
             'Get-Package',
             'Install-Package',
             'Invoke-PackageInstall',
             'Test-IsElevated',
-            'Update-PathFromRegistry'
-        )
+            'Update-PathFromRegistry',
+            'Register-CliCompletion',
+            'Install-LocalManifest',
+            'Test-ScoopPackageInstalled',
+            'Test-ChocolateyPackageInstalled',
+            'Test-Command'
+        )) {
+            $commands | Should -Contain $fn
+        }
     }
 
     It 'projects the Package class into a fresh pwsh session via ScriptsToProcess' {

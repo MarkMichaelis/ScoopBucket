@@ -1,59 +1,58 @@
 <#
 .SYNOPSIS
-    Light-suite test for Get-ScoopBucketModulePath and the migrated
-    ChatGPT.ps1 declarative pattern.
+    Light-suite test for ScoopBucket module bootstrap.
 
 .DESCRIPTION
     Asserts that:
-      - Get-ScoopBucketModulePath resolves the module manifest from any of
-        its discovery strategies (already-loaded, PSModulePath, sibling,
-        working-tree).
-      - The migrated ChatGPT.ps1 declares a single `[Package]` entry whose
-        Installer/Id/Source/VerifyScript match the expected MS-Store
-        identity (extracted by parsing the bundle's source text rather
-        than executing it, so the real winget install never runs).
+      - The ScoopBucket module loads from its working-tree manifest.
+      - The migrated [Package] surface (class, Install-Package, Get-Package,
+        Invoke-PackageInstall) is importable in the caller's scope after a
+        plain `Import-Module ScoopBucket`.
+      - ChatGPT.ps1 contributes its canonical declarative entry to
+        Get-Package output.
 #>
 
 BeforeAll {
-    . (Join-Path $PSScriptRoot 'Utils.ps1')
     $script:repoRoot   = Split-Path -Parent $PSScriptRoot
     $script:moduleRoot = Join-Path $script:repoRoot 'module\ScoopBucket'
+    $script:psd1       = Join-Path $script:moduleRoot 'ScoopBucket.psd1'
 }
 
-Describe 'Get-ScoopBucketModulePath' -Tag 'Light','Module' {
-    It 'resolves to the working-tree manifest when nothing is loaded' {
-        Get-Module ScoopBucket -All | Remove-Module -Force -ErrorAction SilentlyContinue
-        $resolved = Get-ScoopBucketModulePath
-        $resolved | Should -Not -BeNullOrEmpty
-        (Resolve-Path $resolved).Path | Should -Be (Resolve-Path (Join-Path $script:moduleRoot 'ScoopBucket.psd1')).Path
+Describe 'ScoopBucket module bootstrap' -Tag 'Light', 'Module' {
+    It 'imports cleanly from the working-tree manifest' {
+        { Import-Module $script:psd1 -Force -ErrorAction Stop } | Should -Not -Throw
+        Get-Module ScoopBucket | Should -Not -BeNullOrEmpty
     }
 
-    It 'returns the loaded module path when ScoopBucket is already imported' {
-        Import-Module (Join-Path $script:moduleRoot 'ScoopBucket.psd1') -Force
-        $resolved = Get-ScoopBucketModulePath
-        # Module's .Path is the .psm1 once loaded; .psd1 isn't tracked, so
-        # accept either by comparing parent directories.
-        (Split-Path -Parent $resolved) | Should -Be (Resolve-Path $script:moduleRoot).Path
+    It 'exports the declarative public surface' {
+        Import-Module $script:psd1 -Force
+        $exports = (Get-Module ScoopBucket).ExportedFunctions.Keys
+        foreach ($fn in @('Install-Package', 'Get-Package', 'Invoke-PackageInstall',
+                          'Register-CliCompletion', 'Test-ScoopPackageInstalled')) {
+            $exports | Should -Contain $fn
+        }
+    }
+
+    It 'makes the [Package] class available to the caller scope' {
+        Import-Module $script:psd1 -Force
+        $p = [Package]@{ Name = 'x'; Installer = 'scoop'; Id = 'main/x' }
+        $p.Name | Should -Be 'x'
     }
 }
 
-Describe 'ChatGPT.ps1 declarative migration' -Tag 'Light','Module' {
+Describe 'ChatGPT.ps1 declarative migration' -Tag 'Light', 'Module' {
     BeforeAll {
-        Import-Module (Get-ScoopBucketModulePath) -Force
-        $script:bundle = Join-Path $PSScriptRoot 'ChatGPT.ps1'
+        Import-Module $script:psd1 -Force
     }
 
-    It 'discovers the canonical ChatGPT [Package] from ChatGPT.ps1 via Get-Package' {
-        # ChatGPT now also appears in AIAgents (as a scoop install of
-        # MarkMichaelis/ChatGPT, which executes ChatGPT.ps1). Scope the
-        # assertion to the bundle that owns the canonical declaration.
+    It 'discovers the canonical ChatGPT [Package] via Get-Package' {
         $pkgs = Get-Package -Name 'ChatGPT' -BucketPath $PSScriptRoot |
             Where-Object Bundle -eq 'ChatGPT'
-        @($pkgs).Count         | Should -Be 1
-        $pkgs[0].Name          | Should -Be 'ChatGPT'
-        $pkgs[0].Installer     | Should -Be 'winget'
-        $pkgs[0].Id            | Should -Be '9NT1R1C2HH7J'
-        $pkgs[0].Source        | Should -Be 'msstore'
-        $pkgs[0].Bundle        | Should -Be 'ChatGPT'
+        @($pkgs).Count     | Should -Be 1
+        $pkgs[0].Name      | Should -Be 'ChatGPT'
+        $pkgs[0].Installer | Should -Be 'winget'
+        $pkgs[0].Id        | Should -Be '9NT1R1C2HH7J'
+        $pkgs[0].Source    | Should -Be 'msstore'
+        $pkgs[0].Bundle    | Should -Be 'ChatGPT'
     }
 }
