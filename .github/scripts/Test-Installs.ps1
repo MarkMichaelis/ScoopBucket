@@ -673,6 +673,12 @@ $repoRoot = if ($env:GITHUB_WORKSPACE) { $env:GITHUB_WORKSPACE } `
             else { Split-Path (Split-Path $PSScriptRoot -Parent) -Parent }
 $bucketPath = Join-Path $repoRoot 'bucket'
 
+# Ensure Save-Artifact is available for the results-writing steps below
+# (the declarative Get-Package import above is inside a try/catch, so we
+# also import unconditionally here).
+$modulePath = Join-Path $repoRoot 'module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+Import-Module $modulePath -Force -ErrorAction Stop
+
 if (-not (Test-Path $bucketPath)) {
     Write-Error "Bucket directory not found at: $bucketPath"
     exit 1
@@ -945,9 +951,10 @@ $total    = $script:Results.Count
 
 Write-Host "Total: $total | Passed: $passed | Failed: $failed | Untested: $untested"
 
-# Write JSON results file
-$resultsPath = Join-Path $repoRoot 'test-results.json'
-$script:Results | ConvertTo-Json -Depth 5 | Set-Content -Path $resultsPath -Encoding UTF8
+# Write JSON results file via the module's Save-Artifact helper
+# (rotating snapshot + stable latest.json under
+# $env:TEMP\ScoopBucket\test-results\).
+$resultsPath = Save-Artifact -Kind 'test-results' -Data $script:Results -Depth 5
 Write-Host "Results written to: $resultsPath"
 
 # Set output for downstream steps
@@ -1016,10 +1023,13 @@ if ($failed -gt 0) {
     # cancelled mid-run.  The try block starts just before the install loop.
     # ========================================================================
     Write-Host "`n========== Writing partial results (finally block) ==========" -ForegroundColor Yellow
-    $partialPath = Join-Path $repoRoot 'test-results.json'
-    if ($script:Results.Count -gt 0 -and -not (Test-Path $partialPath)) {
-        $script:Results | ConvertTo-Json -Depth 5 | Set-Content -Path $partialPath -Encoding UTF8
-        Write-Host "Partial results written to: $partialPath"
+    if ($script:Results.Count -gt 0) {
+        try {
+            $partialPath = Save-Artifact -Kind 'test-results' -Data $script:Results -Depth 5
+            Write-Host "Partial results written to: $partialPath"
+        } catch {
+            Write-Warning "Save-Artifact failed in finally block: $($_.Exception.Message)"
+        }
     }
     if ($env:GITHUB_OUTPUT -and -not (Select-String -Path $env:GITHUB_OUTPUT -Pattern 'has_failures' -Quiet -ErrorAction SilentlyContinue)) {
         $anyFail = @($script:Results | Where-Object Status -eq 'fail').Count -gt 0
