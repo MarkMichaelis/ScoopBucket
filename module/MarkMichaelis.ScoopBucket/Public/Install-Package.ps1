@@ -56,9 +56,41 @@ function Install-Package {
     if ($BucketPath) { $bundleArgs['BucketPath'] = $BucketPath }
     $bundles = Get-BundlePackages @bundleArgs
 
-    # Group every requested name by the bundle it lives in.
-    $byBundle = @{}
+    # Resolve the effective bucket directory once for manifest fallbacks
+    # below (case (c) — `scoop install <name>` for bare json manifests
+    # and imperative `.ps1` bundles).
+    $effectiveBucket = $BucketPath
+    if (-not $effectiveBucket) {
+        $effectiveBucket = Resolve-BucketPath -CallerScriptRoot $PSScriptRoot
+    }
+
+    # Index lookups: bundle name → bundle entry (only declarative bundles
+    # i.e. bundles with at least one [Package] captured by
+    # Get-BundlePackages); package name → bundle entry.
+    $bundleIndex = @{}
+    foreach ($b in $bundles) {
+        if ($b.Packages -and $b.Packages.Count -gt 0) {
+            $bundleIndex[$b.Bundle] = $b
+        }
+    }
+
+    # Classify each requested name into one of three dispatch buckets:
+    #   ByName    — Package.Name match within a declarative bundle.
+    #               Carries forward existing -Name-filtered dispatch.
+    #   FullBundle — Bundle name match (declarative bundle, install
+    #               every package it declares).
+    #   Manifest  — `<name>.json` exists but no [Package] match and no
+    #               declarative-bundle match. Falls through to
+    #               `scoop install <name>` so the manifest's
+    #               `installer.script` runs verbatim.
+    $byBundle      = @{}
+    $fullBundles   = New-Object System.Collections.Generic.List[object]
+    $manifestNames = New-Object System.Collections.Generic.List[string]
+
     foreach ($needed in $Name) {
+        # (a) Exact Package.Name match wins over bundle / manifest
+        # matches — most precise intent, and what the historical contract
+        # already implied.
         $found = $false
         foreach ($b in $bundles) {
             foreach ($p in $b.Packages) {
@@ -70,70 +102,66 @@ function Install-Package {
                             Names      = [System.Collections.Generic.List[string]]::new()
                         }
                     }
-                    $byBundle[$b.BundlePath].Names.Add($needed)
+                    $byBundle[$b.BundlePath].Names.Add($p.Name)
                     $found = $true
                     break
                 }
             }
             if ($found) { break }
         }
-        if (-not $found) {
-            throw "Install-Package: no bundle declares a package named '$needed'."
+        if ($found) { continue }
+
+        # (b) Bundle name match — install every package in the bundle.
+        $bundleMatch = $null
+        foreach ($key in $bundleIndex.Keys) {
+            if ($key -ieq $needed) { $bundleMatch = $bundleIndex[$key]; break }
         }
+        if ($bundleMatch) {
+            $fullBundles.Add($bundleMatch)
+            continue
+        }
+
+        # (c) Bare manifest fallback — any `<name>.json` we haven't
+        # otherwise classified, including imperative `.ps1` bundles
+        # (Chocolatey, Gemini, ClaudeExcel, PowerShell, ...) whose
+        # `Get-BundlePackages` Packages array is empty.
+        if ($effectiveBucket) {
+            $manifestPath = Join-Path $effectiveBucket ("$needed.json")
+            if (Test-Path $manifestPath) {
+                $manifestNames.Add($needed)
+                continue
+            }
+        }
+
+        throw "Install-Package: no bundle declares a package named '$needed' and no '$needed.json' manifest was found in the bucket."
     }
 
+    # --- Dispatch (a): Package.Name flow with -Name filter -----------------
     foreach ($entry in $byBundle.Values) {
+        Invoke-BundleScript -BundlePath $entry.BundlePath -Bundle $entry.Bundle `
+            -Names $entry.Names -DryRun:$DryRun -SkipCompletion:$SkipCompletion
+    }
+
+    # --- Dispatch (b): full-bundle install (no -Name filter) ---------------
+    foreach ($b in $fullBundles) {
         Write-Host ""
-        Write-Host "Install-Package: dispatching $($entry.Names -join ', ') via $($entry.Bundle)..."
-        # We dot-source the bundle but pre-override its
-        # Invoke-PackageInstall call by hooking before it runs.
-        # Simplest reliable approach: run the bundle's installer in a
-        # child runspace with the bucket's module imported and an
-        # injected -Name filter.
+        Write-Host "Install-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
+        Invoke-BundleScript -BundlePath $b.BundlePath -Bundle $b.Bundle `
+            -DryRun:$DryRun -SkipCompletion:$SkipCompletion
+    }
 
-        $pwsh = (Get-Process -Id $PID).Path
-        if (-not $pwsh) { $pwsh = 'pwsh' }
-        $modulePsd1 = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
-        $namesJson = ($entry.Names | ConvertTo-Json -Compress)
-        $flags = @()
-        if ($DryRun)         { $flags += '-DryRun' }
-        if ($SkipCompletion) { $flags += '-SkipCompletion' }
-        $flagsStr = $flags -join ' '
-
-        $launch = @"
-`$ErrorActionPreference='Continue'
-Import-Module '$modulePsd1' -Force
-`$names = '$namesJson' | ConvertFrom-Json
-`$realDriver = Get-Command Invoke-PackageInstall -Module MarkMichaelis.ScoopBucket
-
-# We can't simply `& '$bundlePath'` and intercept its trailing
-# `Invoke-PackageInstall` call: the bundle's first line re-imports
-# the module, which replaces our shim in the global function table
-# with the module's exported version, defeating any `-Name` filter
-# we tried to inject.
-#
-# Instead, read the bundle text, strip its top-level `Import-Module`
-# (we already imported the module above) and its terminal
-# `Invoke-PackageInstall ...` line (we'll call the real driver
-# ourselves with the filter applied), execute the remainder so
-# `\`$Packages` becomes available, then dispatch with our filter.
-`$bundleText = Get-Content -Raw -LiteralPath '$($entry.BundlePath)'
-`$bundleStripped = `$bundleText -replace '(?ms)^\s*\`$scoopBucketPsd1\s*=.*?Import-Module\s+MarkMichaelis\.ScoopBucket\s+-Force\s*\}\s*', ''
-`$bundleStripped = `$bundleStripped -replace '(?m)^\s*Invoke-PackageInstall\s+-Packages\s+\`$Packages\s+-Bundle\s+''[^'']+''\s*`$', ''
-`$Packages = `$null
-. ([scriptblock]::Create(`$bundleStripped))
-if (`$null -eq `$Packages) {
-    Write-Error "Install-Package: bundle '$($entry.Bundle)' did not assign `\`$Packages."
-    return
-}
-& `$realDriver -Packages `$Packages -Bundle '$($entry.Bundle)' -Name @(`$names) $flagsStr
-"@
-        $tmp = Join-Path $env:TEMP "ScoopBucket-install-$($entry.Bundle)-$PID.ps1"
-        try {
-            Set-Content -Path $tmp -Value $launch -Encoding UTF8
-            & $pwsh -NoProfile -ExecutionPolicy Bypass -File $tmp
-        } finally {
-            Remove-Item -Path $tmp -ErrorAction Ignore
+    # --- Dispatch (c): scoop install fallback for bare manifests -----------
+    foreach ($n in $manifestNames) {
+        Write-Host ""
+        Write-Host "Install-Package: dispatching manifest '$n' via scoop install (no declarative [Package] match)..."
+        if ($DryRun) {
+            Write-Host "  [DryRun] scoop install $n"
+            continue
         }
+        # Delegate to scoop. We pass the bare name (assumes the
+        # MarkMichaelis bucket has been added — see
+        # `Install-Package AddMarkMichaelisScoopBucket`); scoop will
+        # resolve and run the manifest's installer.script.
+        & scoop install $n
     }
 }

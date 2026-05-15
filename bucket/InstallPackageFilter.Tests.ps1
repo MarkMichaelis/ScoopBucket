@@ -36,6 +36,19 @@ if (Test-Path `$scoopBucketPsd1) { Import-Module `$scoopBucketPsd1 -Force } else
 Invoke-PackageInstall -Packages `$Packages -Bundle 'TestBundle'
 "@
     Set-Content -Path (Join-Path $script:tmpBucket 'TestBundle.ps1') -Value $bundleText -Encoding UTF8
+
+    # Sibling .json so the completer's manifest-name scan picks up
+    # 'TestBundle' as a bundle name (mirrors the production layout
+    # where every bundle .ps1 has a sibling .json so scoop can install
+    # it).
+    $bundleManifest = @{
+        '$schema'  = 'https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json'
+        version   = '1.00.000'
+        url       = @('https://example.invalid/test-bundle')
+        installer = @{ script = @('& "$dir\\TestBundle.ps1"') }
+    }
+    Set-Content -LiteralPath (Join-Path $script:tmpBucket 'TestBundle.json') `
+        -Value ($bundleManifest | ConvertTo-Json -Depth 4) -Encoding UTF8
 }
 
 AfterAll {
@@ -63,5 +76,62 @@ Describe 'Install-Package -Name filter' -Tag 'Light', 'Module' {
         $output | Should -Match '\[install\] \[winget\] alpha'
         $output | Should -Match '\[install\] \[winget\] bravo'
         $output | Should -Not -Match '\[install\] \[winget\] charlie'
+    }
+}
+
+Describe 'Install-Package <BundleName> dispatch' -Tag 'Light', 'Module' {
+    # The user types the bundle name (e.g. `Install-Package OSBasePackages`)
+    # instead of an individual package name. We install every package in
+    # that bundle — no -Name filter, full $Packages collection.
+
+    It 'installs every package in the bundle when given the bundle name' {
+        $output = Install-Package -Name 'TestBundle' -DryRun -SkipCompletion -BucketPath $script:tmpBucket *>&1 |
+            Out-String
+
+        $output | Should -Match "dispatching bundle 'TestBundle' \(all packages\)"
+        $output | Should -Match '=== Invoke-PackageInstall: TestBundle \(3 packages\) ==='
+        $output | Should -Match '\[install\] \[winget\] alpha'
+        $output | Should -Match '\[install\] \[winget\] bravo'
+        $output | Should -Match '\[install\] \[winget\] charlie'
+    }
+}
+
+Describe 'Install-Package <BareManifest> fallback' -Tag 'Light', 'Module' {
+    # A `<name>.json` exists in the bucket but no [Package] declares it
+    # and no declarative bundle owns it. Install-Package must fall
+    # through to `scoop install <name>` so the manifest's
+    # installer.script runs verbatim.
+
+    BeforeAll {
+        # Drop a json with no sibling .ps1 into the temp bucket.
+        $manifest = @{
+            '$schema'  = 'https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json'
+            version   = '1.00.000'
+            url       = @('https://example.invalid/bare-manifest')
+            installer = @{ script = @('Write-Host bare-manifest install') }
+        }
+        Set-Content -LiteralPath (Join-Path $script:tmpBucket 'BareManifestPkg.json') `
+            -Value ($manifest | ConvertTo-Json -Depth 4) -Encoding UTF8
+    }
+
+    It 'lists bundle, package, and bare-manifest names in the completer' {
+        $names = & (Get-Module MarkMichaelis.ScoopBucket) {
+            param($p) Get-PackageNameSuggestion -BucketPath $p
+        } $script:tmpBucket
+        $names | Should -Contain 'TestBundle'
+        $names | Should -Contain 'alpha'
+        $names | Should -Contain 'BareManifestPkg'
+    }
+
+    It 'logs scoop-install dispatch under -DryRun without invoking scoop' {
+        $output = Install-Package -Name 'BareManifestPkg' -DryRun -SkipCompletion -BucketPath $script:tmpBucket *>&1 |
+            Out-String
+        $output | Should -Match "dispatching manifest 'BareManifestPkg' via scoop install"
+        $output | Should -Match '\[DryRun\] scoop install BareManifestPkg'
+    }
+
+    It 'throws a helpful error when neither package, bundle, nor manifest matches' {
+        { Install-Package -Name 'NoSuchThing' -DryRun -SkipCompletion -BucketPath $script:tmpBucket } |
+            Should -Throw -ExpectedMessage "*no bundle declares a package named 'NoSuchThing'*"
     }
 }
