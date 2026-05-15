@@ -21,6 +21,20 @@ Describe "Install $name" -Tag 'Heavy', 'Install' {
         Test-ScoopPackageInstalled $name | Should -Be $true
     }
 
+    It 'sets Beyond Compare as the unconditional default difftool/mergetool' {
+        . "$PSScriptRoot\GitConfigBeyondCompare.ps1" *>$null
+        $bcDir = Resolve-BeyondCompareDir
+        if (-not $bcDir) {
+            Set-ItResult -Skipped -Because 'Beyond Compare not installed'
+            return
+        }
+        # BC is the project-wide default; other tools register their own
+        # explicit aliases (`git diffcode`, `git dtv`) instead of competing
+        # for `diff.tool`.
+        git config --global diff.tool  | Should -Be 'bc'
+        git config --global merge.tool | Should -Be 'bc'
+    }
+
     It 'registers the bc difftool when Beyond Compare is installed' {
         . "$PSScriptRoot\GitConfigBeyondCompare.ps1" *>$null
         $bcDir = Resolve-BeyondCompareDir

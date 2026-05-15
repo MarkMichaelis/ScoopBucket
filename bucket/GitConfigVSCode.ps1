@@ -50,24 +50,35 @@ Function Invoke-GitConfigVSCode {
     $mergeCmd = "$launcher --wait --merge `"`$REMOTE`" `"`$LOCAL`" `"`$BASE`" `"`$MERGED`""
 
     # Always register the `vscode` tool config so it's available on demand
-    # via `git difftool --tool=vscode`, regardless of which tool is default.
+    # via `git difftool --tool=vscode` -- this is the BLOCKING flavour
+    # (uses --wait so git waits for the VS Code tab to close before cleaning
+    # up its temp files). It's the right choice for scripted/CI workflows.
     git config --global difftool.vscode.cmd          $diffCmd
     git config --global difftool.vscode.trustExitCode true
     git config --global mergetool.vscode.cmd         $mergeCmd
     git config --global mergetool.vscode.trustExitCode true
     git config --global mergetool.vscode.keepBackup  false
 
-    # First-writer-wins for the global default so install order doesn't
-    # silently flip a deliberately-chosen tool. To switch defaults manually:
-    #   git config --global diff.tool vscode
-    #   git config --global merge.tool vscode
-    if (-not (git config --global --get diff.tool))  { git config --global diff.tool  vscode }
-    if (-not (git config --global --get merge.tool)) { git config --global merge.tool vscode }
-
-    # Aliases — `dt` honors the current default; `dtv` always uses VS Code
-    # explicitly so the user can invoke either without changing the default.
-    if (-not (git config --global --get alias.dt))   { git config --global alias.dt 'difftool' }
+    # `git dtv` -- explicit blocking VS Code difftool invocation; doesn't
+    # require touching the global diff.tool default (Beyond Compare).
     git config --global alias.dtv 'difftool --tool=vscode'
+
+    # `git diffcode` -- NON-BLOCKING VS Code diff against HEAD (or --staged).
+    # Bypasses git's tempfile lifecycle by dumping HEAD/index blobs to
+    # %TEMP%\diffcode\ ourselves and launching `code --diff` without --wait,
+    # so the shell returns immediately while VS Code stays open. The helper
+    # script lives in the same Scoop app dir as this configurator; we hard-
+    # code its absolute path into the alias at install time so PATH state
+    # never breaks the alias.
+    $helper = Join-Path $PSScriptRoot 'Invoke-GitDiffCode.ps1'
+    if (Test-Path $helper) {
+        # Forward-slashes survive git-config's quoting on Windows better than
+        # backslashes; pwsh accepts either.
+        $helperPosix = $helper -replace '\\', '/'
+        git config --global alias.diffcode ("!pwsh -NoProfile -File '" + $helperPosix + "' --")
+    } else {
+        Write-Warning "Invoke-GitDiffCode.ps1 not found alongside GitConfigVSCode.ps1; skipping diffcode alias."
+    }
 
     Write-Host "VS Code configured for git diff/merge: $code"
 }

@@ -138,15 +138,16 @@ Function Invoke-GitConfigBeyondCompare {
     git config --global mergetool.keepBackup false
     git config --global mergetool.prompt false
 
-    # First-writer-wins for the global default so install order doesn't
-    # silently flip a deliberately-chosen tool. To switch defaults manually:
-    #   git config --global diff.tool <name>
-    #   git config --global merge.tool <name>
-    if (-not (git config --global --get diff.tool))  { git config --global diff.tool  bc }
-    if (-not (git config --global --get merge.tool)) { git config --global merge.tool bc }
+    # Beyond Compare is the project-wide default for git diff/merge.  Other
+    # tools (VS Code, Visual Studio) register their own *.path/*.cmd entries
+    # and add explicit aliases (`git diffcode`, `git dtv`, ...) so callers
+    # can reach them on demand without flipping the default.
+    git config --global diff.tool  bc
+    git config --global merge.tool bc
 
-    # Aliases — `dt` honors the current default tool; `dtbc` always uses BC
-    # explicitly, so the user can invoke either without changing the default.
+    # Aliases — `dt` is the existing dir-diff shortcut against the default
+    # tool; `dtbc` always uses BC explicitly so the workflow survives even
+    # if a user re-pointed diff.tool to something else.
     if (-not (git config --global --get alias.dt))   { git config --global alias.dt   'difftool --dir-diff' }
     git config --global alias.dtbc 'difftool --tool=bc --dir-diff'
 
