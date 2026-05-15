@@ -41,9 +41,12 @@ function Get-PackageNameSuggestion {
         Where-Object { $_.Name -notmatch '\.Tests\.ps1$' } |
         Where-Object { $_.Name -ne 'Utils.ps1' -and $_.Name -ne 'Invoke-Tests.ps1' }
 
-    if (-not $bundleFiles) { return @() }
+    $manifestFiles = Get-ChildItem -Path $BucketPath -Filter '*.json' -File -ErrorAction SilentlyContinue
 
-    $latestMtimeTicks = ($bundleFiles | Measure-Object -Property LastWriteTimeUtc -Maximum).Maximum.Ticks
+    if (-not $bundleFiles -and -not $manifestFiles) { return @() }
+
+    $mtimeInputs = @($bundleFiles) + @($manifestFiles)
+    $latestMtimeTicks = ($mtimeInputs | Measure-Object -Property LastWriteTimeUtc -Maximum).Maximum.Ticks
     $cacheKey = "$BucketPath|$latestMtimeTicks"
 
     if ($script:PackageNameCacheKey -ne $cacheKey) {
@@ -61,6 +64,17 @@ function Get-PackageNameSuggestion {
             foreach ($m in $rx.Matches($text)) {
                 $null = $names.Add($m.Groups[1].Value)
             }
+        }
+        # Also surface every <name>.json manifest basename. This covers:
+        #   - Bundles (OSBasePackages, DeveloperBasePackages, ...) — the
+        #     bundle name itself is installable via Install-Package and
+        #     fans out to every package in the bundle.
+        #   - Bare-json manifests (no .ps1, or .ps1 with no [Package]) —
+        #     Codex, dotnet, Chocolatey, Gemini, ClaudeExcel, GitConfigure,
+        #     WSL-Ubuntu-*, McAfeeUninstall, ... — installable by passing
+        #     the manifest through to `scoop install`.
+        foreach ($f in $manifestFiles) {
+            $null = $names.Add($f.BaseName)
         }
         $script:PackageNameCache = @($names) | Sort-Object
         $script:PackageNameCacheKey = $cacheKey

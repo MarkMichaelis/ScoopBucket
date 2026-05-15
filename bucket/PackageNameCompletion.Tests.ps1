@@ -33,6 +33,28 @@ Describe 'Get-PackageNameSuggestion' -Tag 'Light' {
         $names | Should -Contain 'Windows Terminal'
     }
 
+    It 'includes declarative bundle names so Install-Package <BundleName> tab-completes' {
+        # `Install-Package OSBasePackages` installs every package in
+        # the OSBasePackages bundle. The completer must surface every
+        # bundle that ships a `<bundle>.json` manifest.
+        $names = & (Get-Module MarkMichaelis.ScoopBucket) { Get-PackageNameSuggestion }
+        foreach ($bundle in 'OSBasePackages','DeveloperBasePackages','ClientBasePackages','MicrosoftOffice365','AIAgents') {
+            $names | Should -Contain $bundle
+        }
+    }
+
+    It 'includes bare-json manifest names (no [Package] / imperative .ps1) so they tab-complete' {
+        # Manifests with no declarative [Package] entry — bare json
+        # (Codex, dotnet, GeminiCli, ...) and imperative .ps1 bundles
+        # (Chocolatey, Gemini, ClaudeExcel, ...) — must still tab-
+        # complete so users can `Install-Package <name>` rather than
+        # falling back to `scoop install`.
+        $names = & (Get-Module MarkMichaelis.ScoopBucket) { Get-PackageNameSuggestion }
+        foreach ($manifest in 'Codex','dotnet','Chocolatey','Gemini','ClaudeExcel','WSL-Ubuntu-2004') {
+            $names | Should -Contain $manifest
+        }
+    }
+
     It 'narrows by case-insensitive prefix' {
         $matches = & (Get-Module MarkMichaelis.ScoopBucket) { Get-PackageNameSuggestion -WordToComplete 'beyon' }
         $matches | Should -Contain 'Beyond Compare'
