@@ -29,3 +29,9 @@ foreach ($dir in @('Private', 'Public')) {
 # (parse_app / Find-BucketDirectory / search_bucket) into module scope
 # so the `scoop` / `Get-LocalBucket` wrappers can call them.
 try { Initialize-ScoopEnvironment } catch { Write-Verbose "Initialize-ScoopEnvironment: $($_.Exception.Message)" }
+
+# Wire up Tab completion for `Install-Package -Name <tab>` and
+# `Get-Package -Name <tab>` so callers don't need to remember exact
+# package spellings. The completer is regex-driven and cached, so it's
+# safe to register unconditionally at module load.
+try { Register-PackageNameCompleter } catch { Write-Verbose "Register-PackageNameCompleter: $($_.Exception.Message)" }

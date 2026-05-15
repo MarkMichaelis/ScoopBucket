@@ -93,7 +93,7 @@ function Install-Package {
 
         $pwsh = (Get-Process -Id $PID).Path
         if (-not $pwsh) { $pwsh = 'pwsh' }
-        $modulePsd1 = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+        $modulePsd1 = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
         $namesJson = ($entry.Names | ConvertTo-Json -Compress)
         $flags = @()
         if ($DryRun)         { $flags += '-DryRun' }

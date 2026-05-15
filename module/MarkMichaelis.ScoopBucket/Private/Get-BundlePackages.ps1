@@ -52,7 +52,7 @@ function Get-BundlePackages {
         Where-Object { $_.Name -notmatch '\.Tests\.ps1$' } |
         Where-Object { $_.Name -ne 'Utils.ps1' -and $_.Name -ne 'Invoke-Tests.ps1' }
 
-    $modulePsd1 = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+    $modulePsd1 = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
 
     $packageClass = Join-Path (Split-Path -Parent $PSScriptRoot) 'Classes\Package.ps1'
 

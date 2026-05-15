@@ -118,7 +118,12 @@ Get-Package                       # list every declared package, across bundles
 Get-Package -Installer scoop      # filter by engine
 Get-Package -Name 'rip*','Bit*'   # wildcard
 Install-Package -Name 'BitwardenCli'   # auto-pulls Bitwarden via DependsOn
+Install-Package -Name beyon<Tab>       # Tab-completes to 'Beyond Compare'
 ```
+
+`-Name` on both `Install-Package` and `Get-Package` registers a Tab
+completer that suggests every package declared in any bundle (prefix
+first, then substring), so you don't need to remember exact spelling.
 
 Note: `Install-Package` and `Get-Package` deliberately shadow the
 rarely-used built-in `PackageManagement` cmdlets of the same name. The
