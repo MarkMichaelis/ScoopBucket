@@ -57,6 +57,19 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref }}
 
+      - name: Resolve artifact paths
+        shell: pwsh
+        run: |
+          # All CI test artifacts land under $env:TEMP\ScoopBucket\<kind>\
+          # (managed by the module's Save-Artifact helper: rotates 5
+          # newest snapshots and prunes anything older than 1 day).
+          # Export the root so downstream steps can read latest.json and
+          # so upload-artifact can reference an absolute path.
+          $artifactDir = Join-Path $env:TEMP 'ScoopBucket'
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+          "ARTIFACT_DIR=$artifactDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Artifact dir: $artifactDir"
+
       - name: Accept winget source agreements
         shell: pwsh
         run: |
@@ -127,9 +140,10 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
-          $results = & "${{ github.workspace }}\.github\scripts\Get-PackageCommands.ps1" -Quiet
-          if ($null -eq $results) { $results = @() }
-          $results | ConvertTo-Json -Depth 6 | Set-Content -Path "${{ github.workspace }}\cli-availability.json" -Encoding UTF8
+          # Get-PackageCommands.ps1 now self-writes via Save-Artifact to
+          # $env:TEMP\ScoopBucket\cli-availability\latest.json (plus
+          # rotating timestamped snapshots).
+          & "${{ github.workspace }}\.github\scripts\Get-PackageCommands.ps1" -Quiet | Out-Null
           # Run the Pester scaffold (also non-failing).
           Invoke-Pester -Path "${{ github.workspace }}\bucket\PackageCommands.Tests.ps1" -Tag Heavy -Output Detailed -PassThru | Out-Null
 
@@ -138,7 +152,7 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
-          $jsonPath = "${{ github.workspace }}\cli-availability.json"
+          $jsonPath = Join-Path $env:ARTIFACT_DIR 'cli-availability\latest.json'
           if (-not (Test-Path $jsonPath)) {
             "## CLI availability discovery`n`n_No results produced._" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             return
@@ -223,7 +237,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cli-availability
-          path: cli-availability.json
+          path: ${{ env.ARTIFACT_DIR }}/cli-availability/latest.json
           retention-days: 30
 
       - name: Ensure issue labels exist
@@ -242,7 +256,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $results = Get-Content "${{ github.workspace }}\test-results.json" | ConvertFrom-Json
+          $results = Get-Content (Join-Path $env:ARTIFACT_DIR 'test-results\latest.json') | ConvertFrom-Json
           $failures = $results | Where-Object { $_.Status -eq 'fail' }
           $runUrl = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
@@ -345,5 +359,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: install-validation-results
-          path: test-results.json
+          path: ${{ env.ARTIFACT_DIR }}/test-results/latest.json
           retention-days: 30

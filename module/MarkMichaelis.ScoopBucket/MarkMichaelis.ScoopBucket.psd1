@@ -9,7 +9,7 @@
 #
 @{
     RootModule        = 'MarkMichaelis.ScoopBucket.psm1'
-    ModuleVersion     = '1.0.0'
+    ModuleVersion     = '1.1.0'
     GUID              = 'b7e8a4c2-9f3d-4b76-8e6a-1c5d2f7b9e10'
     Author            = 'Mark Michaelis'
     CompanyName       = 'IntelliTect'
@@ -41,7 +41,8 @@
         'Register-CliCompletion',
         'Install-PSCompletionsModule',
         'Register-AllCliCompletions',
-        'Invoke-CliCompletionsSweep'
+        'Invoke-CliCompletionsSweep',
+        'Save-Artifact'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
@@ -52,7 +53,7 @@
             Tags         = @('Scoop', 'Winget', 'Chocolatey', 'PackageManagement', 'Install')
             LicenseUri   = 'https://github.com/MarkMichaelis/ScoopBucket/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/MarkMichaelis/ScoopBucket'
-            ReleaseNotes = '1.0.0 — Module renamed from `ScoopBucket` to `MarkMichaelis.ScoopBucket` to namespace it against any future user-bucket modules and avoid collision with generic Scoop tooling. Public surface unchanged; bundle scripts now Import-Module MarkMichaelis.ScoopBucket. The console-waiting Beyond Compare shim is renamed from `bcompc` to `bcomp.com`.'
+            ReleaseNotes = '1.1.0 — Adds Save-Artifact for CI diagnostic producers. Persists rotating JSON snapshots under $env:TEMP\ScoopBucket\<Kind>\ with a stable latest.json; retains at most 5 newest stamped files per kind and prunes anything older than 1 day. Replaces the previous practice of writing cli-availability.json / test-results.json into the repo root. 1.0.0 — Module renamed from `ScoopBucket` to `MarkMichaelis.ScoopBucket` to namespace it against any future user-bucket modules and avoid collision with generic Scoop tooling. Public surface unchanged; bundle scripts now Import-Module MarkMichaelis.ScoopBucket. The console-waiting Beyond Compare shim is renamed from `bcompc` to `bcomp.com`.'
         }
     }
 }

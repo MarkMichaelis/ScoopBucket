@@ -19,12 +19,14 @@
 
     For each (Source, PackageId, ExpectedCli) tuple, `Get-Command` is used
     to determine whether the CLI is currently on PATH on this machine.
-    Results are written to `cli-availability.json` in the repo root,
-    printed as a Markdown table to stdout, and appended to the
-    `GITHUB_STEP_SUMMARY` file when that env var is set.
+    Results are written via the module's `Save-Artifact` helper to
+    `$env:TEMP\ScoopBucket\cli-availability\latest.json` (plus a
+    rotating timestamped snapshot), printed as a Markdown table to
+    stdout, and appended to the `GITHUB_STEP_SUMMARY` file when that
+    env var is set.
 
     The script is idempotent and has no side effects beyond writing
-    `cli-availability.json` (gitignored). It returns the array of records
+    into the temp artifact directory. It returns the array of records
     so callers (e.g. the Pester scaffold) can inspect them.
 
 .PARAMETER BucketPath
@@ -32,8 +34,12 @@
     Defaults to the bucket directory of the repo this script lives in.
 
 .PARAMETER OutputJson
-    Path for the JSON artifact. Defaults to `cli-availability.json` at
-    the repo root.
+    Optional explicit path for the JSON artifact. When omitted the
+    script routes through the module's `Save-Artifact` helper, which
+    writes a rotating snapshot plus stable `latest.json` under
+    `$env:TEMP\ScoopBucket\cli-availability\` (keeps 5 newest, prunes
+    anything older than 1 day). Pass `-OutputJson <path>` only if you
+    need the file at a specific location (e.g. ad-hoc debugging).
 
 .PARAMETER Quiet
     If set, suppress the Markdown table written to stdout. The JSON file
@@ -54,7 +60,11 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if (-not $BucketPath)  { $BucketPath  = Join-Path $repoRoot 'bucket' }
-if (-not $OutputJson)  { $OutputJson  = Join-Path $repoRoot 'cli-availability.json' }
+
+# Make Save-Artifact (and the rest of the module) available regardless of
+# whether the declarative Get-Package path below succeeds.
+$modulePath = Join-Path $repoRoot 'module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+Import-Module $modulePath -Force -ErrorAction Stop
 
 # ---------------------------------------------------------------------------
 # Override map: package identifier -> expected short CLI name (or $null when
@@ -472,8 +482,15 @@ foreach ($file in $bundleScripts) {
 # Sort for stable output.
 $sorted = @($records | Sort-Object Source, Package, SourceScript)
 
-# Persist JSON artifact (overwrite each run).
-$sorted | ConvertTo-Json -Depth 5 | Set-Content -Path $OutputJson -Encoding UTF8
+# Persist JSON artifact. When -OutputJson is passed explicitly we honour
+# that path (back-compat for ad-hoc callers); otherwise route through
+# Save-Artifact so the file lands in $env:TEMP\ScoopBucket\cli-availability\
+# with rotation (5 newest, <1 day) and a stable latest.json.
+if ($OutputJson) {
+    $sorted | ConvertTo-Json -Depth 5 | Set-Content -Path $OutputJson -Encoding UTF8
+} else {
+    $null = Save-Artifact -Kind 'cli-availability' -Data $sorted -Depth 5
+}
 
 # Build Markdown table.
 $considered      = @($sorted | Where-Object { $_.ExpectedCli })

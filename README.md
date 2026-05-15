@@ -239,12 +239,18 @@ See #45 for the tracking issue. Rolling out in three phases:
 - **Phase 1 — Local discovery.** A `Get-PackageCommands.ps1` helper
   parses every `bucket\*.ps1` for winget / scoop / choco / module
   install patterns, derives a probable CLI short name per package, runs
-  `Get-Command` against it, and writes `cli-availability.json`.
+  `Get-Command` against it, and persists the result via the module's
+  `Save-Artifact` helper to `$env:TEMP\ScoopBucket\cli-availability\`
+  (a rotating snapshot plus a stable `latest.json`; the helper keeps
+  the 5 newest snapshots and prunes anything older than 1 day, so
+  local diagnostic runs never accumulate in the working tree).
 - **Phase 2 — CI integration.** A Pester `Heavy`-tagged test
   (`bucket\PackageCommands.Tests.ps1`) runs the discovery script after
-  the validate-installs job, uploads `cli-availability.json` as an
-  artifact, and posts a Markdown summary to `GITHUB_STEP_SUMMARY`. The
-  test does **not** fail the build at this phase — it only reports.
+  the validate-installs job, uploads
+  `$env:TEMP\ScoopBucket\cli-availability\latest.json` as the
+  `cli-availability` workflow artifact, and posts a Markdown summary
+  to `GITHUB_STEP_SUMMARY`. The test does **not** fail the build at
+  this phase — it only reports.
 - **Phase 3 — Enforcement.** The test asserts availability for an
   explicit allow-list of "must-have CLI" packages (those covered by the
   rule above). Packages with non-obvious CLI names register themselves
