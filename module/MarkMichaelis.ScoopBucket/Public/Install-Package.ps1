@@ -105,12 +105,28 @@ function Install-Package {
 Import-Module '$modulePsd1' -Force
 `$names = '$namesJson' | ConvertFrom-Json
 `$realDriver = Get-Command Invoke-PackageInstall -Module MarkMichaelis.ScoopBucket
-function Invoke-PackageInstall {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][object[]]`$Packages, [Parameter(Mandatory)][string]`$Bundle, [Parameter(ValueFromRemainingArguments)]`$Remaining)
-    & `$realDriver -Packages `$Packages -Bundle `$Bundle -Name @(`$names) $flagsStr
+
+# We can't simply `& '$bundlePath'` and intercept its trailing
+# `Invoke-PackageInstall` call: the bundle's first line re-imports
+# the module, which replaces our shim in the global function table
+# with the module's exported version, defeating any `-Name` filter
+# we tried to inject.
+#
+# Instead, read the bundle text, strip its top-level `Import-Module`
+# (we already imported the module above) and its terminal
+# `Invoke-PackageInstall ...` line (we'll call the real driver
+# ourselves with the filter applied), execute the remainder so
+# `\`$Packages` becomes available, then dispatch with our filter.
+`$bundleText = Get-Content -Raw -LiteralPath '$($entry.BundlePath)'
+`$bundleStripped = `$bundleText -replace '(?ms)^\s*\`$scoopBucketPsd1\s*=.*?Import-Module\s+MarkMichaelis\.ScoopBucket\s+-Force\s*\}\s*', ''
+`$bundleStripped = `$bundleStripped -replace '(?m)^\s*Invoke-PackageInstall\s+-Packages\s+\`$Packages\s+-Bundle\s+''[^'']+''\s*`$', ''
+`$Packages = `$null
+. ([scriptblock]::Create(`$bundleStripped))
+if (`$null -eq `$Packages) {
+    Write-Error "Install-Package: bundle '$($entry.Bundle)' did not assign `\`$Packages."
+    return
 }
-& '$($entry.BundlePath)'
+& `$realDriver -Packages `$Packages -Bundle '$($entry.Bundle)' -Name @(`$names) $flagsStr
 "@
         $tmp = Join-Path $env:TEMP "ScoopBucket-install-$($entry.Bundle)-$PID.ps1"
         try {
