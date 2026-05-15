@@ -11,9 +11,16 @@ function Resolve-PackageOrder {
         by original array index.
     #>
     [CmdletBinding()]
-    [OutputType([Package[]])]
+    [OutputType([object[]])]
     param(
-        [Parameter(Mandatory)][Package[]] $Packages,
+        # Use [object[]] (not [Package[]]) so callers from a different
+        # scope chain don't trip the dual-class-identity issue: the
+        # [Package] class is loaded both by ScriptsToProcess (caller
+        # scope) and the psm1 (module scope), and a [Package] from one
+        # scope is not assignment-compatible with [Package] in the
+        # other. Invoke-PackageInstall already validates each element
+        # has GetType().Name -eq 'Package' before reaching us.
+        [Parameter(Mandatory)][object[]] $Packages,
         [string[]] $Name,
         [string[]] $Skip
     )
@@ -73,7 +80,7 @@ function Resolve-PackageOrder {
         [string[]]@($filtered | ForEach-Object { $_.Name }),
         [System.StringComparer]::OrdinalIgnoreCase
     )
-    $result = [System.Collections.Generic.List[Package]]::new()
+    $result = [System.Collections.Generic.List[object]]::new()
 
     while ($remaining.Count -gt 0) {
         $ready = @($filtered |
