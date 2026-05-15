@@ -474,7 +474,14 @@ function Read-CompletionProfileContent {
     [OutputType([string])]
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
-    if (Test-Path $Path) { return (Get-Content -Path $Path -Raw -Encoding UTF8) }
+    if (Test-Path $Path) {
+        # Get-Content -Raw returns $null for an empty file; coalesce so
+        # callers can pass the result straight to [regex]::IsMatch
+        # without "Value cannot be null" exceptions.
+        $raw = Get-Content -Path $Path -Raw -Encoding UTF8
+        if ($null -eq $raw) { return '' }
+        return $raw
+    }
     return ''
 }
 

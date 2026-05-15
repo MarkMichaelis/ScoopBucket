@@ -28,7 +28,14 @@ foreach ($dir in @('Private', 'Public')) {
 # Resolve $env:SCOOP and dot-source scoop's internal libraries
 # (parse_app / Find-BucketDirectory / search_bucket) into module scope
 # so the `scoop` / `Get-LocalBucket` wrappers can call them.
-try { Initialize-ScoopEnvironment } catch { Write-Verbose "Initialize-ScoopEnvironment: $($_.Exception.Message)" }
+#
+# IMPORTANT: invoke with the dot-source operator (`.`) so the inner
+# `. $p` calls inside Initialize-ScoopEnvironment land in the .psm1
+# (module) scope. A plain function call would put them in the
+# function's local scope where they evaporate on return, leaving
+# parse_app/Find-BucketDirectory/search_bucket undefined for the
+# `scoop` wrapper that calls them later.
+try { . Initialize-ScoopEnvironment } catch { Write-Verbose "Initialize-ScoopEnvironment: $($_.Exception.Message)" }
 
 # Wire up Tab completion for `Install-Package -Name <tab>` and
 # `Get-Package -Name <tab>` so callers don't need to remember exact
