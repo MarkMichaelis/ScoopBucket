@@ -2,7 +2,8 @@
 $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
 if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
 . "$PSScriptRoot\GitConfigBeyondCompare.ps1" # Runs Invoke-GitConfigBeyondCompare
-. "$PSScriptRoot\GitConfigVisualStudio.ps1" # Runs Invoke-GitConfigVisualStudio
+. "$PSScriptRoot\GitConfigVSCode.ps1"        # Runs Invoke-GitConfigVSCode
+. "$PSScriptRoot\GitConfigVisualStudio.ps1"  # Runs Invoke-GitConfigVisualStudio
 
 Function GitConfigure {
     Write-Host "Running $($MyInvocation.MyCommand.Name)..."
@@ -77,7 +78,6 @@ Function GitConfigure {
     # Confiure Misc. Diff Tools
     git config --global difftool.debug-powershell.cmd 'powershell -noprofile -command { Write-Output \"REMOTE=''$REMOTE'' LOCAL=''$LOCAL''\"}'
     git config --global difftool.debug-cmd.exe.cmd 'cmd.exe /C \"ECHO REMOTE=''$REMOTE'' LOCAL=''$LOCAL''\"}'
-    git config --global difftool.vscode.cmd 'code --wait --new-window --diff \"$LOCAL\" \"$REMOTE\"'
 
     Set-Service -StartupType Manual ssh-agent
 }
