@@ -17,56 +17,57 @@ Describe 'CliCompletion pinned contract -- per-bundle native registration' -Tag 
 
     BeforeAll {
         $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
-        if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force } 
+        if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
+        $script:allPkgs = @(Get-Package -BucketPath $PSScriptRoot)
     }
 
-    # Only CLIs whose `<tool> completion powershell` (or equivalent) is known
-    # to emit a real Register-ArgumentCompleter script are pinned here. CLIs
-    # that lack a native PowerShell completion subcommand (bw, copilot,
-    # gcloud) deliver completion via Invoke-CliCompletionsSweep's PSCompletions
-    # fallback instead -- see #73.
-    It '<Cli> is registered with -NativeCommand in <Bundle>' -ForEach @(
-        @{ Cli = 'gh';      Bundle = 'GitConfigure.ps1' }
-        @{ Cli = 'rg';      Bundle = 'OSBasePackages.ps1' }
+    # gh is still wired through the legacy procedural Register-CliCompletion
+    # path in GitConfigure.ps1 (the install block lives inside a function, not
+    # a declarative [Package]). Keep the original pattern assertion for it.
+    It 'gh is registered with -NativeCommand in GitConfigure.ps1' {
+        $path = Join-Path $PSScriptRoot 'GitConfigure.ps1'
+        Test-Path $path | Should -BeTrue
+        $content = Get-Content -Raw -Path $path
+        $pattern = "(?ms)Register-CliCompletion\b[^\r\n]*?-Cli\s+['`"]?gh['`"]?\b[^\r\n]*?-NativeCommand"
+        $content | Should -Match $pattern -Because "GitConfigure.ps1 must call Register-CliCompletion -Cli gh -NativeCommand { ... }"
+    }
+
+    # rg, bw, gcloud, and the sysinternals shims live in declarative [Package]
+    # manifests. Their wiring is asserted at the manifest level: each Package
+    # owning <Cli> must declare both NativeCommandScript and ExpectedCompletions
+    # (so CompletionEndToEnd.Tests.ps1 can verify Tab actually returns those).
+    It '<Cli> Package in <Bundle> declares NativeCommandScript + ExpectedCompletions' -ForEach @(
+        @{ Cli = 'rg';     Bundle = 'OSBasePackages' }
+        @{ Cli = 'bw';     Bundle = 'ClientBasePackages' }
+        @{ Cli = 'gcloud'; Bundle = 'OSBasePackages' }
     ) {
         param($Cli, $Bundle)
-        $path = Join-Path $PSScriptRoot $Bundle
-        Test-Path $path | Should -BeTrue -Because "bundle script '$Bundle' must exist"
-        $content = Get-Content -Raw -Path $path
-        # Pattern: Register-CliCompletion ... -Cli <name> ... -NativeCommand
-        # Tolerant of param ordering and quoting.
-        $pattern = "(?ms)Register-CliCompletion\b[^\r\n]*?-Cli\s+['`"]?$([regex]::Escape($Cli))['`"]?\b[^\r\n]*?-NativeCommand"
-        $content | Should -Match $pattern -Because "'$Bundle' must call Register-CliCompletion -Cli $Cli -NativeCommand { ... }"
+
+        $owning = @($script:allPkgs | Where-Object {
+            $_.Bundle -eq $Bundle -and ($_.CliCommands -contains $Cli)
+        })
+        $owning.Count | Should -BeGreaterThan 0 -Because "a [Package] in bundle '$Bundle' must list '$Cli' in CliCommands"
+
+        $pkg = $owning[0]
+        # Get-Package marshalls Packages across runspaces; the actual
+        # scriptblock cannot round-trip, so we assert HasNativeCommandScript
+        # (the cross-runspace-safe boolean projection).
+        $pkg.HasNativeCommandScript | Should -BeTrue -Because "Package owning '$Cli' must supply NativeCommandScript"
+        $pkg.ExpectedCompletions | Should -Not -BeNullOrEmpty -Because "Package owning '$Cli' must supply ExpectedCompletions"
+        $pkg.ExpectedCompletions.ContainsKey($Cli) | Should -BeTrue -Because "ExpectedCompletions must have a key for '$Cli'"
+        @($pkg.ExpectedCompletions[$Cli]).Count | Should -BeGreaterThan 0 -Because "ExpectedCompletions['$Cli'] must list at least one expected subcommand"
     }
 
     It 'uses sentinel version v1' {
-        $script:CompletionSentinelVersion | Should -Be 'v1'
+        # $script:CompletionSentinelVersion lives inside the module and is not
+        # visible from this test runspace; assert against the source instead so
+        # any bump of the sentinel format requires updating this guard too.
+        $src = Get-Content -Raw -Path (Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\Private\Register-PackageCompletion.ps1')
+        $src | Should -Match "(?m)^\s*\`$script:CompletionSentinelVersion\s*=\s*'v1'\s*$" -Because 'Register-PackageCompletion.ps1 must pin sentinel version v1'
     }
 
     It 'Register-CliCompletion exposes the -NativeCommand parameter' {
         (Get-Command Register-CliCompletion).Parameters.ContainsKey('NativeCommand') | Should -BeTrue
         (Get-Command Register-CliCompletion).Parameters['NativeCommand'].ParameterType | Should -Be ([scriptblock])
-    }
-
-    # Regression guard for #73: these CLIs were intentionally dropped from
-    # per-bundle native registration because their `<tool> completion` (or
-    # equivalent) subcommand does not emit a PowerShell completion script.
-    # Re-adding a Register-CliCompletion -NativeCommand line for any of them
-    # would silently produce a dead block (Resolve-CliCompletionSource sees
-    # empty output and returns Skipped). Completion for these CLIs is
-    # delivered by Invoke-CliCompletionsSweep's PSCompletions fallback.
-    It '<Cli> has no per-bundle -NativeCommand wiring (#73)' -ForEach @(
-        @{ Cli = 'gcloud'  }
-        @{ Cli = 'bw'      }
-        @{ Cli = 'copilot' }
-    ) {
-        param($Cli)
-        $bundleScripts = Get-ChildItem -Path $PSScriptRoot -Filter '*.ps1' |
-            Where-Object { $_.Name -notlike '*.Tests.ps1' -and $_.Name -ne 'Utils.ps1' }
-        $pattern = "(?ms)Register-CliCompletion\b[^\r\n]*?-Cli\s+['`"]?$([regex]::Escape($Cli))['`"]?\b[^\r\n]*?-NativeCommand"
-        foreach ($f in $bundleScripts) {
-            $content = Get-Content -Raw -Path $f.FullName
-            $content | Should -Not -Match $pattern -Because "'$($f.Name)' must not wire a native PowerShell completion for $Cli (its CLI does not emit one; see #73)."
-        }
     }
 }
