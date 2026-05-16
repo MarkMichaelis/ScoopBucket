@@ -59,10 +59,6 @@ function Invoke-PackageInstall {
     .PARAMETER SkipCompletion
         Don't attempt completion registration (used by tests / CI when
         the AllUsersAllHosts profile isn't writable).
-
-    .PARAMETER ForceCompletion
-        Pass -Force through to Register-PackageCompletion so existing
-        sentinel blocks are replaced rather than preserved.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     [OutputType([object[]])]
@@ -72,8 +68,7 @@ function Invoke-PackageInstall {
         [string[]]$Name,
         [string[]]$Skip,
         [switch]$DryRun,
-        [switch]$SkipCompletion,
-        [switch]$ForceCompletion
+        [switch]$SkipCompletion
     )
 
     foreach ($pkg in $Packages) {
@@ -200,7 +195,7 @@ function Invoke-PackageInstall {
             $pkg.Completion -ne 'none' -and $pkg.CliCommands.Count -gt 0) {
             $completionResults = New-Object System.Collections.Generic.List[object]
             foreach ($cli in $pkg.CliCommands) {
-                $registerArgs = @{ Cli = $cli; Mode = $pkg.Completion; Force = $ForceCompletion }
+                $registerArgs = @{ Cli = $cli; Mode = $pkg.Completion }
                 if ($pkg.NativeCommandScript) { $registerArgs['NativeCommand'] = $pkg.NativeCommandScript }
                 try {
                     $r = Register-PackageCompletion @registerArgs

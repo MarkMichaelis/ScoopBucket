@@ -35,13 +35,6 @@ function Install-Package {
     .PARAMETER SkipCompletion
         Don't attempt completion registration.
 
-    .PARAMETER ForceCompletion
-        Re-register every CLI's tab-completion block even when a
-        sentinel block already exists in the AllUsersAllHosts profile.
-        Use this to repair completion for a CLI that was installed
-        before PSCompletions was available (the classic `bw <Tab>`
-        repair scenario).
-
     .PARAMETER BucketPath
         Override the auto-detected bucket directory.
 
@@ -56,7 +49,6 @@ function Install-Package {
         [Parameter(Mandatory, Position = 0)][string[]]$Name,
         [switch]$DryRun,
         [switch]$SkipCompletion,
-        [switch]$ForceCompletion,
         [string]$BucketPath
     )
 
@@ -147,8 +139,7 @@ function Install-Package {
     # --- Dispatch (a): Package.Name flow with -Name filter -----------------
     foreach ($entry in $byBundle.Values) {
         Invoke-BundleScript -BundlePath $entry.BundlePath -Bundle $entry.Bundle `
-            -Names $entry.Names -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
-            -ForceCompletion:$ForceCompletion
+            -Names $entry.Names -DryRun:$DryRun -SkipCompletion:$SkipCompletion
     }
 
     # --- Dispatch (b): full-bundle install (no -Name filter) ---------------
@@ -156,8 +147,7 @@ function Install-Package {
         Write-Host ""
         Write-Host "Install-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
         Invoke-BundleScript -BundlePath $b.BundlePath -Bundle $b.Bundle `
-            -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
-            -ForceCompletion:$ForceCompletion
+            -DryRun:$DryRun -SkipCompletion:$SkipCompletion
     }
 
     # --- Dispatch (c): scoop install fallback for bare manifests -----------

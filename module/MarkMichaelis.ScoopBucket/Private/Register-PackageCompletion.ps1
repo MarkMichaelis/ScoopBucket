@@ -98,8 +98,7 @@ function Set-PackageCompletionProfileBlock {
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
         [Parameter(Mandatory)][string]$Cli,
-        [Parameter(Mandatory)][string]$Block,
-        [switch]$Force
+        [Parameter(Mandatory)][string]$Block
     )
     $ver = $script:CompletionSentinelVersion
     $begin = "# ScoopBucket:CliCompletion:$Cli`:BEGIN $ver"
@@ -108,7 +107,6 @@ function Set-PackageCompletionProfileBlock {
     $newBlock = "$begin`r`n$Block`r`n$end`r`n"
     $match = [regex]::Match($Content, $pattern)
     if ($match.Success) {
-        if (-not $Force) { return $Content }
         $before = $Content.Substring(0, $match.Index)
         $after  = $Content.Substring($match.Index + $match.Length)
         return $before + $newBlock + $after
@@ -140,8 +138,6 @@ function Register-PackageCompletion {
         'pscompletions' — skip native, go straight to PSCompletions probe.
         'auto'          — native first, fall back to PSCompletions.
         Defaults to 'auto'.
-    .PARAMETER Force
-        Overwrite an existing block for the same CLI.
     .PARAMETER ProfilePath
         Test hook: write to this file instead of AllUsersAllHosts.
         Bypasses the elevation check.
@@ -152,7 +148,6 @@ function Register-PackageCompletion {
         [Parameter(Mandatory)][string]$Cli,
         [scriptblock]$NativeCommand,
         [ValidateSet('native','pscompletions','auto')][string]$Mode = 'auto',
-        [switch]$Force,
         [string]$ProfilePath
     )
 
@@ -166,12 +161,6 @@ function Register-PackageCompletion {
 
     $content  = Read-PackageCompletionProfileContent -Path $target
     $existed  = [regex]::IsMatch($content, "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:BEGIN \w+")
-    if ($existed -and -not $Force) {
-        return [pscustomobject]@{
-            Cli = $Cli; Source = 'Preserved'; Action = 'Preserved'
-            ProfilePath = $target; Reason = 'Existing block preserved; pass -Force to overwrite.'
-        }
-    }
 
     $resolveSplat = @{ Cli = $Cli }
     if ($NativeCommand -and $Mode -ne 'pscompletions') {
@@ -205,8 +194,7 @@ function Register-PackageCompletion {
     }
 
     if ($resolved.Source -eq 'PSCompletions') {
-        $pscAction = "psc add $Cli" + ($(if ($Force) { ' (re-add)' } else { '' }))
-        if ($PSCmdlet.ShouldProcess($Cli, $pscAction)) {
+        if ($PSCmdlet.ShouldProcess($Cli, "psc add $Cli")) {
             try {
                 Import-Module PSCompletions -ErrorAction Stop
                 & psc add $Cli 2>$null | Out-Null
@@ -225,7 +213,7 @@ function Register-PackageCompletion {
         }
     }
 
-    $newContent = Set-PackageCompletionProfileBlock -Content $content -Cli $Cli -Block $resolved.Code -Force:$true
+    $newContent = Set-PackageCompletionProfileBlock -Content $content -Cli $Cli -Block $resolved.Code
     $tmp = "$target.tmp"
     [System.IO.File]::WriteAllText($tmp, $newContent, [System.Text.UTF8Encoding]::new($false))
     Move-Item -Path $tmp -Destination $target -Force

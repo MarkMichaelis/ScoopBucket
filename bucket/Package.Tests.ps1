@@ -175,8 +175,34 @@ Describe 'Package.Validate() — happy paths' -Tag 'Light', 'Module' {
             CliCommands         = @('gh')
             Completion          = 'native'
             NativeCommandScript = { 'gh completion -s powershell' }
+            ExpectedCompletions = @{ gh = @('auth','repo','pr') }
         }
         { $p.Validate() } | Should -Not -Throw
+    }
+
+    It 'requires ExpectedCompletions when Completion != none' {
+        $p = [Package]@{
+            Name                = 'gh'
+            Installer           = 'winget'
+            Id                  = 'GitHub.cli'
+            CliCommands         = @('gh')
+            Completion          = 'native'
+            NativeCommandScript = { 'noop' }
+        }
+        { $p.Validate() } | Should -Throw -ExpectedMessage '*ExpectedCompletions*'
+    }
+
+    It 'requires an ExpectedCompletions entry for every CliCommands name' {
+        $p = [Package]@{
+            Name                = 'gh'
+            Installer           = 'winget'
+            Id                  = 'GitHub.cli'
+            CliCommands         = @('gh','gh2')
+            Completion          = 'native'
+            NativeCommandScript = { 'noop' }
+            ExpectedCompletions = @{ gh = @('auth') }
+        }
+        { $p.Validate() } | Should -Throw -ExpectedMessage "*missing a key for CLI 'gh2'*"
     }
 }
 
