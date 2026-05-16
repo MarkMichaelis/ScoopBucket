@@ -45,8 +45,10 @@ Add-ScoopBucket -Name 'extras'
 
 <#'McAfeeUninstall',#> 'OSBasePackages' | ForEach-Object {
   $app = $_
-  # Check if app is already installed globally
-  $installed = scoop list -g 2>&1 | Select-String -Pattern "^\s*$app\s" -Quiet
+  # Check if app is already installed globally. `scoop list` has NO `-g`
+  # flag -- it's `scoop list [query]`. A row with Info='Global install' is
+  # how scoop signals scope; treat its presence as the "installed" probe.
+  $installed = @(scoop list $app 2>$null | Where-Object { $_.Name -eq $app -and ($_.Info -as [string]) -match 'Global' }).Count -gt 0
   
   if ($installed) {
     Write-Host "✓ '$app' is already installed. Checking for updates..." -ForegroundColor Green
