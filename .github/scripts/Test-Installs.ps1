@@ -872,14 +872,20 @@ if ($scoopPackages.Count -gt 0) {
         # global install down outside %ProgramData%\scoop\apps depending on
         # the manifest's installer (msi/inno can target Program Files), so a
         # bare Test-Path on the apps tree produces false negatives. 'scoop
-        # list -g <leaf>' returns a row IFF scoop tracks a global install.
+        # list <leaf>' returns a PSObject row whose 'Info' column reads
+        # 'Global install' when scoop tracks it globally. (Note: there is
+        # NO '-g' flag for `scoop list` -- earlier versions of this check
+        # used `scoop list -g <leaf>` which scoop interpreted as a query
+        # filter and silently matched nothing, marking every install as a
+        # verification failure.)
         Test-Verification -Name "scoop-global:$($pkg.Name)" `
-            -Description "Scoop should report '$($pkg.Name)' as a global install ('scoop list -g $leaf')" `
+            -Description "Scoop should report '$($pkg.Name)' as a global install ('scoop list $leaf' Info column == 'Global install')" `
             -Test ([scriptblock]::Create(@"
-                `$output = cmd /c 'scoop list -g $leaf 2>&1'
-                # 'scoop list -g <name>' prints a header + one row per match;
-                # match presence of the leaf token anywhere in the output.
-                (`$output -join "``n") -match [regex]::Escape('$leaf')
+                `$rows = @(scoop list '$leaf' 2>`$null)
+                `$match = `$rows | Where-Object {
+                    `$_.Name -eq '$leaf' -and (`$_.Info -as [string]) -match 'Global'
+                }
+                [bool](`$match)
 "@))
     }
 }
