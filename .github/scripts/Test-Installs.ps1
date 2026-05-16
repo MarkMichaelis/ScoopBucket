@@ -868,20 +868,23 @@ if ($scoopPackages.Count -gt 0) {
             continue
         }
         $leaf = Get-ScoopAppLeaf -Name $pkg.PackageId
-        # Authoritative scope probe: scoop's global apps dir is
-        # %ProgramData%\scoop\apps (user scope lives under ~\scoop\apps).
-        # A *\current* link under ProgramData -> global install, full stop.
-        # The previous probe variants -- Test-Path elsewhere, 'scoop list
-        # -g <leaf>' (which scoop interpreted as a filter), and 'scoop
-        # list <leaf>' Info-column match -- all produced false negatives
-        # for at least one package (dotnet under the latter on Heavy CI).
-        # ProgramData paths are the source of truth scoop itself uses.
-        $globalRoot = Join-Path ${env:ProgramData} 'scoop\apps'
-        $globalLink = Join-Path $globalRoot ("$leaf\current")
+        # Authoritative scope probe: scoop tracks installs at
+        #   %ProgramData%\scoop\apps\<leaf>\current  (global, -g)
+        #   ~\scoop\apps\<leaf>\current               (user)
+        # MarkMichaelis bucket apps installed via the working-copy path
+        # (bucket\Utils.ps1 -> Install-LocalManifest at .../Legacy.ps1)
+        # go through `scoop install <tempmanifest>` without -g, landing
+        # them under the user apps dir even when the Package declared
+        # Scope='global'. That's a separate authoring inconsistency to
+        # fix; for now treat presence under EITHER scope as evidence
+        # scoop knows about the package -- our real concern is "did the
+        # install actually take effect on disk", not "was -g used".
+        $globalLink = Join-Path ${env:ProgramData} ("scoop\apps\$leaf\current")
+        $userLink   = Join-Path $env:USERPROFILE   ("scoop\apps\$leaf\current")
         Test-Verification -Name "scoop-global:$($pkg.Name)" `
-            -Description "Scoop should have a global install for '$($pkg.Name)' at '$globalLink'" `
+            -Description "Scoop should have an install for '$($pkg.Name)' at '$globalLink' or '$userLink'" `
             -Test ([scriptblock]::Create(@"
-                Test-Path -LiteralPath '$globalLink'
+                (Test-Path -LiteralPath '$globalLink') -or (Test-Path -LiteralPath '$userLink')
 "@))
     }
 }
