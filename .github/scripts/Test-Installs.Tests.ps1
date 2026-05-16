@@ -665,9 +665,9 @@ Describe 'Get-PackagesNeedingVerification' {
     }
 
     It 'excludes packages that are on the CI skip list (untested status)' {
-        # Anthropic.Claude is on $script:CISkipPackages -> recorded as 'untested'
-        # via Skip-Package, so it must NOT be verified (would generate a duplicate
-        # auto-filed issue).
+        # Skipped packages (recorded as 'untested' via Skip-Package) must NOT be
+        # verified — Get-PackagesNeedingVerification's status filter is what keeps
+        # untested rows from generating duplicate auto-filed issues.
         $results = @(
             [PSCustomObject]@{ Name = 'Anthropic.Claude'; InstallerType = 'winget'; Status = 'untested' }
             [PSCustomObject]@{ Name = 'GitHub.cli';       InstallerType = 'winget'; Status = 'pass' }

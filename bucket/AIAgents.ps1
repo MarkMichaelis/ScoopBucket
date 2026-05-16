@@ -80,6 +80,15 @@ Register-ArgumentCompleter -Native -CommandName npx -ScriptBlock {
         Name        = 'Claude Desktop'
         Installer   = 'winget'
         Id          = 'Anthropic.Claude'
+        # Anthropic ships Claude Desktop in two flavors: a machine-context MSIX
+        # (requires the runFullTrust restricted capability, only honored on
+        # interactive Windows desktop sessions with sideloading enabled) and a
+        # user-scope EXE. On headless Windows Server hosted CI runners winget's
+        # default MSIX selection fails with APPINSTALLER_CLI_ERROR_INSTALL_SYSTEM_NOT_SUPPORTED
+        # (-1978334957). Forcing --scope user routes winget to the EXE installer,
+        # which is also Anthropic's actual deployment model (per-user app under
+        # %LOCALAPPDATA%\AnthropicClaude). See #85.
+        Scope       = 'user'
         Notes       = 'MCP-capable desktop client. Local Claude.json manifest also installs this via winget; keeping the declarative entry here is the canonical home for the package.'
     }
     [Package]@{

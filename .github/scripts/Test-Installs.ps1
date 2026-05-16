@@ -35,10 +35,6 @@ $ProgressPreference = 'SilentlyContinue'  # Speed up web requests
 $script:CISkipPackages = @{
     # winget: user-scope-only MSIX apps (no machine-scope MSI/EXE installer)
     'Pushbullet.Pushbullet'         = 'User-scope MSIX only — no machine installer; no msstore/scoop/choco alternative (#8)'
-    # winget: installer returns APPINSTALLER_CLI_ERROR_INSTALL_SYSTEM_NOT_SUPPORTED (-1978334957)
-    # on hosted runners — the Claude Desktop installer rejects the runner's system
-    # configuration (#85). Tracked separately; not a regression we can resolve in CI.
-    'Anthropic.Claude'              = 'winget installer reports SYSTEM_NOT_SUPPORTED on hosted runners (#85)'
     # choco: delisted or CI-incompatible
     'Office365ProPlus'              = 'Requires GUI session and license activation (exit 17004)'
     # scoop: browser-watch installers requiring interactive Download click
