@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Compact default view for [Package] instances.
+
+  Without this file, PowerShell auto-formats [Package] (which has
+  17+ properties, many of them scriptblocks) as a verbose Format-List
+  - one row per property, repeated per package. After splitting
+  Invoke-PackageInstall's output across the success/error streams
+  (each Installed/AlreadyInstalled/Skipped Package now lands on the
+  success stream), interactive use degenerated into a wall of
+  property dumps.
+
+  This file ships a single compact Table view (Name, Installer, Id,
+  Scope) that fits one row per Package. Pipeline consumers are
+  unaffected - format views don't change object identity or
+  property access - they only change how PowerShell renders an
+  unassigned Package to the host.
+-->
+<Configuration>
+  <ViewDefinitions>
+    <View>
+      <Name>Package</Name>
+      <ViewSelectedBy>
+        <TypeName>Package</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader>
+            <Label>Name</Label>
+            <Width>28</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Installer</Label>
+            <Width>11</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Id</Label>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Scope</Label>
+            <Width>8</Width>
+          </TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem>
+                <PropertyName>Name</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>Installer</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>Id</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>Scope</PropertyName>
+              </TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+  </ViewDefinitions>
+</Configuration>

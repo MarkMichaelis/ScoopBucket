@@ -19,6 +19,8 @@
 
     ScriptsToProcess  = @('Classes\Package.ps1')
 
+    FormatsToProcess  = @('MarkMichaelis.ScoopBucket.format.ps1xml')
+
     FunctionsToExport = @(
         'Install-Package',
         'Uninstall-Package',

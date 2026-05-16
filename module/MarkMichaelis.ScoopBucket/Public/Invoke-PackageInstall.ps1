@@ -154,12 +154,13 @@ function Invoke-PackageInstall {
                     Write-Host "  [DryRun] CustomInstallScript"
                     $result = @{ State = 'Installed'; Reason = '(DryRun)' }
                 } else {
-                    # 2>$null swallows any error-stream emissions from the
-                    # scriptblock. We re-emit a single structured
-                    # PackageInstallFailed ErrorRecord in the catch below,
-                    # so without the swallow the user would see both the
-                    # raw inner error AND our wrapper for one failure.
-                    & $pkg.CustomInstallScript $pkg 2>$null
+                    # Discard any pipeline output the user's
+                    # CustomInstallScript may emit — we treat it as
+                    # purely side-effecting (the synthesized $result
+                    # below is what we actually use). Without the
+                    # [void], stray return values land on our function's
+                    # success stream and pollute the [Package] output.
+                    [void](& $pkg.CustomInstallScript $pkg 2>$null)
                     $result = @{ State = 'Installed'; Reason = $null }
                 }
             } else {
@@ -206,7 +207,10 @@ function Invoke-PackageInstall {
                 Write-Host "  [DryRun] PostInstallScript"
             } else {
                 try {
-                    & $pkg.PostInstallScript $pkg 2>$null
+                    # PostInstallScript is purely side-effecting; discard
+                    # any pipeline output so it doesn't pollute our
+                    # function's success stream of [Package] objects.
+                    [void](& $pkg.PostInstallScript $pkg 2>$null)
                     Update-PathFromRegistry
                 } catch {
                     $reason = "PostInstallScript threw: $($_.Exception.Message)"
