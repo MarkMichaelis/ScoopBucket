@@ -20,7 +20,8 @@ $Packages = [Package[]]@(
                 Notes = 'Pulls every AI agent + Claude Desktop and configures MCP servers; see AIAgents.ps1.' }
 
     [Package]@{ Name = 'Handy';            Installer = 'winget'; Id = 'cjpais.Handy'; Scope = 'user'
-                Notes = 'Free open-source local speech-to-text (https://handy.computer). Runs Whisper/Parakeet locally; no cloud. User-scope only (no machine-scope installer).' }
+                WingetExtraArgs = @('--skip-dependencies')
+                Notes = 'Free open-source local speech-to-text (https://handy.computer). Runs Whisper/Parakeet locally; no cloud. User-scope only. Declares a KhronosGroup.VulkanRT dependency winget cannot resolve on most machines (already present via GPU drivers), so we skip dependency processing.' }
 
     [Package]@{ Name = 'eSpeak NG';        Installer = 'scoop';  Id = 'main/espeak-ng';    CliCommands = @('espeak-ng') }
     [Package]@{ Name = 'Notion';           Installer = 'scoop';  Id = 'extras/notion' }

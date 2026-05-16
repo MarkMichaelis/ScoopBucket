@@ -92,6 +92,39 @@ Describe 'Engine dispatchers' -Tag 'Light','Module' {
             $r.State | Should -Be 'Failed'
             $r.Reason | Should -Match '5'
         }
+
+        It 'appends WingetExtraArgs to the install command' {
+            $script:installArgs = $null
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget {
+                if ($args[0] -eq 'list') { $global:LASTEXITCODE = 1; return '' }
+                $script:installArgs = $args
+                $global:LASTEXITCODE = 0
+                return 'Installed.'
+            }
+
+            $pkg = [Package]@{ Name='Test'; Installer='winget'; Id='Test.Id'
+                               WingetExtraArgs = @('--skip-dependencies', '--force') }
+            $null = & $script:Engine -Package $pkg
+            $script:installArgs | Should -Contain '--skip-dependencies'
+            $script:installArgs | Should -Contain '--force'
+        }
+
+        It 'does not stop retries as permanent for exit -1978334972 (missing dependency)' {
+            # -1978334972 = APPINSTALLER_CLI_ERROR_INSTALL_MISSING_DEPENDENCY.
+            # Retrying won't recover, so we treat it as permanent (no retry loop).
+            $script:installCount = 0
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget {
+                if ($args[0] -eq 'list') { $global:LASTEXITCODE = 1; return '' }
+                $script:installCount++
+                $global:LASTEXITCODE = -1978334972
+                return 'missing dependency'
+            }
+
+            $pkg = [Package]@{ Name='Test'; Installer='winget'; Id='Test.Id' }
+            $r = & $script:Engine -Package $pkg
+            $r.State | Should -Be 'Failed'
+            $script:installCount | Should -Be 1
+        }
     }
 
     Context 'Install-ChocoPackage' {

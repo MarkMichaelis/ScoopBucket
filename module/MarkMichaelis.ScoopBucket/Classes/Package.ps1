@@ -45,6 +45,13 @@ class Package {
     [scriptblock] $PostInstallScript
     [scriptblock] $VerifyScript
 
+    # Engine-specific extra arguments appended to the install command.
+    # Currently only consumed by Install-WingetPackage. Use for cases
+    # where winget needs a flag beyond the standard ones (e.g.
+    # --skip-dependencies for packages with broken or already-satisfied
+    # dependency manifests).
+    [string[]] $WingetExtraArgs = @()
+
     [string[]] $DependsOn = @()
 
     [string]   $CISkip = ''
