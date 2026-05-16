@@ -175,7 +175,14 @@ function Install-Package {
     # Register-ArgumentCompleter -Native is process-global so this works
     # regardless of module scope.
     if (-not $SkipCompletion -and -not $DryRun) {
-        $packagesToImport = New-Object System.Collections.Generic.List[Package]
+        # NOTE: List[object] (not List[Package]) because $b.Packages items
+        # are JSON-deserialized PSCustomObjects from Get-BundlePackages'
+        # child runspace, not real [Package] instances. PowerShell can't
+        # coerce PSCustomObject -> Package, so List[Package].Add throws
+        # "Cannot find an overload for 'Add' and the argument count: '1'".
+        # Import-PackageCompletion only reads property names off the
+        # objects, so PSCustomObject works fine downstream.
+        $packagesToImport = New-Object System.Collections.Generic.List[object]
         foreach ($entry in $byBundle.Values) {
             foreach ($b in $bundles) {
                 if ($b.BundlePath -ne $entry.BundlePath) { continue }
