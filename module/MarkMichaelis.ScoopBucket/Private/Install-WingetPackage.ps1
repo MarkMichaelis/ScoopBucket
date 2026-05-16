@@ -69,6 +69,7 @@ function Install-WingetPackage {
     $permanentFailureCodes = @(
         -1978335212  # APPINSTALLER_CLI_ERROR_NO_APPLICABLE_INSTALLER (user-scope only)
         -1978334969  # APPINSTALLER_CLI_ERROR_INSTALL_BLOCKED_BY_POLICY
+        -1978334972  # APPINSTALLER_CLI_ERROR_INVALID_INSTALLER_TYPE_FOR_SCOPE (nullsoft/EXE installers that don't support --scope machine)
     )
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         if ($attempt -gt 1) {

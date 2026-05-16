@@ -222,9 +222,31 @@ function Invoke-PackageInstall {
     $arr | ForEach-Object {
         $line = "  {0,-18} {1,-12} {2}" -f $_.State, $_.Installer, $_.Name
         if ($_.Reason) { $line += "  -- $($_.Reason)" }
-        Write-Host $line
+        # Colorize by state so a glance at the summary tells the story.
+        # Without this, every line — Installed, Failed, Skipped — rendered
+        # in the default foreground and "Failed" was easy to overlook.
+        $color = switch ($_.State) {
+            'Installed'        { 'Green' }
+            'AlreadyInstalled' { 'DarkGreen' }
+            'Failed'           { 'Red' }
+            'Skipped'          { 'Yellow' }
+            default            { $Host.UI.RawUI.ForegroundColor }
+        }
+        Write-Host $line -ForegroundColor $color
     }
     Write-Host ""
+
+    # PowerShell auto-renders the returned PSCustomObject array as
+    # Format-List with green property names; on a failed install, that
+    # green can mislead a quick eye into thinking the operation
+    # succeeded. Emit a final, unambiguous red banner so failures can't
+    # be skimmed past.
+    $failedCount = @($arr | Where-Object State -eq 'Failed').Count
+    if ($failedCount -gt 0) {
+        $noun = if ($failedCount -eq 1) { 'package' } else { 'packages' }
+        Write-Host "!! $failedCount $noun failed in '$Bundle' — see [Reason] above." -ForegroundColor Red
+        Write-Host ""
+    }
 
     return ,$arr
 }
