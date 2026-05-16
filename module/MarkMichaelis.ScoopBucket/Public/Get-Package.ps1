@@ -37,7 +37,7 @@ function Get-Package {
 
     .OUTPUTS
         PSCustomObject[] with Bundle, Name, Installer, Id, Source, Scope,
-        CliCommands, Completion, DependsOn, CISkip, Notes.
+        CliCommands, Completion, DependsOn, CISkip, Notes, WingetExtraArgs.
 
     .EXAMPLE
         Get-Package -Installer scoop
@@ -103,6 +103,7 @@ function Get-Package {
                 DependsOn   = @($p.DependsOn)
                 CISkip      = $p.CISkip
                 Notes       = $p.Notes
+                WingetExtraArgs = @($p.WingetExtraArgs)
                 HasPostInstallScript   = [bool]$p.HasPostInstallScript
                 HasCustomInstallScript = [bool]$p.HasCustomInstallScript
                 HasVerifyScript        = [bool]$p.HasVerifyScript
