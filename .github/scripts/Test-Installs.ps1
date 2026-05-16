@@ -850,44 +850,21 @@ function Add-VerificationSkipped {
         -Command "SKIPPED: $Reason" -Status 'untested'
 }
 
-# --- Scoop global installs (derived from discovered packages) ---
-# Only verify packages whose install actually passed.  Skipped/failed installs
-# already have a row in $script:Results — running a second 'Test-Path' check
-# would just produce a duplicate failure for the same upstream cause.
-$scoopPackages = @($packages | Where-Object InstallerType -eq 'scoop')
-if ($scoopPackages.Count -gt 0) {
-    Write-Host "Verifying scoop packages are installed globally..." -ForegroundColor Gray
-    $scoopToVerify = Get-PackagesNeedingVerification -Packages $scoopPackages `
-        -InstallerType 'scoop' -Results @($script:Results)
-    $scoopVerifyNames = @{}
-    foreach ($p in $scoopToVerify) { $scoopVerifyNames[$p.Name] = $true }
-    foreach ($pkg in $scoopPackages) {
-        if (-not $scoopVerifyNames.ContainsKey($pkg.Name)) {
-            Add-VerificationSkipped -Name "scoop-global:$($pkg.Name)" `
-                -Reason "Install was skipped or failed; verification not attempted"
-            continue
-        }
-        $leaf = Get-ScoopAppLeaf -Name $pkg.PackageId
-        # Authoritative probe: ask scoop itself whether it tracks the
-        # app. `scoop list <leaf>` emits a PSObject per installed app
-        # whose Name column equals the leaf name when the app is in
-        # scoop's installed database -- at either scope, regardless of
-        # whether the manifest's installer actually creates a real
-        # apps\<leaf>\current junction. (Several MarkMichaelis bucket
-        # manifests are no-op "phantom" packages whose URL is a 0-byte
-        # `blank` file and whose installer only emits a Write-Warning;
-        # those legitimately appear in scoop's list but never produce a
-        # populated apps dir.) Match on the Name property directly to
-        # avoid text-formatting quirks (e.g. dotnet's row used to slip
-        # past a regex match on its own name).
-        Test-Verification -Name "scoop-global:$($pkg.Name)" `
-            -Description "Scoop should track '$($pkg.Name)' via 'scoop list $leaf'" `
-            -Test ([scriptblock]::Create(@"
-                `$rows = @(& scoop list '$leaf' 2>`$null | Where-Object { `$_.Name -eq '$leaf' })
-                `$rows.Count -gt 0
-"@))
-    }
-}
+# --- Scoop installs ---
+# Historical note: PRs #140/#151/#152/#153/#154/#155 layered a second
+# "scope-verification" probe (Test-Path under apps\<leaf>\current; then
+# 'scoop list -g'; then 'scoop list <leaf>' regex; then PSObject Name
+# match) on top of the install pass/fail signal. Across four Heavy runs
+# every variant produced false negatives for legitimate cases:
+#   * "phantom" bucket manifests (Microsoft Copilot, Claude Code CLI,
+#     Codex CLI, Gemini CLI, GitHub Copilot CLI, Visual Studio) whose
+#     installer is a Write-Warning over a 0-byte 'blank' URL -- they
+#     register in scoop but never populate apps\<leaf>\current.
+#   * `main/dotnet` -- the runner image ships dotnet natively; scoop's
+#     -g install succeeds with no-op semantics and the resulting `scoop
+#     list dotnet` returns the empty-list header.
+# None of the variants ever caught a real install regression: the
+# command's exit code already does that. Drop the second probe.
 
 # --- Winget installs (spot-check via 'winget list') ---
 # Only verify packages that actually passed installation (skip CI-skipped and failed).
