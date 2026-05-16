@@ -369,6 +369,10 @@ function Install-LocalManifest {
         $null = scoop.ps1 uninstall $appName 2>&1
         $manifest | ConvertTo-Json -Depth 20 | Out-File -FilePath $tempManifest -Encoding UTF8
         scoop.ps1 install $tempManifest
+        $scoopInstallExit = $LASTEXITCODE
+        if ($scoopInstallExit -eq 0 -and $BucketName) {
+            Update-LocalManifestInstallMetadata -AppName $appName -BucketName $BucketName -ErrorAction SilentlyContinue
+        }
     } finally {
         Remove-Item -Force -Path $tempManifest -ErrorAction Ignore
         scoop.ps1 unhold scoop | Out-Null
@@ -381,6 +385,110 @@ function Install-LocalManifest {
             $null = scoop.ps1 bucket rm $BucketName 2>&1
             if ($originalSource) {
                 $null = scoop.ps1 bucket add $BucketName $originalSource 2>&1
+            }
+        }
+    }
+}
+
+<#
+.SYNOPSIS
+    Repair an app's ~/scoop/apps/<App>/current/install.json and manifest.json
+    after a working-copy `Install-LocalManifest` install.
+.DESCRIPTION
+    `Install-LocalManifest` runs `scoop install <temp manifest>` to test a
+    working-copy manifest before pushing. Scoop records the install with an
+    empty `bucket` field (the install came from a file path, not a registered
+    bucket) and caches the rewritten `url[]` entries pointing at the local
+    working-copy directory. Net effect: `scoop update <App>` errors with
+    "couldn't find manifest for '<App>'", and the cached manifest's url[]
+    no longer matches master.
+
+    This helper:
+      * Sets install.json.bucket = $BucketName so `scoop update` resolves.
+      * Restores canonical https://raw.githubusercontent.com/.../master/...
+        URLs in the cached manifest.json so future re-installs/updates fetch
+        from the bucket, not the local file path.
+
+    Both ~/scoop/apps/<App>/current/{install,manifest}.json and (if the
+    version directory exists separately) ~/scoop/apps/<App>/<version>/{install,manifest}.json
+    are patched defensively. `current` is normally a junction to the
+    version directory so patching one effectively patches both; we touch
+    both explicitly in case a Scoop release ever changes that.
+
+    All file writes are wrapped in try/catch: install.json is an internal
+    Scoop record (no public schema contract), so any failure should be
+    non-fatal — `scoop update` will keep returning the original error and
+    the user can fall back to `scoop install MarkMichaelis/<App>` to relink.
+
+    See issue #62.
+#>
+function Update-LocalManifestInstallMetadata {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$AppName,
+        [Parameter(Mandatory)][string]$BucketName,
+        [string]$ScoopRoot
+    )
+
+    if (-not $ScoopRoot) {
+        $ScoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
+    }
+    $appRoot = Join-Path $ScoopRoot "apps\$AppName"
+    if (-not (Test-Path $appRoot)) {
+        Write-Verbose "Update-LocalManifestInstallMetadata: $appRoot does not exist; nothing to patch."
+        return
+    }
+
+    # Collect candidate dirs: current/, plus any version-named sibling
+    # directories so we hit both the junction target and the original
+    # version dir on the off chance they aren't the same inode.
+    $dirs = [System.Collections.Generic.List[string]]::new()
+    $currentDir = Join-Path $appRoot 'current'
+    if (Test-Path $currentDir) { $null = $dirs.Add($currentDir) }
+    Get-ChildItem -Path $appRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne 'current' } |
+        ForEach-Object { $null = $dirs.Add($_.FullName) }
+
+    foreach ($dir in $dirs) {
+        $installJsonPath = Join-Path $dir 'install.json'
+        if (Test-Path $installJsonPath) {
+            try {
+                $installJson = Get-Content -LiteralPath $installJsonPath -Raw -ErrorAction Stop |
+                    ConvertFrom-Json -ErrorAction Stop
+                if ($installJson.PSObject.Properties.Name -contains 'bucket') {
+                    $installJson.bucket = $BucketName
+                } else {
+                    $installJson | Add-Member -NotePropertyName 'bucket' -NotePropertyValue $BucketName -Force
+                }
+                $installJson | ConvertTo-Json -Depth 20 |
+                    Out-File -LiteralPath $installJsonPath -Encoding UTF8 -ErrorAction Stop
+                Write-Verbose "Patched bucket field in $installJsonPath -> $BucketName"
+            } catch {
+                Write-Warning "Update-LocalManifestInstallMetadata: failed to patch '$installJsonPath': $($_.Exception.Message)"
+            }
+        }
+
+        $manifestJsonPath = Join-Path $dir 'manifest.json'
+        if (Test-Path $manifestJsonPath) {
+            try {
+                $manifestJson = Get-Content -LiteralPath $manifestJsonPath -Raw -ErrorAction Stop |
+                    ConvertFrom-Json -ErrorAction Stop
+                if ($manifestJson.url) {
+                    $canonicalPrefix = "https://raw.githubusercontent.com/$BucketName/ScoopBucket/master/bucket"
+                    $manifestJson.url = @(
+                        $manifestJson.url | ForEach-Object {
+                            # Strip any file:// or local path prefix and rebuild against canonical master URL.
+                            $leaf = [System.IO.Path]::GetFileName(([Uri]$_).LocalPath)
+                            if (-not $leaf) { $leaf = [System.IO.Path]::GetFileName($_) }
+                            "$canonicalPrefix/$leaf"
+                        }
+                    )
+                    $manifestJson | ConvertTo-Json -Depth 20 |
+                        Out-File -LiteralPath $manifestJsonPath -Encoding UTF8 -ErrorAction Stop
+                    Write-Verbose "Restored canonical url[] in $manifestJsonPath"
+                }
+            } catch {
+                Write-Warning "Update-LocalManifestInstallMetadata: failed to patch '$manifestJsonPath': $($_.Exception.Message)"
             }
         }
     }
