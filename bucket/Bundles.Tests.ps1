@@ -272,4 +272,18 @@ Describe 'Specific cross-bundle placement contracts' -Tag 'Light','Bundle' {
         $bc = $script:byBundle.DeveloperBasePackages | Where-Object Name -eq 'Beyond Compare'
         $bc.HasPostInstallScript | Should -BeTrue
     }
+
+    It 'Get-Package surfaces WingetExtraArgs through the child-runspace bundle loader (#161)' {
+        # Regression: PR #159 added WingetExtraArgs on the [Package] class
+        # and to Test-Installs.ps1's CI wrapper, but the curated hashtable
+        # in Get-BundlePackages.ps1's probe (and Get-Package's flattener)
+        # omitted the field, so it round-tripped as $null. Result: Handy
+        # was installed in CI without --skip-dependencies and failed with
+        # APPINSTALLER_CLI_ERROR_INSTALL_MISSING_DEPENDENCY (-1978334972)
+        # on KhronosGroup.VulkanRT 1.4.350.0. Lock in the contract.
+        $handy = $script:byBundle.ClientBasePackages | Where-Object Name -eq 'Handy'
+        $handy                                          | Should -Not -BeNullOrEmpty
+        $handy.PSObject.Properties.Name                 | Should -Contain 'WingetExtraArgs'
+        @($handy.WingetExtraArgs)                       | Should -Contain '--skip-dependencies'
+    }
 }

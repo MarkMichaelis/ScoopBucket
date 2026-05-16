@@ -105,6 +105,7 @@ function global:Invoke-PackageInstall {
             DependsOn   = @(`$p.DependsOn)
             CISkip      = `$p.CISkip
             Notes       = `$p.Notes
+            WingetExtraArgs = @(`$p.WingetExtraArgs)
             HasPostInstallScript   = [bool]`$p.PostInstallScript
             HasCustomInstallScript = [bool]`$p.CustomInstallScript
             HasVerifyScript        = [bool]`$p.VerifyScript
