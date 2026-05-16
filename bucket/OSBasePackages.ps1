@@ -8,15 +8,96 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 #   #73  rg native completion + gcloud PSCompletions fallback
 
 $Packages = [Package[]]@(
-    [Package]@{ Name = 'Windows Terminal';              Installer = 'winget'; Id = 'Microsoft.WindowsTerminal';                          CliCommands = @('wt') }
-    [Package]@{ Name = '7-Zip';                         Installer = 'winget'; Id = '7Zip.7Zip';                                          CliCommands = @('7z') }
+    [Package]@{
+        Name        = 'Windows Terminal'
+        Installer   = 'winget'
+        Id          = 'Microsoft.WindowsTerminal'
+        CliCommands = @('wt')
+        Completion  = 'pscompletions'
+        ExpectedCompletions = @{ wt = @('new-tab','split-pane','focus-tab') }
+    }
+    [Package]@{
+        Name        = '7-Zip'
+        Installer   = 'winget'
+        Id          = '7Zip.7Zip'
+        CliCommands = @('7z')
+        Completion  = 'pscompletions'
+        ExpectedCompletions = @{ '7z' = @('a','x','l') }
+    }
     [Package]@{ Name = 'Everything';                    Installer = 'winget'; Id = 'voidtools.Everything' }
-    [Package]@{ Name = 'Everything CLI';                Installer = 'winget'; Id = 'voidtools.Everything.Cli';                           CliCommands = @('es') }
+    [Package]@{
+        Name        = 'Everything CLI'
+        Installer   = 'winget'
+        Id          = 'voidtools.Everything.Cli'
+        CliCommands = @('es')
+        Completion  = 'auto'
+        Notes       = 'es.exe has no PowerShell completion subcommand and no PSCompletions catalog entry; ship hand-curated top-level flags so Tab returns the common search-control switches.'
+        ExpectedCompletions = @{ es = @('-s','-r','-n','-sort','-help') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName es -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '-s','-r','-i','-w','-p','-c','-n','-sort','-name','-path','-size','-date-modified',
+        '-date-created','-attributes','-r-name','-r-path','-help','-export-csv','-export-txt',
+        '-folder','-file','-instance','-set-run-count','-inc-run-count'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
     [Package]@{ Name = 'Google Chrome';                 Installer = 'winget'; Id = 'Google.Chrome' }
     [Package]@{ Name = 'WinDirStat';                    Installer = 'winget'; Id = 'WinDirStat.WinDirStat' }
     [Package]@{ Name = 'UniversalSilentSwitchFinder';   Installer = 'winget'; Id = 'WindowsPostInstallWizard.UniversalSilentSwitchFinder' }
-    [Package]@{ Name = 'bat';                           Installer = 'winget'; Id = 'sharkdp.bat';                                        CliCommands = @('bat') }
-    [Package]@{ Name = 'fzf';                           Installer = 'winget'; Id = 'junegunn.fzf';                                       CliCommands = @('fzf') }
+    [Package]@{
+        Name        = 'bat'
+        Installer   = 'winget'
+        Id          = 'sharkdp.bat'
+        CliCommands = @('bat')
+        Completion  = 'auto'
+        Notes       = 'bat ships zsh/bash/fish completion only; no PowerShell command and no PSCompletions entry. Hand-curated top-level flag list.'
+        ExpectedCompletions = @{ bat = @('--help','--list-languages','--style') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName bat -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','--version','--list-languages','--list-themes','--language','--theme',
+        '--style','--paging','--color','--decorations','--wrap','--tabs','--line-range',
+        '--show-all','--plain','--number','--cache-build','--diff','--diff-context'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
+    [Package]@{
+        Name        = 'fzf'
+        Installer   = 'winget'
+        Id          = 'junegunn.fzf'
+        CliCommands = @('fzf')
+        Completion  = 'auto'
+        Notes       = 'fzf ships shell-key-binding completion for bash/zsh/fish (and a PowerShell PSFzf module) but no native `fzf completion powershell` and no PSCompletions entry. Hand-curated top-level flag list.'
+        ExpectedCompletions = @{ fzf = @('--help','--height','--reverse') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName fzf -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','--version','--height','--reverse','--multi','--query','--filter',
+        '--preview','--preview-window','--bind','--header','--prompt','--ansi',
+        '--no-sort','--exact','--cycle','--layout','--border','--color','--print0',
+        '--read0','--info','--scroll-off','--tabstop','--no-mouse'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
     [Package]@{
         Name        = 'Google Cloud SDK'
         Installer   = 'winget'
@@ -47,10 +128,41 @@ Register-ArgumentCompleter -Native -CommandName gcloud -ScriptBlock {
     # text editor available before DeveloperBasePackages runs. The winget
     # engine's AlreadyInstalled probe makes the duplicate declaration in
     # DeveloperBasePackages a no-op on a second pass.
-    [Package]@{ Name = 'Visual Studio Code';            Installer = 'winget'; Id = 'Microsoft.VisualStudioCode';                          CliCommands = @('code') }
+    [Package]@{
+        Name        = 'Visual Studio Code'
+        Installer   = 'winget'
+        Id          = 'Microsoft.VisualStudioCode'
+        CliCommands = @('code')
+        Completion  = 'auto'
+        Notes       = '`code --help` lists CLI switches but `code` has no completion subcommand and no PSCompletions catalog entry. Hand-curated flag list shared with DeveloperBasePackages.'
+        ExpectedCompletions = @{ code = @('--help','--diff','--new-window') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName code -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','--version','--diff','--merge','--add','--goto','--new-window','--reuse-window',
+        '--wait','--locale','--user-data-dir','--profile','--extensions-dir','--list-extensions',
+        '--install-extension','--uninstall-extension','--enable-proposed-api','--status',
+        '--prof-startup','--disable-extensions','--disable-extension','--sync','--inspect-extensions',
+        '--inspect-brk-extensions','--verbose','--log','--telemetry'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
 
     # scoop replacements for winget entries with upstream drift
-    [Package]@{ Name = 'ffmpeg';                        Installer = 'scoop';  Id = 'main/ffmpeg';                                         CliCommands = @('ffmpeg') }
+    [Package]@{
+        Name        = 'ffmpeg'
+        Installer   = 'scoop'
+        Id          = 'main/ffmpeg'
+        CliCommands = @('ffmpeg')
+        Completion  = 'pscompletions'
+        ExpectedCompletions = @{ ffmpeg = @('-i','-y','-version') }
+    }
     [Package]@{
         Name        = 'ripgrep'
         Installer   = 'scoop'

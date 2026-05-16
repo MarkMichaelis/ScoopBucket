@@ -139,7 +139,7 @@ Describe 'Package class — construction and defaults' -Tag 'Light', 'Module' {
 
 Describe 'Package.Validate() — happy paths' -Tag 'Light', 'Module' {
     It 'passes a minimal scoop entry with bucket prefix' {
-        $p = [Package]@{ Name = 'ripgrep'; Installer = 'scoop'; Id = 'main/ripgrep'; CliCommands = @('rg') }
+        $p = [Package]@{ Name = 'ripgrep'; Installer = 'scoop'; Id = 'main/ripgrep' }
         { $p.Validate() } | Should -Not -Throw
     }
 

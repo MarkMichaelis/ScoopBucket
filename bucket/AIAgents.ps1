@@ -33,7 +33,46 @@ $Packages = [Package[]]@(
         Installer   = 'choco'
         Id          = 'nodejs'
         CliCommands = @('node','npm','npx')
-        Notes       = 'Required for every npx-based MCP server (context7, playwright, filesystem, github).'
+        Completion  = 'auto'
+        Notes       = 'Required for every npx-based MCP server (context7, playwright, filesystem, github). node/npm have PSCompletions entries but npx does not, so ship a shared hand-curated NativeCommandScript that registers all three uniformly here.'
+        ExpectedCompletions = @{
+            node = @('--help','--version','--eval')
+            npm  = @('install','run','version')
+            npx  = @('--help','--version','--package')
+        }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName node -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','--version','--eval','--print','--check','--interactive','--require','--inspect',
+        '--inspect-brk','--enable-source-maps','--experimental-modules','--experimental-vm-modules',
+        '--unhandled-rejections','--use-openssl-ca','--no-warnings','--trace-warnings'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+Register-ArgumentCompleter -Native -CommandName npm -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        'install','uninstall','update','run','start','test','version','init','publish','pack',
+        'config','cache','audit','outdated','ls','list','link','unlink','search','view','prune',
+        'rebuild','restart','stop','adduser','login','logout','whoami','--help','--version'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+Register-ArgumentCompleter -Native -CommandName npx -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','--version','--package','--call','--no-install','--ignore-existing','--yes','--no',
+        '--shell','--cache','--prefer-offline','--prefer-online','--offline','--quiet','--verbose'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
     }
 
     # Agent apps.
@@ -65,6 +104,23 @@ $Packages = [Package[]]@(
         Id          = 'MarkMichaelis/ClaudeCode'
         CliCommands = @('claude')
         DependsOn   = @('Node.js')
+        Completion  = 'auto'
+        Notes       = 'claude has no completion subcommand and no PSCompletions entry. Hand-curated top-level command list.'
+        ExpectedCompletions = @{ claude = @('--help','--version','mcp') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName claude -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','--version','--print','--continue','--resume','--model','--add-dir',
+        '--allowedTools','--disallowedTools','--mcp-config','--append-system-prompt',
+        '--verbose','--debug','mcp','config','update','migrate-installer','doctor'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
     }
     [Package]@{
         Name        = 'Codex CLI'
@@ -72,6 +128,23 @@ $Packages = [Package[]]@(
         Id          = 'MarkMichaelis/Codex'
         CliCommands = @('codex')
         DependsOn   = @('Node.js')
+        Completion  = 'auto'
+        Notes       = 'codex has no completion subcommand and no PSCompletions entry. Hand-curated top-level command list.'
+        ExpectedCompletions = @{ codex = @('--help','--version','exec') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName codex -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','--version','--model','--config','--cd','--ask-for-approval','--sandbox',
+        '--dangerously-bypass-approvals-and-sandbox','--full-auto','exec','login','logout',
+        'mcp','completion','update','resume','--profile'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
     }
     [Package]@{
         Name        = 'Gemini CLI'
@@ -79,6 +152,23 @@ $Packages = [Package[]]@(
         Id          = 'MarkMichaelis/GeminiCli'
         CliCommands = @('gemini')
         DependsOn   = @('Node.js')
+        Completion  = 'auto'
+        Notes       = 'gemini has no completion subcommand and no PSCompletions entry. Hand-curated top-level command/flag list.'
+        ExpectedCompletions = @{ gemini = @('--help','--version','--model') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName gemini -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','--version','--model','--prompt','--sandbox','--debug','--all-files',
+        '--yolo','--checkpointing','--telemetry','--telemetry-target','--allowed-mcp-server-names',
+        '--extensions','--list-extensions','mcp','--show-memory-usage'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
     }
     [Package]@{
         Name        = 'GitHub Copilot CLI'
@@ -86,7 +176,23 @@ $Packages = [Package[]]@(
         Id          = 'MarkMichaelis/GitHubCopilotCli'
         CliCommands = @('copilot')
         DependsOn   = @('Node.js')
-        Notes       = '`copilot completion` only supports bash/zsh/fish; not in PSCompletions catalog. No PS completion shipped — track upstream (#73).'
+        Completion  = 'auto'
+        Notes       = '`copilot completion` only supports bash/zsh/fish; not in PSCompletions catalog (#73). Hand-curated top-level flag/command list (mirrors DeveloperBasePackages winget GitHub.Copilot package).'
+        ExpectedCompletions = @{ copilot = @('--help','--version','--model') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName copilot -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','--version','--model','--prompt','--allow-tool','--deny-tool',
+        '--allow-all-tools','--add-dir','--no-color','--banner','--resume','--continue',
+        '--screen-reader','--log-level','--log-dir','-p','--allow-all-paths'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
     }
 )
 

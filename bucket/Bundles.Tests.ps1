@@ -132,6 +132,16 @@ Describe 'Declarative bundles (data-driven)' -Tag 'Light','Bundle' {
         }
     }
 
+    It '<Pkg.Name> (<Bundle>) registers Completion when CliCommands is non-empty' -ForEach $script:pkgCases {
+        # Inverse of the assertion above: declaring CliCommands without picking
+        # a Completion strategy silently ships a CLI with no Tab-completion.
+        # Matches the Package.Validate() guard introduced after the Everything
+        # CLI / Node.js / dotnet / etc. gap (25 packages were affected).
+        if (@($Pkg.CliCommands).Count -gt 0) {
+            $Pkg.Completion | Should -Not -Be 'none' -Because "package declares CliCommands ($(@($Pkg.CliCommands) -join ', ')) but Completion='none' -- pick native|pscompletions|auto and add ExpectedCompletions"
+        }
+    }
+
     It '<Pkg.Name> (<Bundle>) declares ExpectedCompletions for every CLI when Completion != none' -ForEach $script:pkgCases {
         if ($Pkg.Completion -in @('native','pscompletions','auto')) {
             $Pkg.ExpectedCompletions | Should -Not -BeNullOrEmpty

@@ -100,6 +100,15 @@ class Package {
             throw "Package '$($this.Name)': NativeCommandScript is required when Completion='$($this.Completion)'."
         }
 
+        # Inverse direction: if a Package exposes CLIs on PATH, it MUST register
+        # completion for them (one of native/pscompletions/auto). Leaving
+        # Completion at its 'none' default while declaring CliCommands silently
+        # ships a CLI with no Tab-completion -- the gap that hid Everything CLI
+        # and 24 other packages before this guard existed.
+        if ($this.CliCommands.Count -gt 0 -and $this.Completion -eq 'none') {
+            throw "Package '$($this.Name)': Completion='none' is not allowed when CliCommands is non-empty (CLIs: $($this.CliCommands -join ', ')). Either declare Completion='native'|'pscompletions'|'auto' and supply ExpectedCompletions, or remove CliCommands if the tool truly has no tab-completable surface."
+        }
+
         if ($this.Completion -ne 'none') {
             if ($this.CliCommands.Count -eq 0) {
                 throw "Package '$($this.Name)': CliCommands must be non-empty when Completion='$($this.Completion)'."

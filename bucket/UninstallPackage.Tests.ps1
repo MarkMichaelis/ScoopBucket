@@ -249,7 +249,7 @@ Describe 'Invoke-PackageUninstall pipeline' -Tag 'Light','Module' {
 
     It '-DryRun does not strip completion blocks' {
         $pkgs = [Package[]]@(
-            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'; CliCommands=@('gh') }
+            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'; CliCommands=@('gh'); Completion='pscompletions'; ExpectedCompletions=@{ gh = @('auth','repo','pr') } }
         )
         $null = Invoke-PackageUninstall -Packages $pkgs -Bundle 'Test' -DryRun
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Remove-PackageCompletionBlock -Times 0
@@ -257,7 +257,7 @@ Describe 'Invoke-PackageUninstall pipeline' -Tag 'Light','Module' {
 
     It '-KeepCompletion skips Remove-PackageCompletionBlock' {
         $pkgs = [Package[]]@(
-            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'; CliCommands=@('gh') }
+            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'; CliCommands=@('gh'); Completion='pscompletions'; ExpectedCompletions=@{ gh = @('auth','repo','pr') } }
         )
         $null = Invoke-PackageUninstall -Packages $pkgs -Bundle 'Test' -KeepCompletion
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Remove-PackageCompletionBlock -Times 0
@@ -265,7 +265,7 @@ Describe 'Invoke-PackageUninstall pipeline' -Tag 'Light','Module' {
 
     It 'removes completion blocks for every CliCommand by default' {
         $pkgs = [Package[]]@(
-            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'; CliCommands=@('foo','bar') }
+            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'; CliCommands=@('foo','bar'); Completion='pscompletions'; ExpectedCompletions=@{ foo = @('a','b','c'); bar = @('a','b','c') } }
         )
         $null = Invoke-PackageUninstall -Packages $pkgs -Bundle 'Test'
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Remove-PackageCompletionBlock -Times 2
