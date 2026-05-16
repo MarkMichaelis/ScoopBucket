@@ -161,7 +161,12 @@ function Install-WingetPackage {
         [string]$SourceScript,
         [string]$Scope = 'machine'
     )
-    $cmd = "winget install --id $PackageId --scope $Scope --accept-package-agreements --accept-source-agreements --disable-interactivity --silent"
+    # winget only accepts 'user' or 'machine' for --scope. The declarative
+    # schema uses 'global' (the new default) as a synonym for machine-wide;
+    # map both 'global' and the legacy 'machine' to winget's 'machine'.
+    # Anything not 'user' falls back to 'machine'.
+    $effectiveScope = if ($Scope -eq 'user') { 'user' } else { 'machine' }
+    $cmd = "winget install --id $PackageId --scope $effectiveScope --accept-package-agreements --accept-source-agreements --disable-interactivity --silent"
     try {
         Write-Host "  Installing [winget] $Name ($PackageId)..."
         $maxAttempts = 3
@@ -181,6 +186,17 @@ function Install-WingetPackage {
                 continue
             }
             break
+        }
+        # If the chosen --scope has no applicable installer (0x8A150014) or the
+        # value is rejected as invalid (0x8A150002), the manifest only ships an
+        # installer for the *other* scope. Retry once without --scope and let
+        # winget pick whatever the package actually supports.
+        if (-not $result.TimedOut -and ($code -eq -1978335212 -or $code -eq -1978335230)) {
+            $fallbackCmd = "winget install --id $PackageId --accept-package-agreements --accept-source-agreements --disable-interactivity --silent"
+            Write-Host "  [winget] ${Name}: --scope $effectiveScope rejected (exit $code); retrying without --scope..."
+            $result = Invoke-WithTimeout -Command $fallbackCmd -TimeoutSeconds $script:DefaultTimeoutSec
+            $code = $result.ExitCode
+            $cmd = $fallbackCmd
         }
         if ($result.TimedOut) {
             Add-Result -Name $Name -PackageId $PackageId -InstallerType 'winget' `
@@ -205,27 +221,29 @@ function Install-WingetPackage {
 function Install-ChocoPackage {
     param(
         [string]$Name,
+        [string]$PackageId,
         [string]$SourceScript
     )
-    $cmd = "choco install $Name -y --no-progress"
+    if (-not $PackageId) { $PackageId = $Name }
+    $cmd = "choco install $PackageId -y --no-progress"
     try {
         Write-Host "  Installing [choco] $Name..."
         $result = Invoke-WithTimeout -Command $cmd -TimeoutSeconds $script:DefaultTimeoutSec
         $code = $result.ExitCode
         if ($result.TimedOut) {
-            Add-Result -Name $Name -PackageId $Name -InstallerType 'choco' `
+            Add-Result -Name $Name -PackageId $PackageId -InstallerType 'choco' `
                 -SourceScript $SourceScript -Command $cmd -Status 'fail' `
                 -ExitCode $code -ErrorOutput $result.Output
         } elseif ($code -eq 0) {
-            Add-Result -Name $Name -PackageId $Name -InstallerType 'choco' `
+            Add-Result -Name $Name -PackageId $PackageId -InstallerType 'choco' `
                 -SourceScript $SourceScript -Command $cmd -Status 'pass'
         } else {
-            Add-Result -Name $Name -PackageId $Name -InstallerType 'choco' `
+            Add-Result -Name $Name -PackageId $PackageId -InstallerType 'choco' `
                 -SourceScript $SourceScript -Command $cmd -Status 'fail' `
                 -ExitCode $code -ErrorOutput $result.Output
         }
     } catch {
-        Add-Result -Name $Name -PackageId $Name -InstallerType 'choco' `
+        Add-Result -Name $Name -PackageId $PackageId -InstallerType 'choco' `
             -SourceScript $SourceScript -Command $cmd -Status 'fail' `
             -ExitCode -1 -ErrorOutput $_.Exception.Message
     }
@@ -234,27 +252,29 @@ function Install-ChocoPackage {
 function Install-ScoopPackage {
     param(
         [string]$Name,
+        [string]$PackageId,
         [string]$SourceScript
     )
-    $cmd = "scoop install -g $Name"
+    if (-not $PackageId) { $PackageId = $Name }
+    $cmd = "scoop install -g $PackageId"
     try {
         Write-Host "  Installing [scoop] $Name..."
         $result = Invoke-WithTimeout -Command $cmd -TimeoutSeconds $script:ScoopTimeoutSec
         $code = $result.ExitCode
         if ($result.TimedOut) {
-            Add-Result -Name $Name -PackageId $Name -InstallerType 'scoop' `
+            Add-Result -Name $Name -PackageId $PackageId -InstallerType 'scoop' `
                 -SourceScript $SourceScript -Command $cmd -Status 'fail' `
                 -ExitCode $code -ErrorOutput $result.Output
         } elseif ($code -eq 0) {
-            Add-Result -Name $Name -PackageId $Name -InstallerType 'scoop' `
+            Add-Result -Name $Name -PackageId $PackageId -InstallerType 'scoop' `
                 -SourceScript $SourceScript -Command $cmd -Status 'pass'
         } else {
-            Add-Result -Name $Name -PackageId $Name -InstallerType 'scoop' `
+            Add-Result -Name $Name -PackageId $PackageId -InstallerType 'scoop' `
                 -SourceScript $SourceScript -Command $cmd -Status 'fail' `
                 -ExitCode $code -ErrorOutput $result.Output
         }
     } catch {
-        Add-Result -Name $Name -PackageId $Name -InstallerType 'scoop' `
+        Add-Result -Name $Name -PackageId $PackageId -InstallerType 'scoop' `
             -SourceScript $SourceScript -Command $cmd -Status 'fail' `
             -ExitCode -1 -ErrorOutput $_.Exception.Message
     }
@@ -736,10 +756,10 @@ foreach ($group in $grouped) {
                     -Reason 'Microsoft Store auth unavailable in CI'
             }
             'choco' {
-                Install-ChocoPackage -Name $pkg.Name -SourceScript $pkg.SourceScript
+                Install-ChocoPackage -Name $pkg.Name -PackageId $pkg.PackageId -SourceScript $pkg.SourceScript
             }
             'scoop' {
-                Install-ScoopPackage -Name $pkg.Name -SourceScript $pkg.SourceScript
+                Install-ScoopPackage -Name $pkg.Name -PackageId $pkg.PackageId -SourceScript $pkg.SourceScript
             }
             'ps-module' {
                 Install-PSModule -Name $pkg.Name -SourceScript $pkg.SourceScript `
@@ -859,7 +879,7 @@ if ($scoopPackages.Count -gt 0) {
                 -Reason "Install was skipped or failed; verification not attempted"
             continue
         }
-        $leaf = Get-ScoopAppLeaf -Name $pkg.Name
+        $leaf = Get-ScoopAppLeaf -Name $pkg.PackageId
         Test-Verification -Name "scoop-global:$($pkg.Name)" `
             -Description "Scoop package '$($pkg.Name)' should be installed globally under $scoopGlobalAppsPath" `
             -Test ([scriptblock]::Create("Test-Path (Join-Path '$scoopGlobalAppsPath' '$leaf')"))
