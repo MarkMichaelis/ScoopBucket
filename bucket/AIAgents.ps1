@@ -373,17 +373,30 @@ Function Add-McpServerToCodex {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
 
-    $argsToml = ($Server.Arguments | ForEach-Object { '"' + $_ + '"' }) -join ', '
+    # TOML basic strings interpret backslash as an escape character. Any
+    # raw Windows path like 'C:\Users\Mark' contains '\U' which the TOML
+    # parser tries to consume as a \UXXXXXXXX Unicode escape and fails
+    # with "too few unicode value digits". Escape backslashes (\ -> \\)
+    # and double-quotes (" -> \") in every interpolated value.
+    #
+    # Note on PowerShell -replace replacement strings: in .NET regex
+    # replacement, '$' is special but '\' is literal. So replacement
+    # '\\' (2 chars) emits 2 chars '\\', and replacement '\"' emits '\"'.
+    $argsToml = ($Server.Arguments | ForEach-Object {
+        $esc = $_ -replace '\\','\\' -replace '"','\"'
+        '"' + $esc + '"'
+    }) -join ', '
+    $cmdEsc = $Server.Command -replace '\\','\\' -replace '"','\"'
     $section = @"
 [mcp_servers.$($Server.Name)]
-command = "$($Server.Command)"
+command = "$cmdEsc"
 args = [$argsToml]
 "@
     if ($Server.ContainsKey('Env') -and $Server.Env -and $Server.Env.Count -gt 0) {
         $envLines = foreach ($k in $Server.Env.Keys) {
             $v = $Server.Env[$k]
             if ($null -eq $v) { $v = '' }
-            $vEsc = $v -replace '\\','\\\\' -replace '"','\\"'
+            $vEsc = $v -replace '\\','\\' -replace '"','\"'
             "$k = `"$vEsc`""
         }
         $section += "`r`n[mcp_servers.$($Server.Name).env]`r`n" + ($envLines -join "`r`n")
