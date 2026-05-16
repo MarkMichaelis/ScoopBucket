@@ -857,7 +857,6 @@ function Add-VerificationSkipped {
 $scoopPackages = @($packages | Where-Object InstallerType -eq 'scoop')
 if ($scoopPackages.Count -gt 0) {
     Write-Host "Verifying scoop packages are installed globally..." -ForegroundColor Gray
-    $scoopGlobalAppsPath = Join-Path $env:ProgramData 'scoop\apps'
     $scoopToVerify = Get-PackagesNeedingVerification -Packages $scoopPackages `
         -InstallerType 'scoop' -Results @($script:Results)
     $scoopVerifyNames = @{}
@@ -869,9 +868,19 @@ if ($scoopPackages.Count -gt 0) {
             continue
         }
         $leaf = Get-ScoopAppLeaf -Name $pkg.PackageId
+        # Authoritative: ask scoop. Some packages (e.g. dotnet) lay their
+        # global install down outside %ProgramData%\scoop\apps depending on
+        # the manifest's installer (msi/inno can target Program Files), so a
+        # bare Test-Path on the apps tree produces false negatives. 'scoop
+        # list -g <leaf>' returns a row IFF scoop tracks a global install.
         Test-Verification -Name "scoop-global:$($pkg.Name)" `
-            -Description "Scoop package '$($pkg.Name)' should be installed globally under $scoopGlobalAppsPath" `
-            -Test ([scriptblock]::Create("Test-Path (Join-Path '$scoopGlobalAppsPath' '$leaf')"))
+            -Description "Scoop should report '$($pkg.Name)' as a global install ('scoop list -g $leaf')" `
+            -Test ([scriptblock]::Create(@"
+                `$output = cmd /c 'scoop list -g $leaf 2>&1'
+                # 'scoop list -g <name>' prints a header + one row per match;
+                # match presence of the leaf token anywhere in the output.
+                (`$output -join "``n") -match [regex]::Escape('$leaf')
+"@))
     }
 }
 
