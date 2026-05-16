@@ -10,11 +10,54 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 #   #73               bw / gcloud have no PSCompletions catalog entry — ship our own native completer
 
 $Packages = [Package[]]@(
-    [Package]@{ Name = 'exiftool';         Installer = 'choco';  Id = 'exiftool';                                CliCommands = @('exiftool') }
+    [Package]@{
+        Name        = 'exiftool'
+        Installer   = 'choco'
+        Id          = 'exiftool'
+        CliCommands = @('exiftool')
+        Completion  = 'auto'
+        Notes       = 'exiftool has no completion subcommand and no PSCompletions entry. Hand-curated common-options list (full surface is ~500 tag names).'
+        ExpectedCompletions = @{ exiftool = @('-help','-overwrite_original','-r') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName exiftool -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '-help','-ver','-r','-q','-quiet','-overwrite_original','-overwrite_original_in_place',
+        '-preserve','-P','-ext','-ee','-G','-a','-s','-S','-T','-csv','-json','-xml','-html',
+        '-args','-charset','-d','-list','-listw','-listf','-listg','-listr','-listx',
+        '-Filename','-Directory','-FileModifyDate','-Comment','-Keywords','-Subject','-Title'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
     [Package]@{ Name = 'GeoSetter';        Installer = 'choco';  Id = 'geosetter' }
 
-    [Package]@{ Name = 'DbxCli';           Installer = 'scoop';  Id = 'MarkMichaelis/DbxCli';                    CliCommands = @('dbxcli')
-                Notes = 'dbxcli delisted from chocolatey (#13). Installed via this bucket''s DbxCli.json which pulls upstream GitHub release.' }
+    [Package]@{
+        Name        = 'DbxCli'
+        Installer   = 'scoop'
+        Id          = 'MarkMichaelis/DbxCli'
+        CliCommands = @('dbxcli')
+        Completion  = 'auto'
+        Notes       = 'dbxcli delisted from chocolatey (#13). Installed via this bucket''s DbxCli.json which pulls upstream GitHub release. dbxcli is a cobra-based tool but ships no completion subcommand; hand-curate the top-level command list.'
+        ExpectedCompletions = @{ dbxcli = @('get','put','ls') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName dbxcli -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        'account','du','get','ls','mkdir','mv','put','restore','revs','rm','search','share',
+        'team','version','help','--help','-h'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
 
     [Package]@{ Name = 'AIAgents bundle';  Installer = 'scoop';  Id = 'MarkMichaelis/AIAgents'
                 Notes = 'Pulls every AI agent + Claude Desktop and configures MCP servers; see AIAgents.ps1.' }
@@ -23,7 +66,29 @@ $Packages = [Package[]]@(
                 WingetExtraArgs = @('--skip-dependencies')
                 Notes = 'Free open-source local speech-to-text (https://handy.computer). Runs Whisper/Parakeet locally; no cloud. User-scope only. Declares a KhronosGroup.VulkanRT dependency winget cannot resolve on most machines (already present via GPU drivers), so we skip dependency processing.' }
 
-    [Package]@{ Name = 'eSpeak NG';        Installer = 'scoop';  Id = 'main/espeak-ng';    CliCommands = @('espeak-ng') }
+    [Package]@{
+        Name        = 'eSpeak NG'
+        Installer   = 'scoop'
+        Id          = 'main/espeak-ng'
+        CliCommands = @('espeak-ng')
+        Completion  = 'auto'
+        Notes       = 'espeak-ng has no completion subcommand and no PSCompletions entry. Hand-curated flag list.'
+        ExpectedCompletions = @{ 'espeak-ng' = @('--help','-v','-s') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName espeak-ng -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','--version','-v','-s','-p','-a','-g','-k','-l','-f','-w','-x','-X','-q','-m',
+        '-b','--stdin','--stdout','--pho','--phonout','--punct','--split','--path','--ipa',
+        '--voices','--compile','--compile-debug'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
     [Package]@{ Name = 'Notion';           Installer = 'scoop';  Id = 'extras/notion' }
     [Package]@{ Name = 'Spotify';          Installer = 'scoop';  Id = 'extras/spotify' }
     [Package]@{ Name = 'Zoom';             Installer = 'scoop';  Id = 'extras/zoom' }
@@ -56,7 +121,29 @@ Register-ArgumentCompleter -Native -CommandName bw -ScriptBlock {
         }
     }
     [Package]@{ Name = 'calibre';          Installer = 'winget'; Id = 'calibre.calibre' }
-    [Package]@{ Name = 'SoX';              Installer = 'winget'; Id = 'ChrisBagwell.SoX';      CliCommands = @('sox') }
+    [Package]@{
+        Name        = 'SoX'
+        Installer   = 'winget'
+        Id          = 'ChrisBagwell.SoX'
+        CliCommands = @('sox')
+        Completion  = 'auto'
+        Notes       = 'sox has no completion subcommand and no PSCompletions entry. Hand-curated common-options list (effect names enumerated via `sox --help-effect` are out of scope).'
+        ExpectedCompletions = @{ sox = @('--help','--version','-r') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','--help-effect','--help-format','--version','-r','-c','-b','-e','-t','-V','-S',
+        '-n','-d','-D','-q','-G','-R','--norm','--combine','--effects-file','--multi-threaded',
+        '--no-clobber','--show-progress','--type','--channels','--bits','--rate','--encoding'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
     [Package]@{ Name = 'Dropbox';          Installer = 'winget'; Id = 'Dropbox.Dropbox' }
     [Package]@{ Name = 'Foxit PDF Reader'; Installer = 'winget'; Id = 'Foxit.FoxitReader'
                 Notes = 'choco foxitreader times out downloading upstream installer (#27). winget is preferred per README.' }

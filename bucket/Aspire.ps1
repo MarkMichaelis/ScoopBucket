@@ -15,7 +15,22 @@ $Packages = [Package[]]@(
         Installer   = 'dotnetTool'
         Id          = 'Aspire.Cli'
         CliCommands = @('aspire')
-        Notes       = 'Global dotnet tool. Requires dotnet SDK on PATH.'
+        Completion  = 'auto'
+        Notes       = 'Global dotnet tool. Requires dotnet SDK on PATH. aspire has no completion subcommand and no PSCompletions entry; hand-curated top-level command list.'
+        ExpectedCompletions = @{ aspire = @('new','run','add') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName aspire -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        'new','run','add','publish','deploy','exec','config','update','--help','--version',
+        '-h','--debug','--cli-version','--wait-for-debugger'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
         PostInstallScript = {
             if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
                 $candidates = @(

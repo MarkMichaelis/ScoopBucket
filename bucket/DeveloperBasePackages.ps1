@@ -6,16 +6,79 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 #   #73      copilot completion via PSCompletions (no native PS completion command)
 
 $Packages = [Package[]]@(
-    [Package]@{ Name = 'Node.js';                       Installer = 'choco';  Id = 'nodejs';                                              CliCommands = @('node','npm') }
+    [Package]@{
+        Name        = 'Node.js'
+        Installer   = 'choco'
+        Id          = 'nodejs'
+        CliCommands = @('node','npm')
+        Completion  = 'pscompletions'
+        ExpectedCompletions = @{
+            node = @('--help','--version','--eval')
+            npm  = @('install','run','version')
+        }
+    }
 
-    [Package]@{ Name = 'dotnet';                        Installer = 'scoop';  Id = 'main/dotnet';                                          CliCommands = @('dotnet') }
-    [Package]@{ Name = 'Visual Studio';                 Installer = 'scoop';  Id = 'MarkMichaelis/VisualStudio2026Enterprise';             CliCommands = @('devenv') }
+    [Package]@{
+        Name        = 'dotnet'
+        Installer   = 'scoop'
+        Id          = 'main/dotnet'
+        CliCommands = @('dotnet')
+        Completion  = 'pscompletions'
+        ExpectedCompletions = @{ dotnet = @('build','run','test') }
+    }
+    [Package]@{
+        Name        = 'Visual Studio'
+        Installer   = 'scoop'
+        Id          = 'MarkMichaelis/VisualStudio2026Enterprise'
+        CliCommands = @('devenv')
+        Completion  = 'auto'
+        Notes       = 'devenv has no completion subcommand and no PSCompletions entry; hand-curated common-options list from `devenv /?`.'
+        ExpectedCompletions = @{ devenv = @('/Build','/Run','/Edit') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName devenv -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '/Build','/Clean','/Rebuild','/Deploy','/Run','/RunExit','/Edit','/Diff','/Merge',
+        '/Out','/Log','/Command','/SafeMode','/ResetSettings','/ResetUserData','/ResetSkipPkgs',
+        '/InstallVSTemplates','/Setup','/NoSplash','/Project','/ProjectConfig','/Help','/?',
+        '/Upgrade','/UseEnv'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
     [Package]@{
         Name        = 'Beyond Compare'
         Installer   = 'scoop'
         Id          = 'extras/beyondcompare'
         CliCommands = @('bcomp','bcompare')
-        Notes       = 'Keep scoop default bcomp shim (BComp.exe, GUI launcher). Add a separate bcomp.com shim for BComp.com (console-waiting variant) so git/scripted callers can request blocking semantics on demand. Refs #14/#46.'
+        Completion  = 'auto'
+        Notes       = 'Keep scoop default bcomp shim (BComp.exe, GUI launcher). Add a separate bcomp.com shim for BComp.com (console-waiting variant) so git/scripted callers can request blocking semantics on demand. Refs #14/#46. Neither bcomp nor bcompare has a completion subcommand or PSCompletions entry; hand-curated shared flag list.'
+        ExpectedCompletions = @{
+            bcomp    = @('/?','/closescript','/silent')
+            bcompare = @('/?','/closescript','/silent')
+        }
+        NativeCommandScript = {
+            @"
+@('bcomp','bcompare') | ForEach-Object {
+    `$cli = `$_
+    Register-ArgumentCompleter -Native -CommandName `$cli -ScriptBlock {
+        param(`$wordToComplete, `$commandAst, `$cursorPosition)
+        @(
+            '/?','/help','/silent','/closescript','/automerge','/reviewconflicts',
+            '/title1','/title2','/title3','/lefttitle','/centertitle','/righttitle',
+            '/savetarget','/expandall','/leftreadonly','/centerreadonly','/rightreadonly',
+            '/qc','/quickcompare','/edit','/snapshot','/fv','/iv'
+        ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+        }
+    }
+}
+"@
+        }
         PostInstallScript = {
             try {
                 $dir = (& scoop prefix beyondcompare 2>$null | Select-Object -First 1)
@@ -32,15 +95,62 @@ $Packages = [Package[]]@(
         }
     }
 
-    [Package]@{ Name = 'Visual Studio Code';            Installer = 'winget'; Id = 'Microsoft.VisualStudioCode';                            CliCommands = @('code') }
+    [Package]@{
+        Name        = 'Visual Studio Code'
+        Installer   = 'winget'
+        Id          = 'Microsoft.VisualStudioCode'
+        CliCommands = @('code')
+        Completion  = 'auto'
+        Notes       = '`code --help` lists CLI switches but `code` has no completion subcommand and no PSCompletions catalog entry. Hand-curated flag list (mirrors OSBasePackages).'
+        ExpectedCompletions = @{ code = @('--help','--diff','--new-window') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName code -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','--version','--diff','--merge','--add','--goto','--new-window','--reuse-window',
+        '--wait','--locale','--user-data-dir','--profile','--extensions-dir','--list-extensions',
+        '--install-extension','--uninstall-extension','--enable-proposed-api','--status',
+        '--prof-startup','--disable-extensions','--disable-extension','--sync','--inspect-extensions',
+        '--inspect-brk-extensions','--verbose','--log','--telemetry'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
     [Package]@{
         Name        = 'GitHub Copilot CLI'
         Installer   = 'winget'
         Id          = 'GitHub.Copilot'
         CliCommands = @('copilot')
-        Notes       = '`copilot completion` only supports bash/zsh/fish; not in PSCompletions catalog. No PS completion shipped — track upstream (#73).'
+        Completion  = 'auto'
+        Notes       = '`copilot completion` only supports bash/zsh/fish; not in PSCompletions catalog (#73). Hand-curated top-level flag/command list.'
+        ExpectedCompletions = @{ copilot = @('--help','--version','--model') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName copilot -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','--version','--model','--prompt','--allow-tool','--deny-tool',
+        '--allow-all-tools','--add-dir','--no-color','--banner','--resume','--continue',
+        '--screen-reader','--log-level','--log-dir','-p','--allow-all-paths'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
     }
-    [Package]@{ Name = 'Python';                        Installer = 'winget'; Id = 'Python.Python.3.14';                                    CliCommands = @('python') }
+}
+"@
+        }
+    }
+    [Package]@{
+        Name        = 'Python'
+        Installer   = 'winget'
+        Id          = 'Python.Python.3.14'
+        CliCommands = @('python')
+        Completion  = 'pscompletions'
+        ExpectedCompletions = @{ python = @('--help','--version','-m') }
+    }
 
     [Package]@{
         Name        = 'Aspire'
@@ -48,7 +158,22 @@ $Packages = [Package[]]@(
         Id          = 'MarkMichaelis/Aspire'
         CliCommands = @('aspire')
         DependsOn   = @('dotnet','Visual Studio')
-        Notes       = 'Bundle manifest invokes `dotnet tool install --global Aspire.Cli` + project templates. DependsOn ensures dotnet+VS are in place first.'
+        Completion  = 'auto'
+        Notes       = 'Bundle manifest invokes `dotnet tool install --global Aspire.Cli` + project templates. DependsOn ensures dotnet+VS are in place first. aspire has no completion subcommand and no PSCompletions entry; hand-curated top-level command list (mirrors Aspire bundle).'
+        ExpectedCompletions = @{ aspire = @('new','run','add') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName aspire -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        'new','run','add','publish','deploy','exec','config','update','--help','--version',
+        '-h','--debug','--cli-version','--wait-for-debugger'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
     }
 )
 
