@@ -382,3 +382,42 @@ Or run only the harness's drift checks (fast; no installs):
 Invoke-Pester -Path bucket\ManifestInstall.Tests.ps1 -Tag Light
 ```
 
+### Working-copy installs (`Install-LocalManifest`)
+
+To exercise a manifest *as it would install from a bucket* without
+pushing first, use `Install-LocalManifest` (exported from the
+`MarkMichaelis.ScoopBucket` module). It reads the working-copy
+`<Name>.json`, rewrites the `url[]` entries to `file://` paths anchored
+at your repo, drops a temp manifest into `$env:TEMP`, and runs
+`scoop install` against it.
+
+```powershell
+Install-LocalManifest -ManifestPath bucket\AIAgents.json
+# or, with $env:SCOOPBUCKET_LOCAL_REPO set to the repo root:
+Install-LocalManifest -ManifestName AIAgents
+```
+
+After the install succeeds, `Install-LocalManifest` patches the apps'
+Scoop metadata so the install looks (to `scoop update` and friends) as
+if it had come from the registered `MarkMichaelis` bucket:
+
+- `~/scoop/apps/<App>/current/install.json` — `bucket` field is stamped
+  to `MarkMichaelis` (Scoop leaves it empty for file-path installs).
+- `~/scoop/apps/<App>/current/manifest.json` — `url[]` entries are
+  restored to canonical
+  `https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/<leaf>`
+  so future re-installs/updates fetch from the bucket, not your local
+  working copy.
+
+The patch is best-effort (`install.json` is Scoop's internal schema, no
+public contract): missing files, malformed JSON, and absent app
+directories emit a warning but never throw. Light unit coverage lives
+in `bucket/LocalManifestInstallJson.Tests.ps1`.
+
+**Version-skew caveat.** If your working copy's manifest carries a
+higher version than master (typical mid-PR), `scoop update <App>` will
+still say "up to date" until master catches up — Scoop compares the
+canonical URL's content, not your working tree. Re-running
+`Install-LocalManifest` is the right way to iterate; `scoop update` is
+not.
+
