@@ -187,17 +187,6 @@ function Install-WingetPackage {
             }
             break
         }
-        # If the chosen --scope has no applicable installer (0x8A150014) or the
-        # value is rejected as invalid (0x8A150002), the manifest only ships an
-        # installer for the *other* scope. Retry once without --scope and let
-        # winget pick whatever the package actually supports.
-        if (-not $result.TimedOut -and ($code -eq -1978335212 -or $code -eq -1978335230)) {
-            $fallbackCmd = "winget install --id $PackageId --accept-package-agreements --accept-source-agreements --disable-interactivity --silent"
-            Write-Host "  [winget] ${Name}: --scope $effectiveScope rejected (exit $code); retrying without --scope..."
-            $result = Invoke-WithTimeout -Command $fallbackCmd -TimeoutSeconds $script:DefaultTimeoutSec
-            $code = $result.ExitCode
-            $cmd = $fallbackCmd
-        }
         if ($result.TimedOut) {
             Add-Result -Name $Name -PackageId $PackageId -InstallerType 'winget' `
                 -SourceScript $SourceScript -Command $cmd -Status 'fail' `

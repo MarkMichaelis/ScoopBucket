@@ -73,7 +73,14 @@ jobs:
       - name: Accept winget source agreements
         shell: pwsh
         run: |
-          winget source update --accept-source-agreements
+          # winget sources occasionally land in a corrupted/stale state on
+          # fresh runners (exit 0x8A15000F "Data required by the source is
+          # missing" on subsequent installs). Reset + re-add + update gives
+          # us a clean baseline before any install attempt.
+          Write-Host "winget source reset --force"
+          winget source reset --force --disable-interactivity 2>&1 | ForEach-Object { Write-Host $_ }
+          Write-Host "winget source update --accept-source-agreements"
+          winget source update --accept-source-agreements --disable-interactivity 2>&1 | ForEach-Object { Write-Host $_ }
           winget source list
 
       - name: Bootstrap Chocolatey
