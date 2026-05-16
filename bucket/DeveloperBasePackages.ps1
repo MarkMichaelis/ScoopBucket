@@ -38,8 +38,7 @@ $Packages = [Package[]]@(
         Installer   = 'winget'
         Id          = 'GitHub.Copilot'
         CliCommands = @('copilot')
-        Completion  = 'pscompletions'
-        Notes       = '`copilot completion` only supports bash/zsh/fish; no native PowerShell completion command. Fall back to PSCompletions. See #73.'
+        Notes       = '`copilot completion` only supports bash/zsh/fish; not in PSCompletions catalog. No PS completion shipped — track upstream (#73).'
     }
     [Package]@{ Name = 'Python';                        Installer = 'winget'; Id = 'Python.Python.3.14';                                    CliCommands = @('python') }
 

@@ -85,9 +85,8 @@ $Packages = [Package[]]@(
         Installer   = 'scoop'
         Id          = 'MarkMichaelis/GitHubCopilotCli'
         CliCommands = @('copilot')
-        Completion  = 'pscompletions'
         DependsOn   = @('Node.js')
-        Notes       = '`copilot completion` only supports bash/zsh/fish; no native PowerShell completion command. PSCompletions fallback (#73).'
+        Notes       = '`copilot completion` only supports bash/zsh/fish; not in PSCompletions catalog. No PS completion shipped — track upstream (#73).'
     }
 )
 

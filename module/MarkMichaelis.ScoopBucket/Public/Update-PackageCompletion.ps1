@@ -90,7 +90,7 @@ function Update-PackageCompletion {
                         $results.Add([pscustomobject]@{
                             Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
                             Mode = $mode; Action = 'Skipped'; Source = 'Skipped'
-                            Reason = "Package declares Completion='auto' with a native scriptblock; re-run Install-Package -ForceCompletion to refresh native completion."
+                            Reason = "Package declares Completion='auto' with a native scriptblock; re-run Install-Package to refresh native completion."
                         })
                     }
                     continue
@@ -132,7 +132,6 @@ function Update-PackageCompletion {
                 $registerArgs = @{
                     Cli   = $cli
                     Mode  = $effectiveMode
-                    Force = $true   # Always overwrite during repair.
                 }
                 if ($ProfilePath) { $registerArgs['ProfilePath'] = $ProfilePath }
 

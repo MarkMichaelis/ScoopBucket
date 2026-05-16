@@ -74,6 +74,7 @@ function Get-Package {
                 Scope       = $p.Scope
                 CliCommands = @($p.CliCommands)
                 Completion  = $p.Completion
+                ExpectedCompletions = $p.ExpectedCompletions
                 DependsOn   = @($p.DependsOn)
                 CISkip      = $p.CISkip
                 Notes       = $p.Notes

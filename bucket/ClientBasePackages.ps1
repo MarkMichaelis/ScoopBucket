@@ -7,7 +7,7 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 #   #9/#11            Snagit / Todoist via Microsoft Store (winget --source msstore)
 #   #13/#46           DbxCli delisted from choco; install via local bucket manifest
 #   #27               foxitreader choco package times out; use winget
-#   #73               bw completion only supports zsh -> PSCompletions fallback
+#   #73               bw / gcloud have no PSCompletions catalog entry — ship our own native completer
 
 $Packages = [Package[]]@(
     [Package]@{ Name = 'exiftool';         Installer = 'choco';  Id = 'exiftool';                                CliCommands = @('exiftool') }
@@ -31,9 +31,25 @@ $Packages = [Package[]]@(
         Installer   = 'winget'
         Id          = 'Bitwarden.CLI'
         CliCommands = @('bw')
-        Completion  = 'pscompletions'
+        Completion  = 'auto'
         DependsOn   = @('Bitwarden')
-        Notes       = '`bw completion` only supports zsh; no native PS completion. PSCompletions fallback (#73).'
+        Notes       = '`bw completion` only supports zsh and PSCompletions has no `bw` entry; ship a hand-curated top-level subcommand completer (#73).'
+        ExpectedCompletions = @{ bw = @('login','logout','sync','list','unlock','status') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName bw -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    `$cmds = @(
+        'completion','config','create','delete','device-approval','edit','encode',
+        'export','generate','get','help','import','list','lock','login','logout',
+        'restore','send','serve','share','status','sync','unlock','update'
+    )
+    `$cmds | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
     }
     [Package]@{ Name = 'calibre';          Installer = 'winget'; Id = 'calibre.calibre' }
     [Package]@{ Name = 'SoX';              Installer = 'winget'; Id = 'ChrisBagwell.SoX';      CliCommands = @('sox') }

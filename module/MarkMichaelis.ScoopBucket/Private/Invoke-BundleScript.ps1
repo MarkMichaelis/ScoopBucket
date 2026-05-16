@@ -30,7 +30,7 @@ function Invoke-BundleScript {
     .PARAMETER Names
         Optional -Name filter. When omitted the whole bundle installs.
 
-    .PARAMETER DryRun, SkipCompletion, ForceCompletion
+    .PARAMETER DryRun, SkipCompletion
         Passed through to `Invoke-PackageInstall`.
     #>
     [CmdletBinding()]
@@ -39,8 +39,7 @@ function Invoke-BundleScript {
         [Parameter(Mandatory)][string]$Bundle,
         [string[]]$Names,
         [switch]$DryRun,
-        [switch]$SkipCompletion,
-        [switch]$ForceCompletion
+        [switch]$SkipCompletion
     )
 
     if ($Names -and $Names.Count -gt 0) {
@@ -55,7 +54,6 @@ function Invoke-BundleScript {
     $flags = @()
     if ($DryRun)          { $flags += '-DryRun' }
     if ($SkipCompletion)  { $flags += '-SkipCompletion' }
-    if ($ForceCompletion) { $flags += '-ForceCompletion' }
     $flagsStr = $flags -join ' '
 
     $nameFilterLiteral = ''

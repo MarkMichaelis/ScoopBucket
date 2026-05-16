@@ -321,24 +321,24 @@ Describe 'Completion registration' -Tag 'Light','Module' {
         (Get-Content $script:profilePath -Raw) | Should -Match 'ScoopBucket:CliCompletion:mycli:BEGIN'
     }
 
-    It 'is idempotent: rerunning preserves existing block' {
+    It 'is idempotent: rerunning always replaces with the current native output' {
         $null = & $script:RegisterFn -Cli 'idem' `
             -NativeCommand { 'first' } -Mode 'native' -ProfilePath $script:profilePath -Confirm:$false
         $r = & $script:RegisterFn -Cli 'idem' `
             -NativeCommand { 'second' } -Mode 'native' -ProfilePath $script:profilePath -Confirm:$false
-        $r.Action | Should -Be 'Preserved'
-        (Get-Content $script:profilePath -Raw) | Should -Match 'first'
-        (Get-Content $script:profilePath -Raw) | Should -Not -Match 'second'
-    }
-
-    It 'replaces existing block when -Force is passed' {
-        $null = & $script:RegisterFn -Cli 'idem2' `
-            -NativeCommand { 'first' } -Mode 'native' -ProfilePath $script:profilePath -Confirm:$false
-        $r = & $script:RegisterFn -Cli 'idem2' `
-            -NativeCommand { 'second' } -Mode 'native' -ProfilePath $script:profilePath -Force -Confirm:$false
         $r.Action | Should -Be 'Replaced'
         (Get-Content $script:profilePath -Raw) | Should -Match 'second'
         (Get-Content $script:profilePath -Raw) | Should -Not -Match 'first'
+    }
+
+    It 'rerunning with identical native output produces a byte-identical block' {
+        $null = & $script:RegisterFn -Cli 'idem3' `
+            -NativeCommand { 'same' } -Mode 'native' -ProfilePath $script:profilePath -Confirm:$false
+        $first = Get-Content $script:profilePath -Raw
+        $null = & $script:RegisterFn -Cli 'idem3' `
+            -NativeCommand { 'same' } -Mode 'native' -ProfilePath $script:profilePath -Confirm:$false
+        $second = Get-Content $script:profilePath -Raw
+        $first | Should -Be $second
     }
 
     It 'returns Skipped (Mode=native) when native command emits nothing' {

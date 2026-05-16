@@ -17,7 +17,31 @@ $Packages = [Package[]]@(
     [Package]@{ Name = 'UniversalSilentSwitchFinder';   Installer = 'winget'; Id = 'WindowsPostInstallWizard.UniversalSilentSwitchFinder' }
     [Package]@{ Name = 'bat';                           Installer = 'winget'; Id = 'sharkdp.bat';                                        CliCommands = @('bat') }
     [Package]@{ Name = 'fzf';                           Installer = 'winget'; Id = 'junegunn.fzf';                                       CliCommands = @('fzf') }
-    [Package]@{ Name = 'Google Cloud SDK';              Installer = 'winget'; Id = 'Google.CloudSDK';                                    CliCommands = @('gcloud'); Completion = 'pscompletions' }
+    [Package]@{
+        Name        = 'Google Cloud SDK'
+        Installer   = 'winget'
+        Id          = 'Google.CloudSDK'
+        CliCommands = @('gcloud')
+        Completion  = 'auto'
+        Notes       = '`gcloud` has no PowerShell completion command and is not in PSCompletions catalog; ship a hand-curated top-level command-group completer (#73).'
+        ExpectedCompletions = @{ gcloud = @('auth','config','version') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName gcloud -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    `$cmds = @(
+        'auth','components','config','compute','container','dataflow','dataproc',
+        'deployment-manager','dns','functions','iam','init','kms','logging','ml',
+        'organizations','projects','pubsub','run','services','source','spanner',
+        'sql','storage','topic','version','help'
+    )
+    `$cmds | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
 
     # Editor included in the OS baseline so a freshly imaged box has a
     # text editor available before DeveloperBasePackages runs. The winget
@@ -35,6 +59,7 @@ $Packages = [Package[]]@(
         Completion  = 'native'
         NativeCommandScript = { rg --generate complete-powershell }
         Notes       = 'scoop main/ripgrep gives v14+, required for --generate complete-powershell. See #73.'
+        ExpectedCompletions = @{ rg = @('--help','--version','--color') }
     }
     [Package]@{
         Name        = 'Sysinternals Suite'

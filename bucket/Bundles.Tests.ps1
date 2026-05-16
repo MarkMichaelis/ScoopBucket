@@ -123,6 +123,29 @@ Describe 'Declarative bundles (data-driven)' -Tag 'Light','Bundle' {
         }
     }
 
+    It '<Pkg.Name> (<Bundle>) declares ExpectedCompletions for every CLI when Completion != none' -ForEach $script:pkgCases {
+        if ($Pkg.Completion -in @('native','pscompletions','auto')) {
+            $Pkg.ExpectedCompletions | Should -Not -BeNullOrEmpty
+            foreach ($cli in @($Pkg.CliCommands)) {
+                $Pkg.ExpectedCompletions.ContainsKey($cli) | Should -BeTrue -Because "every CliCommands entry needs an ExpectedCompletions entry so completion can be verified end-to-end"
+                @($Pkg.ExpectedCompletions[$cli]).Count | Should -BeGreaterThan 0
+            }
+        }
+    }
+
+    It "<Pkg.Name> (<Bundle>) Completion='pscompletions' CLI is in upstream PSCompletions catalog" -ForEach $script:pkgCases {
+        if ($Pkg.Completion -ne 'pscompletions') { return }
+        $catalogPath = Join-Path $PSScriptRoot 'PSCompletionsCatalog.json'
+        if (-not (Test-Path $catalogPath)) {
+            Set-ItResult -Skipped -Because "PSCompletionsCatalog.json snapshot missing; run .github/scripts/Update-PSCompletionsCatalog.ps1"
+            return
+        }
+        $catalog = @((Get-Content -Raw -Path $catalogPath | ConvertFrom-Json).Completions)
+        foreach ($cli in @($Pkg.CliCommands)) {
+            $catalog | Should -Contain $cli -Because "Completion='pscompletions' requires '$cli' to exist in https://github.com/abgox/PSCompletions/tree/main/completions; otherwise switch to Completion='auto' with a NativeCommandScript"
+        }
+    }
+
     It '<Pkg.Name> (<Bundle>) declares plausible short CLI names' -ForEach $script:pkgCases {
         foreach ($cli in @($Pkg.CliCommands)) {
             $cli | Should -Match '^[A-Za-z0-9._\-]+$' -Because "CliCommands must be bare command names (no paths/quotes)"

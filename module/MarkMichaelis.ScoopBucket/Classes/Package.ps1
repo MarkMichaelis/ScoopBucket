@@ -32,6 +32,13 @@ class Package {
     [ValidateSet('none', 'native', 'pscompletions', 'auto')]
     [string]   $Completion = 'none'
 
+    # Per-CLI expected-completion hashtable: CliName -> string[] of
+    # subcommands the manifest promises TabExpansion2 will return for
+    # that CLI after registration. Tested end-to-end by
+    # CompletionEndToEnd.Tests.ps1 and statically by
+    # CompletionContract.Tests.ps1. Required whenever Completion != 'none'.
+    [hashtable] $ExpectedCompletions = @{}
+
     [scriptblock] $NativeCommandScript
     [scriptblock] $CustomInstallScript
     [scriptblock] $PostInstallScript
@@ -77,6 +84,24 @@ class Package {
 
         if ($this.Completion -in @('native', 'auto') -and -not $this.NativeCommandScript) {
             throw "Package '$($this.Name)': NativeCommandScript is required when Completion='$($this.Completion)'."
+        }
+
+        if ($this.Completion -ne 'none') {
+            if ($this.CliCommands.Count -eq 0) {
+                throw "Package '$($this.Name)': CliCommands must be non-empty when Completion='$($this.Completion)'."
+            }
+            if (-not $this.ExpectedCompletions -or $this.ExpectedCompletions.Count -eq 0) {
+                throw "Package '$($this.Name)': ExpectedCompletions hashtable is required when Completion='$($this.Completion)' so completion can be verified end-to-end (no mocks)."
+            }
+            foreach ($cli in $this.CliCommands) {
+                if (-not $this.ExpectedCompletions.ContainsKey($cli)) {
+                    throw "Package '$($this.Name)': ExpectedCompletions is missing a key for CLI '$cli'."
+                }
+                $items = @($this.ExpectedCompletions[$cli])
+                if ($items.Count -eq 0) {
+                    throw "Package '$($this.Name)': ExpectedCompletions['$cli'] is empty; supply at least one subcommand TabExpansion2 must produce."
+                }
+            }
         }
 
         if ($this.DependsOn -contains $this.Name) {
