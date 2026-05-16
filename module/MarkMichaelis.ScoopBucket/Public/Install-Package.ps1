@@ -164,4 +164,40 @@ function Install-Package {
         # resolve and run the manifest's installer.script.
         & scoop install $n
     }
+
+    # --- Post-install: register completers in the caller's session ---------
+    # Register-PackageCompletion writes sentinel blocks to
+    # $PROFILE.AllUsersAllHosts in the child pwsh that runs the bundle;
+    # those blocks only auto-load on the next pwsh startup. To save users
+    # the "open a fresh terminal" dance, re-resolve each just-installed
+    # CLI's completion source from the declarative [Package] data and
+    # invoke Register-ArgumentCompleter directly in the current session.
+    # Register-ArgumentCompleter -Native is process-global so this works
+    # regardless of module scope.
+    if (-not $SkipCompletion -and -not $DryRun) {
+        $packagesToImport = New-Object System.Collections.Generic.List[Package]
+        foreach ($entry in $byBundle.Values) {
+            foreach ($b in $bundles) {
+                if ($b.BundlePath -ne $entry.BundlePath) { continue }
+                foreach ($p in $b.Packages) {
+                    if ($entry.Names -contains $p.Name -and $p.Completion -ne 'none') {
+                        [void]$packagesToImport.Add($p)
+                    }
+                }
+            }
+        }
+        foreach ($b in $fullBundles) {
+            foreach ($p in $b.Packages) {
+                if ($p.Completion -ne 'none') { [void]$packagesToImport.Add($p) }
+            }
+        }
+        if ($packagesToImport.Count -gt 0) {
+            $imported = Import-PackageCompletion -Package $packagesToImport
+            $ok = @($imported | Where-Object Action -eq 'Registered')
+            if ($ok.Count -gt 0) {
+                Write-Host ""
+                Write-Host "Install-Package: registered completers in current session for: $(($ok.Cli) -join ', ')"
+            }
+        }
+    }
 }
