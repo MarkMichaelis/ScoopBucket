@@ -65,7 +65,44 @@ Register-ArgumentCompleter -Native -CommandName gcloud -ScriptBlock {
         Name        = 'Sysinternals Suite'
         Installer   = 'scoop'
         Id          = 'extras/sysinternals'
-        Notes       = 'extras/sysinternals declares every tool in its manifest "bin" list, so scoop creates a shim per tool (procexp, autoruns, accesschk, ...) automatically. No PATH update required. See #44.'
+        # Curated subset of the 70+ shims extras/sysinternals creates. We
+        # only enumerate the tools most commonly used interactively so
+        # tab-completion is registered for them. The full set is still on
+        # PATH via scoop's shims; users who want completion for additional
+        # tools can extend this list.
+        CliCommands = @('handle64','procexp64','autoruns','accesschk','psexec','pslist','sigcheck','procdump','tcpview')
+        Completion  = 'native'
+        # Sysinternals tools share a small, stable set of universal flags
+        # (Win32 conventions: both slash- and dash-prefixed). No upstream
+        # PowerShell completer ships for any of them; PSCompletions has
+        # no entries either. Emit a per-CLI Register-ArgumentCompleter
+        # from this single shared script (Resolve-PackageCompletionSource
+        # passes $Cli so the same script generates each tool's block).
+        NativeCommandScript = {
+            param($Cli)
+@"
+Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @('/?','-?','/accepteula','-accepteula','/nobanner','-nobanner','/h','-h') |
+        Where-Object { `$_ -like "`$wordToComplete*" } |
+        ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+        }
+}
+"@
+        }
+        ExpectedCompletions = @{
+            handle64   = @('/?','/accepteula','/nobanner')
+            procexp64  = @('/?','/accepteula','/nobanner')
+            autoruns   = @('/?','/accepteula','/nobanner')
+            accesschk  = @('/?','/accepteula','/nobanner')
+            psexec     = @('/?','/accepteula','/nobanner')
+            pslist     = @('/?','/accepteula','/nobanner')
+            sigcheck   = @('/?','/accepteula','/nobanner')
+            procdump   = @('/?','/accepteula','/nobanner')
+            tcpview    = @('/?','/accepteula','/nobanner')
+        }
+        Notes       = 'extras/sysinternals declares every tool in its manifest "bin" list, so scoop creates a shim per tool (procexp, autoruns, accesschk, ...) automatically. No PATH update required. CliCommands enumerates the curated subset that gets tab-completion via a shared per-CLI flag completer (universal Sysinternals flags: /?, /accepteula, /nobanner). See #44.'
     }
 )
 

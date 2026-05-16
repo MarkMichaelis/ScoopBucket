@@ -36,12 +36,21 @@ BeforeAll {
         }
         $script:byName[$p.Name] += $p
     }
-    # Generic-test consumers: one row per package, given to It -ForEach.
-    # Pester's -ForEach iterates over each hashtable's key/value pairs
-    # and exposes them as named variables ($Bundle, $Pkg) inside the It.
-    $script:pkgCases = foreach ($p in $script:allPkgs) {
-        @{ Bundle = $p.Bundle; Pkg = $p }
-    }
+}
+
+# DISCOVERY-TIME data collection. The per-package `It -ForEach $script:pkgCases`
+# cases below need $script:pkgCases populated at Pester DISCOVERY time, not at
+# Run time (BeforeAll runs after discovery). Previously this lived in
+# BeforeAll, which silently produced ZERO iterations for every -ForEach test
+# — i.e. all per-package validation was inert. This block runs during the
+# discovery pass so the cases fan out properly.
+$scoopBucketPsd1Discovery = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+if (Test-Path $scoopBucketPsd1Discovery) { Import-Module $scoopBucketPsd1Discovery -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
+# Generic-test consumers: one row per package, given to It -ForEach.
+# Pester's -ForEach iterates over each hashtable's key/value pairs
+# and exposes them as named variables ($Bundle, $Pkg) inside the It.
+$script:pkgCases = foreach ($p in @(Get-Package -BucketPath $PSScriptRoot)) {
+    @{ Bundle = $p.Bundle; Pkg = $p }
 }
 
 Describe 'Declarative bundles (data-driven)' -Tag 'Light','Bundle' {
@@ -143,6 +152,59 @@ Describe 'Declarative bundles (data-driven)' -Tag 'Light','Bundle' {
         $catalog = @((Get-Content -Raw -Path $catalogPath | ConvertFrom-Json).Completions)
         foreach ($cli in @($Pkg.CliCommands)) {
             $catalog | Should -Contain $cli -Because "Completion='pscompletions' requires '$cli' to exist in https://github.com/abgox/PSCompletions/tree/main/completions; otherwise switch to Completion='auto' with a NativeCommandScript"
+        }
+    }
+
+    It "<Pkg.Name> (<Bundle>) NativeCommandScript emits Register-ArgumentCompleter for every declared CLI" -ForEach $script:pkgCases {
+        # Regression guard for the Sysinternals gap: a Package can declare
+        # Completion='native'/'auto' with a NativeCommandScript that runs
+        # without error but emits nothing for one or more of its CliCommands
+        # entries. Resolve-PackageCompletionSource then silently returns
+        # Source='Skipped' and the CLI ships with no tab-completion.
+        #
+        # Get-Package's NativeCommandOutputs is pre-computed by the bundle
+        # loader (Get-BundlePackages): it invokes $p.NativeCommandScript
+        # against each $cli the same way Resolve-PackageCompletionSource
+        # does at install time and captures the resulting text. We assert
+        # on that captured text here so the failure mode is caught at PR
+        # time without needing the package installed.
+        if ($Pkg.Completion -notin @('native','auto')) { return }
+        $Pkg.HasNativeCommandScript | Should -BeTrue -Because "Completion='$($Pkg.Completion)' requires a NativeCommandScript"
+        foreach ($cli in @($Pkg.CliCommands)) {
+            $Pkg.NativeCommandOutputs.ContainsKey($cli) | Should -BeTrue -Because "Get-Package should expose NativeCommandOutputs for every declared CLI"
+            $out = [string]$Pkg.NativeCommandOutputs[$cli]
+            $trimmed = $out.Trim()
+            if (-not $trimmed) {
+                # The bundle loader (Get-BundlePackages) invoked the
+                # NativeCommandScript but it emitted nothing. Two
+                # legitimate reasons:
+                #   1. The script delegates to the CLI binary
+                #      (e.g. `rg --generate complete-powershell`)
+                #      which isn't installed (or is too old) in the
+                #      Light/PR runner. Heavy validate-installs reruns
+                #      this same probe AFTER install and will catch
+                #      genuine breakage there.
+                #   2. The script is a static here-string but mis-uses
+                #      its $Cli arg so it emits text for one CLI only,
+                #      leaving others blank. Sysinternals-class bug.
+                # We can't distinguish (1) from (2) statically, so we
+                # only flag (2)-style breakage when at least ONE CLI on
+                # the same package DID emit. That catches uneven
+                # multi-CLI scripts without false-positive'ing on
+                # single-CLI binary-delegating scripts.
+                $anyEmitted = $false
+                foreach ($otherCli in @($Pkg.CliCommands)) {
+                    if ($otherCli -eq $cli) { continue }
+                    $otherOut = [string]$Pkg.NativeCommandOutputs[$otherCli]
+                    if ($otherOut.Trim()) { $anyEmitted = $true; break }
+                }
+                if ($anyEmitted) {
+                    throw "NativeCommandScript emitted output for some CLIs in '$($Pkg.Name)' but NOT for '$cli'. The shared script likely doesn't honor its `$Cli arg for every declared CLI -- Resolve-PackageCompletionSource will silently skip '$cli' at install time."
+                }
+                Set-ItResult -Skipped -Because "NativeCommandScript for '$cli' produced no output (likely binary-dependent and not on PATH in this runner). Heavy validate-installs covers this end-to-end."
+                continue
+            }
+            $trimmed | Should -Match 'Register-ArgumentCompleter' -Because "NativeCommandScript output for CLI '$cli' must contain a Register-ArgumentCompleter call so the profile block actually wires tab-completion"
         }
     }
 

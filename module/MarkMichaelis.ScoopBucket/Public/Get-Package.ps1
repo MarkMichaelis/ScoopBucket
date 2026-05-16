@@ -65,6 +65,30 @@ function Get-Package {
     foreach ($b in $bundles) {
         if ($Bundle -and ($b.Bundle -notin $Bundle)) { continue }
         foreach ($p in $b.Packages) {
+            # Get-BundlePackages round-trips through JSON, so hashtables
+            # arrive as PSCustomObjects. Restore them to real Hashtables
+            # here so callers (tests, sweep loops) can use .ContainsKey()
+            # and indexer syntax uniformly.
+            $expected = @{}
+            if ($p.ExpectedCompletions) {
+                if ($p.ExpectedCompletions -is [hashtable]) {
+                    $expected = $p.ExpectedCompletions
+                } else {
+                    foreach ($prop in $p.ExpectedCompletions.PSObject.Properties) {
+                        $expected[$prop.Name] = @($prop.Value)
+                    }
+                }
+            }
+            $nativeOutputs = @{}
+            if ($p.PSObject.Properties.Name -contains 'NativeCommandOutputs' -and $p.NativeCommandOutputs) {
+                if ($p.NativeCommandOutputs -is [hashtable]) {
+                    $nativeOutputs = $p.NativeCommandOutputs
+                } else {
+                    foreach ($prop in $p.NativeCommandOutputs.PSObject.Properties) {
+                        $nativeOutputs[$prop.Name] = [string]$prop.Value
+                    }
+                }
+            }
             $obj = [pscustomobject]@{
                 Bundle      = $b.Bundle
                 Name        = $p.Name
@@ -74,7 +98,8 @@ function Get-Package {
                 Scope       = $p.Scope
                 CliCommands = @($p.CliCommands)
                 Completion  = $p.Completion
-                ExpectedCompletions = $p.ExpectedCompletions
+                ExpectedCompletions = $expected
+                NativeCommandOutputs = $nativeOutputs
                 DependsOn   = @($p.DependsOn)
                 CISkip      = $p.CISkip
                 Notes       = $p.Notes
