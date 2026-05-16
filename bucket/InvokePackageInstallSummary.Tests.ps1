@@ -4,7 +4,9 @@
 <#
 .SYNOPSIS
     Light test for Invoke-PackageInstall's summary output: each row must
-    be color-coded by State so Failed rows can't be mistaken for success.
+    be color-coded *and* glyph-marked by State so Failed rows can't be
+    mistaken for success (color alone isn't colorblind-safe, so the
+    glyph carries the same signal).
 #>
 
 BeforeAll {
@@ -14,7 +16,7 @@ BeforeAll {
 
 Describe 'Invoke-PackageInstall summary coloring' -Tag 'Light','Module' {
 
-    It 'writes Failed rows in Red and Installed rows in Green' {
+    It 'writes Failed rows in Red (with ✗ glyph) and Installed rows in Green (with ✓ glyph)' {
         InModuleScope MarkMichaelis.ScoopBucket {
             $captured = New-Object System.Collections.Generic.List[object]
             Mock Write-Host -MockWith {
@@ -33,7 +35,10 @@ Describe 'Invoke-PackageInstall summary coloring' -Tag 'Light','Module' {
                             CustomInstallScript = { throw 'simulated failure' } }
             )
 
-            $null = Invoke-PackageInstall -Bundle 'Test' -Packages $pkgs
+            # BadPkg writes to the error stream now; silence it so the
+            # mock doesn't get confused but the summary still renders.
+            $null = Invoke-PackageInstall -Bundle 'Test' -Packages $pkgs `
+                -ErrorAction SilentlyContinue
 
             $summaryLines = @($captured | Where-Object { $_.Message -match '^\s{2}\S' -and $_.Color })
             $goodLine = $summaryLines | Where-Object Message -match 'GoodPkg' | Select-Object -Last 1
@@ -41,14 +46,11 @@ Describe 'Invoke-PackageInstall summary coloring' -Tag 'Light','Module' {
 
             $goodLine | Should -Not -BeNullOrEmpty
             $badLine  | Should -Not -BeNullOrEmpty
-            $goodLine.Color | Should -Be 'Green'
-            $badLine.Color  | Should -Be 'Red'
-
-            # The post-summary red banner — must appear and must be red.
-            $banner = $captured | Where-Object { $_.Message -match '^!! .*failed' } | Select-Object -Last 1
-            $banner          | Should -Not -BeNullOrEmpty
-            $banner.Color    | Should -Be 'Red'
-            $banner.Message  | Should -Match '1 package failed'
+            $goodLine.Color   | Should -Be 'Green'
+            $badLine.Color    | Should -Be 'Red'
+            # Glyph carries the signal even when color is stripped.
+            $goodLine.Message | Should -Match ([char]0x2713)   # ✓
+            $badLine.Message  | Should -Match ([char]0x2717)   # ✗
         }
     }
 }

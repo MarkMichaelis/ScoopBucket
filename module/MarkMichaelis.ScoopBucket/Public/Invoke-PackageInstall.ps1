@@ -34,8 +34,23 @@ function Invoke-PackageInstall {
          10. Record an [installed | already-installed | skipped | failed]
              entry on the summary.
 
-        Returns the array of summary records and stores it on
-        `$global:LASTINSTALLREPORT` for cross-bundle inspection.
+        Outputs are split across PowerShell's standard streams:
+          - **Success stream** — each Installed / AlreadyInstalled /
+            Skipped Package is emitted via Write-Output. The function's
+            return value is therefore a `[Package[]]` of successes,
+            pipeline-friendly:
+              `Invoke-PackageInstall ... | Where-Object Installer -eq 'winget'`.
+          - **Error stream** — each Failed package emits a structured
+            `ErrorRecord` (FullyQualifiedErrorId = 'PackageInstallFailed',
+            TargetObject = the [Package], Exception.Message = the
+            failure reason). Renders red by default; `$?` flips false;
+            `-ErrorAction Stop` makes it terminating; `-ErrorVariable`
+            captures it.
+          - **Host / information stream** — the per-package install
+            log lines and the final per-package summary table (with
+            ✓ ↺ ✗ → glyphs for colorblind-safe disambiguation) are
+            written via Write-Host as before. Color is now redundant
+            with the glyph, not load-bearing.
 
     .PARAMETER Packages
         The declarative [Package[]] collection for this bundle.
@@ -61,7 +76,7 @@ function Invoke-PackageInstall {
         the AllUsersAllHosts profile isn't writable).
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
-    [OutputType([object[]])]
+    [OutputType([Package])]
     param(
         [Parameter(Mandatory)][object[]]$Packages,
         [Parameter(Mandatory)][string]$Bundle,
@@ -89,7 +104,13 @@ function Invoke-PackageInstall {
     Write-Host ""
     Write-Host "=== Invoke-PackageInstall: $Bundle ($($ordered.Count) packages) ==="
 
-    $summary = New-Object System.Collections.Generic.List[object]
+    # Host-stream summary state — collected per package so the final
+    # summary table can render each row with the right glyph/color. The
+    # success-stream output is the [Package] itself; the error-stream
+    # output is a structured ErrorRecord written below at each failure
+    # site. This list is intentionally NOT returned to callers — they
+    # should consume the success/error streams instead.
+    $states = New-Object System.Collections.Generic.List[object]
     $isCi = [bool]$env:CI
 
     # If any package in this run requests PSCompletions-backed tab completion
@@ -112,24 +133,15 @@ function Invoke-PackageInstall {
     }
 
     foreach ($pkg in $ordered) {
-        $record = [pscustomobject]@{
-            Bundle      = $Bundle
-            Name        = $pkg.Name
-            Installer   = $pkg.Installer
-            Id          = $pkg.Id
-            Scope       = $pkg.Scope
-            CliCommands = $pkg.CliCommands
-            State       = 'Pending'
-            Reason      = $null
-            Verified    = $null
-            Completion  = $null
-        }
+        $state  = 'Pending'
+        $reason = $null
 
         if ($pkg.CISkip -and $isCi) {
-            $record.State  = 'Skipped'
-            $record.Reason = "CISkip: $($pkg.CISkip)"
-            Write-Host "[skip] $($pkg.Name) -- $($record.Reason)"
-            $summary.Add($record)
+            $state  = 'Skipped'
+            $reason = "CISkip: $($pkg.CISkip)"
+            Write-Host "[skip] $($pkg.Name) -- $reason"
+            $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
+            Write-Output $pkg
             continue
         }
 
@@ -142,7 +154,13 @@ function Invoke-PackageInstall {
                     Write-Host "  [DryRun] CustomInstallScript"
                     $result = @{ State = 'Installed'; Reason = '(DryRun)' }
                 } else {
-                    & $pkg.CustomInstallScript $pkg
+                    # Discard any pipeline output the user's
+                    # CustomInstallScript may emit — we treat it as
+                    # purely side-effecting (the synthesized $result
+                    # below is what we actually use). Without the
+                    # [void], stray return values land on our function's
+                    # success stream and pollute the [Package] output.
+                    [void](& $pkg.CustomInstallScript $pkg 2>$null)
                     $result = @{ State = 'Installed'; Reason = $null }
                 }
             } else {
@@ -155,100 +173,108 @@ function Invoke-PackageInstall {
                     default       { throw "Invoke-PackageInstall: unknown Installer '$($pkg.Installer)' for '$($pkg.Name)'." }
                 }
             }
-            $record.State  = $result.State
-            $record.Reason = $result.Reason
+            $state  = $result.State
+            $reason = $result.Reason
         } catch {
-            $record.State  = 'Failed'
-            $record.Reason = "Install threw: $($_.Exception.Message)"
-            Write-Warning "  $($pkg.Name): $($record.Reason)"
-            $summary.Add($record)
+            $reason = "Install threw: $($_.Exception.Message)"
+            $states.Add([pscustomobject]@{ Pkg = $pkg; State = 'Failed'; Reason = $reason })
+            $PSCmdlet.WriteError(
+                [System.Management.Automation.ErrorRecord]::new(
+                    [System.Exception]::new("$($pkg.Name): $reason"),
+                    'PackageInstallFailed',
+                    [System.Management.Automation.ErrorCategory]::NotInstalled,
+                    $pkg))
+            continue
+        }
+
+        if ($state -eq 'Failed') {
+            # Engine returned a structured Failed result (e.g. winget
+            # exit code mapped to State='Failed').
+            $states.Add([pscustomobject]@{ Pkg = $pkg; State = 'Failed'; Reason = $reason })
+            $PSCmdlet.WriteError(
+                [System.Management.Automation.ErrorRecord]::new(
+                    [System.Exception]::new("$($pkg.Name): $reason"),
+                    'PackageInstallFailed',
+                    [System.Management.Automation.ErrorCategory]::NotInstalled,
+                    $pkg))
             continue
         }
 
         if (-not $DryRun) { Update-PathFromRegistry }
 
-        if ($pkg.PostInstallScript -and $record.State -ne 'Failed') {
+        if ($pkg.PostInstallScript) {
             if ($DryRun) {
                 Write-Host "  [DryRun] PostInstallScript"
             } else {
                 try {
-                    & $pkg.PostInstallScript $pkg
+                    # PostInstallScript is purely side-effecting; discard
+                    # any pipeline output so it doesn't pollute our
+                    # function's success stream of [Package] objects.
+                    [void](& $pkg.PostInstallScript $pkg 2>$null)
                     Update-PathFromRegistry
                 } catch {
-                    $record.State  = 'Failed'
-                    $record.Reason = "PostInstallScript threw: $($_.Exception.Message)"
-                    Write-Warning "  $($pkg.Name): $($record.Reason)"
-                    $summary.Add($record)
+                    $reason = "PostInstallScript threw: $($_.Exception.Message)"
+                    $states.Add([pscustomobject]@{ Pkg = $pkg; State = 'Failed'; Reason = $reason })
+                    $PSCmdlet.WriteError(
+                        [System.Management.Automation.ErrorRecord]::new(
+                            [System.Exception]::new("$($pkg.Name): $reason"),
+                            'PackageInstallFailed',
+                            [System.Management.Automation.ErrorCategory]::NotInstalled,
+                            $pkg))
                     continue
                 }
             }
         }
 
-        if (-not $DryRun -and $record.State -ne 'Failed') {
-            $record.Verified = Test-PackageInstalled -Package $pkg
-            if (-not $record.Verified -and ($pkg.CliCommands.Count -gt 0 -or $pkg.VerifyScript)) {
+        if (-not $DryRun) {
+            $verified = Test-PackageInstalled -Package $pkg
+            if (-not $verified -and ($pkg.CliCommands.Count -gt 0 -or $pkg.VerifyScript)) {
                 Write-Warning "  $($pkg.Name): verification failed (CliCommands not on PATH and/or VerifyScript=false)."
             }
         }
 
         if (-not $SkipCompletion -and -not $DryRun -and
             $pkg.Completion -ne 'none' -and $pkg.CliCommands.Count -gt 0) {
-            $completionResults = New-Object System.Collections.Generic.List[object]
             foreach ($cli in $pkg.CliCommands) {
                 $registerArgs = @{ Cli = $cli; Mode = $pkg.Completion }
                 if ($pkg.NativeCommandScript) { $registerArgs['NativeCommand'] = $pkg.NativeCommandScript }
                 try {
-                    $r = Register-PackageCompletion @registerArgs
-                    $completionResults.Add($r)
+                    $null = Register-PackageCompletion @registerArgs
                 } catch {
                     Write-Warning "  $($pkg.Name)/$cli completion registration failed: $($_.Exception.Message)"
-                    $completionResults.Add([pscustomobject]@{
-                        Cli = $cli; Source = 'Skipped'; Action = 'Skipped'
-                        Reason = $_.Exception.Message
-                    })
                 }
             }
-            $record.Completion = $completionResults.ToArray()
         }
 
-        $summary.Add($record)
+        $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
+        Write-Output $pkg
     }
-
-    $arr = $summary.ToArray()
-    $global:LASTINSTALLREPORT = $arr
 
     Write-Host ""
     Write-Host "=== $Bundle summary ==="
-    $arr | ForEach-Object {
-        $line = "  {0,-18} {1,-12} {2}" -f $_.State, $_.Installer, $_.Name
-        if ($_.Reason) { $line += "  -- $($_.Reason)" }
-        # Colorize by state so a glance at the summary tells the story.
-        # Without this, every line — Installed, Failed, Skipped — rendered
-        # in the default foreground and "Failed" was easy to overlook.
-        $color = switch ($_.State) {
+    foreach ($s in $states) {
+        # Glyph carries the success/failure signal so a colorblind reader
+        # (or any pipeline that strips ANSI) can still scan the table.
+        # Color reinforces the glyph but is no longer load-bearing.
+        $glyph = switch ($s.State) {
+            'Installed'        { [char]0x2713 }   # ✓
+            'AlreadyInstalled' { [char]0x21BA }   # ↺
+            'Failed'           { [char]0x2717 }   # ✗
+            'Skipped'          { [char]0x2192 }   # →
+            default            { ' ' }
+        }
+        $color = switch ($s.State) {
             'Installed'        { 'Green' }
             'AlreadyInstalled' { 'DarkGreen' }
             'Failed'           { 'Red' }
             'Skipped'          { 'Yellow' }
             default            { $Host.UI.RawUI.ForegroundColor }
         }
+        $line = "  {0} {1,-18} {2,-12} {3}" -f $glyph, $s.State, $s.Pkg.Installer, $s.Pkg.Name
+        if ($s.Reason) { $line += "  -- $($s.Reason)" }
         Write-Host $line -ForegroundColor $color
     }
     Write-Host ""
-
-    # PowerShell auto-renders the returned PSCustomObject array as
-    # Format-List with green property names; on a failed install, that
-    # green can mislead a quick eye into thinking the operation
-    # succeeded. Emit a final, unambiguous red banner so failures can't
-    # be skimmed past.
-    $failedCount = @($arr | Where-Object State -eq 'Failed').Count
-    if ($failedCount -gt 0) {
-        $noun = if ($failedCount -eq 1) { 'package' } else { 'packages' }
-        Write-Host "!! $failedCount $noun failed in '$Bundle' — see [Reason] above." -ForegroundColor Red
-        Write-Host ""
-    }
-
-    return ,$arr
 }
 
 function Test-PackageInstalled {
