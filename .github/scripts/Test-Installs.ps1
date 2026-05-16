@@ -35,6 +35,10 @@ $ProgressPreference = 'SilentlyContinue'  # Speed up web requests
 $script:CISkipPackages = @{
     # winget: user-scope-only MSIX apps (no machine-scope MSI/EXE installer)
     'Pushbullet.Pushbullet'         = 'User-scope MSIX only — no machine installer; no msstore/scoop/choco alternative (#8)'
+    # winget: installer returns APPINSTALLER_CLI_ERROR_INSTALL_SYSTEM_NOT_SUPPORTED (-1978334957)
+    # on hosted runners — the Claude Desktop installer rejects the runner's system
+    # configuration (#85). Tracked separately; not a regression we can resolve in CI.
+    'Anthropic.Claude'              = 'winget installer reports SYSTEM_NOT_SUPPORTED on hosted runners (#85)'
     # choco: delisted or CI-incompatible
     'Office365ProPlus'              = 'Requires GUI session and license activation (exit 17004)'
     # scoop: browser-watch installers requiring interactive Download click
@@ -159,7 +163,8 @@ function Install-WingetPackage {
         [string]$Name,
         [string]$PackageId,
         [string]$SourceScript,
-        [string]$Scope = 'machine'
+        [string]$Scope = 'machine',
+        [string[]]$ExtraArgs = @()
     )
     # winget only accepts 'user' or 'machine' for --scope. The declarative
     # schema uses 'global' (the new default) as a synonym for machine-wide;
@@ -167,6 +172,11 @@ function Install-WingetPackage {
     # Anything not 'user' falls back to 'machine'.
     $effectiveScope = if ($Scope -eq 'user') { 'user' } else { 'machine' }
     $cmd = "winget install --id $PackageId --scope $effectiveScope --accept-package-agreements --accept-source-agreements --disable-interactivity --silent"
+    # Append per-package extras (e.g. --skip-dependencies for packages whose
+    # declared dependencies have no applicable installer on hosted runners).
+    if ($ExtraArgs -and $ExtraArgs.Count -gt 0) {
+        $cmd = "$cmd $(($ExtraArgs) -join ' ')"
+    }
     try {
         Write-Host "  Installing [winget] $Name ($PackageId)..."
         $maxAttempts = 3
@@ -640,12 +650,13 @@ function Get-AllPackages {
                     default      { $p.Installer }
                 }
                 $null = $allPackages.Add([pscustomobject]@{
-                    Name           = $p.Name
-                    PackageId      = $p.Id
-                    InstallerType  = $installerType
-                    Scope          = if ($p.Scope) { $p.Scope } else { 'machine' }
-                    SourceScript   = "$($p.Bundle).ps1"
-                    AdditionalArgs = ''
+                    Name             = $p.Name
+                    PackageId        = $p.Id
+                    InstallerType    = $installerType
+                    Scope            = if ($p.Scope) { $p.Scope } else { 'machine' }
+                    SourceScript     = "$($p.Bundle).ps1"
+                    AdditionalArgs   = ''
+                    WingetExtraArgs  = @($p.WingetExtraArgs)
                 })
             }
         }
@@ -736,8 +747,12 @@ foreach ($group in $grouped) {
 
         switch ($pkg.InstallerType) {
             'winget' {
+                $extra = @()
+                if ($pkg.PSObject.Properties['WingetExtraArgs'] -and $pkg.WingetExtraArgs) {
+                    $extra = @($pkg.WingetExtraArgs)
+                }
                 Install-WingetPackage -Name $pkg.Name -PackageId $pkg.PackageId `
-                    -SourceScript $pkg.SourceScript -Scope $pkg.Scope
+                    -SourceScript $pkg.SourceScript -Scope $pkg.Scope -ExtraArgs $extra
             }
             'winget-store' {
                 Skip-Package -Name $pkg.Name -PackageId $pkg.PackageId `
