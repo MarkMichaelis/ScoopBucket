@@ -818,3 +818,82 @@ Describe 'Add-Result hex formatting for negative ExitCode' -Tag 'Unit' {
         ($output -join "`n") | Should -Match '0x00000001'
     }
 }
+
+
+# ============================================================================
+# Install helper command-line construction (regression tests for the
+# PackageId-vs-Name confusion and the winget --scope global rejection bug)
+# ============================================================================
+
+Describe 'Install helper command construction' -Tag 'Unit' {
+    BeforeAll {
+        $scriptPath = Join-Path $PSScriptRoot 'Test-Installs.ps1'
+        $scriptContent = Get-Content $scriptPath -Raw
+
+        # Capture the install commands without actually invoking the
+        # external installers. We replace Invoke-WithTimeout and Add-Result
+        # with stubs that record the $Command they receive.
+        $script:CapturedCommands = [System.Collections.ArrayList]::new()
+        function script:Invoke-WithTimeout {
+            param($Command, $TimeoutSeconds)
+            $null = $script:CapturedCommands.Add($Command)
+            return [pscustomobject]@{ ExitCode = 0; Output = ''; TimedOut = $false }
+        }
+        function script:Add-Result {
+            param($Name, $PackageId, $InstallerType, $SourceScript, $Command,
+                  $Status, $ExitCode, $ErrorOutput, $Reason)
+        }
+        function script:Test-IsTransientWingetFailure { param($ExitCode, $Output) $false }
+        $script:DefaultTimeoutSec = 60
+        $script:ScoopTimeoutSec   = 60
+
+        foreach ($f in 'Install-ScoopPackage','Install-ChocoPackage','Install-WingetPackage') {
+            if ($scriptContent -match "(?ms)(function\s+$f\s*\{.+?\n\})") {
+                Invoke-Expression $Matches[1]
+            } else { throw "function $f not found" }
+        }
+    }
+
+    BeforeEach { $script:CapturedCommands.Clear() }
+
+    It 'Install-ScoopPackage uses PackageId, not display Name, in the install command' {
+        Install-ScoopPackage -Name 'Sysinternals Suite' -PackageId 'extras/sysinternals' `
+            -SourceScript 'OSBasePackages.ps1'
+        $script:CapturedCommands[0] | Should -Be 'scoop install -g extras/sysinternals'
+    }
+
+    It 'Install-ScoopPackage falls back to Name when PackageId is empty' {
+        Install-ScoopPackage -Name 'tool' -SourceScript 'fake.ps1'
+        $script:CapturedCommands[0] | Should -Be 'scoop install -g tool'
+    }
+
+    It 'Install-ChocoPackage uses PackageId, not display Name, in the install command' {
+        Install-ChocoPackage -Name 'Node.js' -PackageId 'nodejs' `
+            -SourceScript 'DeveloperBasePackages.ps1'
+        $script:CapturedCommands[0] | Should -Be 'choco install nodejs -y --no-progress'
+    }
+
+    It 'Install-ChocoPackage falls back to Name when PackageId is empty' {
+        Install-ChocoPackage -Name 'pkg' -SourceScript 'fake.ps1'
+        $script:CapturedCommands[0] | Should -Be 'choco install pkg -y --no-progress'
+    }
+
+    It 'Install-WingetPackage maps Scope=global to --scope machine' {
+        Install-WingetPackage -Name 'AnyApp' -PackageId 'Vendor.AnyApp' `
+            -SourceScript 'fake.ps1' -Scope 'global'
+        $script:CapturedCommands[0] | Should -Match '--scope machine'
+        $script:CapturedCommands[0] | Should -Not -Match '--scope global'
+    }
+
+    It 'Install-WingetPackage maps Scope=machine to --scope machine' {
+        Install-WingetPackage -Name 'AnyApp' -PackageId 'Vendor.AnyApp' `
+            -SourceScript 'fake.ps1' -Scope 'machine'
+        $script:CapturedCommands[0] | Should -Match '--scope machine'
+    }
+
+    It 'Install-WingetPackage maps Scope=user to --scope user' {
+        Install-WingetPackage -Name 'AnyApp' -PackageId 'Vendor.AnyApp' `
+            -SourceScript 'fake.ps1' -Scope 'user'
+        $script:CapturedCommands[0] | Should -Match '--scope user'
+    }
+}
