@@ -41,6 +41,7 @@ class Package {
 
     [scriptblock] $NativeCommandScript
     [scriptblock] $CustomInstallScript
+    [scriptblock] $CustomUninstallScript
     [scriptblock] $PostInstallScript
     [scriptblock] $VerifyScript
 
@@ -72,6 +73,12 @@ class Package {
 
         if ($this.Installer -eq 'custom' -and -not $this.CustomInstallScript) {
             throw "Package '$($this.Name)': CustomInstallScript is required when Installer='custom'."
+        }
+
+        # CustomUninstallScript is optional — not every install is reversible.
+        # If present it must only accompany Installer='custom'.
+        if ($this.CustomUninstallScript -and $this.Installer -ne 'custom') {
+            throw "Package '$($this.Name)': CustomUninstallScript is only valid when Installer='custom' (got '$($this.Installer)')."
         }
 
         if ($this.Source -eq 'msstore' -and $this.Installer -ne 'winget') {

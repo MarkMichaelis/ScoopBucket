@@ -92,6 +92,98 @@ function Read-PackageCompletionProfileContent {
     return ''
 }
 
+function Remove-PackageCompletionProfileBlock {
+    <#
+    .SYNOPSIS
+        Strip the sentinel-delimited completion block for $Cli from $Content.
+        Pure string transform — shares the regex shape with
+        Set-PackageCompletionProfileBlock so the block format lives in
+        exactly one place.
+    #>
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
+        [Parameter(Mandatory)][string]$Cli
+    )
+    $pattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:BEGIN \w+.*?^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:END\r?\n?"
+    $match = [regex]::Match($Content, $pattern)
+    if (-not $match.Success) {
+        return [pscustomobject]@{ Changed = $false; Content = $Content }
+    }
+    $before = $Content.Substring(0, $match.Index)
+    $after  = $Content.Substring($match.Index + $match.Length)
+    # Collapse the extra blank line we add when writing blocks (see
+    # Set-PackageCompletionProfileBlock: appends `r`n`r`n before block).
+    $combined = ($before.TrimEnd("`r","`n") + "`r`n" + $after.TrimStart("`r","`n"))
+    if (-not $before -and -not $after.Trim()) { $combined = '' }
+    return [pscustomobject]@{ Changed = $true; Content = $combined }
+}
+
+function Remove-PackageCompletionBlock {
+    <#
+    .SYNOPSIS
+        Remove the sentinel-delimited completion block for $Cli from
+        $PROFILE.AllUsersAllHosts (or -ProfilePath override). Inverse of
+        Register-PackageCompletion.
+    .DESCRIPTION
+        Used by Uninstall-Package so removing a package also cleans up
+        the completer it registered. Requires elevation to write to
+        AllUsersAllHosts (mirrors Register-PackageCompletion). Honors
+        SupportsShouldProcess. Returns a PSCustomObject describing the
+        outcome (Action = 'Removed' | 'NotPresent' | 'Skipped' | 'WhatIf').
+    .PARAMETER Cli
+        Bare command name whose block to strip.
+    .PARAMETER ProfilePath
+        Test hook: read/write this file instead of AllUsersAllHosts.
+        Bypasses the elevation check.
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$Cli,
+        [string]$ProfilePath
+    )
+
+    $target = Get-PackageCompletionProfilePath -OverridePath $ProfilePath
+    if (-not $target) {
+        return [pscustomobject]@{
+            Cli = $Cli; Action = 'Skipped'; ProfilePath = $null
+            Reason = 'No AllUsersAllHosts profile path available on this host.'
+        }
+    }
+    if (-not (Test-Path $target)) {
+        return [pscustomobject]@{
+            Cli = $Cli; Action = 'NotPresent'; ProfilePath = $target
+            Reason = 'Profile file does not exist.'
+        }
+    }
+
+    $content  = Read-PackageCompletionProfileContent -Path $target
+    $stripped = Remove-PackageCompletionProfileBlock -Content $content -Cli $Cli
+    if (-not $stripped.Changed) {
+        return [pscustomobject]@{
+            Cli = $Cli; Action = 'NotPresent'; ProfilePath = $target
+            Reason = "No completion block for '$Cli' in profile."
+        }
+    }
+
+    if (-not $PSCmdlet.ShouldProcess($target, "Remove completion block for '$Cli'")) {
+        return [pscustomobject]@{
+            Cli = $Cli; Action = 'WhatIf'; ProfilePath = $target
+            Reason = '-WhatIf or -Confirm declined.'
+        }
+    }
+
+    $tmp = "$target.tmp"
+    [System.IO.File]::WriteAllText($tmp, $stripped.Content, [System.Text.UTF8Encoding]::new($false))
+    Move-Item -Path $tmp -Destination $target -Force
+
+    return [pscustomobject]@{
+        Cli = $Cli; Action = 'Removed'; ProfilePath = $target; Reason = $null
+    }
+}
+
 function Set-PackageCompletionProfileBlock {
     [OutputType([string])]
     [CmdletBinding()]
