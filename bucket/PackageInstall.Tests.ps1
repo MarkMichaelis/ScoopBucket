@@ -223,7 +223,9 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
         )
         $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
         $r.Count | Should -Be 3
-        ($r | ForEach-Object State) -join ',' | Should -Be 'Installed,Installed,Installed'
+        # Success stream emits [Package] instances on Installed.
+        ($r | ForEach-Object Name) -join ',' | Should -Be 'A,B,C'
+        $r[0] | Should -BeOfType ([Package])
         # Verify each engine got called exactly once.
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Install-WingetPackage -Times 1 -Exactly
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Install-ChocoPackage  -Times 1 -Exactly
@@ -255,9 +257,21 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
             [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'
                         PostInstallScript = { throw 'boom' } }
         )
-        $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion -WarningAction SilentlyContinue
-        $r[0].State | Should -Be 'Failed'
-        $r[0].Reason | Should -Match 'boom'
+        # Failures go to the error stream as ErrorRecords; capture via
+        # -ErrorVariable to inspect FullyQualifiedErrorId / TargetObject.
+        # NOTE: PowerShell's own throw-propagation also pushes the raw
+        # inner RuntimeException ('boom') onto -ErrorVariable in addition
+        # to our wrapper. Filter to our contract: exactly one
+        # PackageInstallFailed record per failed package.
+        $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion `
+            -ErrorAction SilentlyContinue -ErrorVariable errs
+        $r | Should -BeNullOrEmpty
+        $ours = @($errs | Where-Object { $_.FullyQualifiedErrorId -like 'PackageInstallFailed*' })
+        $ours.Count | Should -Be 1
+        $ours[0].Exception.Message | Should -Match 'boom'
+        $ours[0].Exception.Message | Should -Match 'PostInstallScript threw'
+        $ours[0].TargetObject | Should -BeOfType ([Package])
+        $ours[0].TargetObject.Name | Should -Be 'A'
     }
 
     It 'invokes CustomInstallScript for Installer=custom' {
@@ -268,7 +282,8 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
         )
         $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
         $script:customRan | Should -BeTrue
-        $r[0].State | Should -Be 'Installed'
+        $r.Count | Should -Be 1
+        $r[0].Name | Should -Be 'Readwise'
     }
 
     It 'skips packages with CISkip set when $env:CI is truthy' {
@@ -280,8 +295,15 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
                 [Package]@{ Name='Other';      Installer='winget'; Id='Foo.X' }
             )
             $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
-            ($r | Where-Object Name -eq 'Pushbullet').State | Should -Be 'Skipped'
-            ($r | Where-Object Name -eq 'Other').State      | Should -Be 'Installed'
+            # Both packages emit on the success stream (Skipped + Installed).
+            $r.Count | Should -Be 2
+            ($r | ForEach-Object Name) | Should -Contain 'Pushbullet'
+            ($r | ForEach-Object Name) | Should -Contain 'Other'
+            # The skipped one never reached the engine; the other did.
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Install-WingetPackage -Times 1 -Exactly `
+                -ParameterFilter { $Package.Name -eq 'Other' }
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Install-WingetPackage -Times 0 -Exactly `
+                -ParameterFilter { $Package.Name -eq 'Pushbullet' }
         } finally {
             if ($null -eq $oldCi) { Remove-Item Env:\CI -ErrorAction Ignore }
             else { $env:CI = $oldCi }
@@ -296,16 +318,16 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
             [Package]@{ Name='Bad';  Installer='winget'; Id='Foo.Bad' }
             [Package]@{ Name='Good'; Installer='choco';  Id='good' }
         )
-        $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion -WarningAction SilentlyContinue
-        ($r | Where-Object Name -eq 'Bad').State  | Should -Be 'Failed'
-        ($r | Where-Object Name -eq 'Good').State | Should -Be 'Installed'
-    }
-
-    It 'stores the result on $global:LASTINSTALLREPORT' {
-        $pkgs = [Package[]]@([Package]@{ Name='A'; Installer='winget'; Id='Foo.A' })
-        $null = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
-        $global:LASTINSTALLREPORT | Should -Not -BeNullOrEmpty
-        $global:LASTINSTALLREPORT[0].Bundle | Should -Be 'Test'
+        $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion `
+            -ErrorAction SilentlyContinue -ErrorVariable errs
+        # Success stream: only the Good package.
+        $r.Count | Should -Be 1
+        $r[0].Name | Should -Be 'Good'
+        # Error stream: one ErrorRecord for the Bad package.
+        $errs.Count | Should -Be 1
+        $errs[0].FullyQualifiedErrorId | Should -Match '^PackageInstallFailed'
+        $errs[0].TargetObject.Name | Should -Be 'Bad'
+        $errs[0].Exception.Message | Should -Match 'simulated'
     }
 
     It 'rejects non-Package elements' {
@@ -324,7 +346,8 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
     It 'respects -DryRun: dispatchers receive -WhatIf, returns Installed records' {
         $pkgs = [Package[]]@([Package]@{ Name='A'; Installer='winget'; Id='Foo.A' })
         $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion -DryRun
-        $r[0].State | Should -Be 'Installed'
+        $r.Count | Should -Be 1
+        $r[0].Name | Should -Be 'A'
         # Dispatcher is still invoked (to emit "[WhatIf] ..." log lines), it
         # just must not run the underlying engine.
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Install-WingetPackage -Times 1 -Exactly -ParameterFilter { $WhatIf -eq $true }
