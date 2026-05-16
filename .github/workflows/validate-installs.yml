@@ -131,6 +131,13 @@ jobs:
         shell: pwsh
         run: |
           Set-ExecutionPolicy Bypass -Scope Process -Force
+          # NOTE: -Cleanup is intentionally NOT passed here. Subsequent steps
+          # ("Apply post-install hooks", "CLI availability discovery",
+          # "CLI availability — pinned contract") all depend on installs
+          # persisting through the job. The runner image is discarded at
+          # end-of-job so no state leaks anyway. -Cleanup is a dev-box
+          # convenience for running Test-Installs.ps1 locally — see README
+          # "Heavy validate-installs — local cleanup" for details.
           & "${{ github.workspace }}\.github\scripts\Test-Installs.ps1"
 
       - name: Apply post-install hooks (PATH/shim sidecars)
