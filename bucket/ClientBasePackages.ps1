@@ -19,6 +19,9 @@ $Packages = [Package[]]@(
     [Package]@{ Name = 'AIAgents bundle';  Installer = 'scoop';  Id = 'MarkMichaelis/AIAgents'
                 Notes = 'Pulls every AI agent + Claude Desktop and configures MCP servers; see AIAgents.ps1.' }
 
+    [Package]@{ Name = 'Handy';            Installer = 'winget'; Id = 'cjpais.Handy'
+                Notes = 'Free open-source local speech-to-text (https://handy.computer). Runs Whisper/Parakeet locally; no cloud.' }
+
     [Package]@{ Name = 'eSpeak NG';        Installer = 'scoop';  Id = 'main/espeak-ng';    CliCommands = @('espeak-ng') }
     [Package]@{ Name = 'Notion';           Installer = 'scoop';  Id = 'extras/notion' }
     [Package]@{ Name = 'Spotify';          Installer = 'scoop';  Id = 'extras/spotify' }
