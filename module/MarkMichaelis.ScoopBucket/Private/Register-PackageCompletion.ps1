@@ -55,7 +55,11 @@ function Resolve-PackageCompletionSource {
 
     if ($NativeCommand -and -not $PreferPSCompletions) {
         $native = $null
-        try { $native = & $NativeCommand 2>$null | Out-String } catch { }
+        # Pass $Cli so multi-CLI packages (e.g. Sysinternals Suite) can emit
+        # a per-CLI Register-ArgumentCompleter from a single shared
+        # NativeCommandScript. Existing paramless scriptblocks (gh, rg, bw,
+        # gcloud) simply ignore the extra argument.
+        try { $native = & $NativeCommand $Cli 2>$null | Out-String } catch { }
         if ($native -and $native.Trim()) {
             $guarded = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n$native}"
             return @{ Source = 'Native'; Code = $guarded; PSCompletionsName = $null }

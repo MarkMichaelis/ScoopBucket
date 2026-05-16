@@ -80,6 +80,18 @@ function Get-ScoopBucketModulePath { return '$packageClass' }
 function global:Invoke-PackageInstall {
     param([Parameter(Mandatory)][object[]]`$Packages, [Parameter(Mandatory)][string]`$Bundle, [Parameter(ValueFromRemainingArguments)]`$Remaining)
     `$exported = foreach (`$p in `$Packages) {
+        # Pre-invoke the NativeCommandScript per declared CLI inside this
+        # child runspace so the parent process can assert on what the
+        # completion machinery would actually emit at install time, without
+        # round-tripping scriptblocks through JSON (which would strip them).
+        `$nativeOutputs = @{}
+        if (`$p.NativeCommandScript) {
+            foreach (`$cli in @(`$p.CliCommands)) {
+                `$out = ''
+                try { `$out = & `$p.NativeCommandScript `$cli 2>`$null | Out-String } catch { `$out = '' }
+                `$nativeOutputs[`$cli] = `$out
+            }
+        }
         @{
             Name        = `$p.Name
             Installer   = `$p.Installer
@@ -89,6 +101,7 @@ function global:Invoke-PackageInstall {
             CliCommands = @(`$p.CliCommands)
             Completion  = `$p.Completion
             ExpectedCompletions = `$p.ExpectedCompletions
+            NativeCommandOutputs = `$nativeOutputs
             DependsOn   = @(`$p.DependsOn)
             CISkip      = `$p.CISkip
             Notes       = `$p.Notes
