@@ -16,7 +16,24 @@
     - Sideloaded apps (Add-AppxPackage) -> marked untested in CI
 
     Adding or removing a package in any bucket script automatically updates CI coverage.
+
+.PARAMETER Cleanup
+    When set, every successful install is recorded to a JSON "install ledger"
+    (default: $env:TEMP\ScoopBucket-Cleanup-Ledger.json) and uninstalled at
+    end-of-run.  If a prior -Cleanup run aborted mid-flight, re-running with
+    -Cleanup first replays the stale ledger so the new run starts from a
+    known-clean state.  Default OFF: preserves dev-box state for interactive
+    sessions and keeps backwards compatibility with existing CI.
+
+.PARAMETER LedgerPath
+    Override the ledger file location.  Mainly for tests.
 #>
+
+[CmdletBinding()]
+param(
+    [switch]$Cleanup,
+    [string]$LedgerPath
+)
 
 $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'  # Speed up web requests
@@ -90,6 +107,188 @@ function Add-Result {
         Write-Host $ErrorOutput
         Write-Host "::endgroup::"
     }
+}
+
+# ============================================================================
+# Install Ledger (Cleanup mode)
+# ============================================================================
+# When -Cleanup is set, every successful install is appended to a JSON ledger
+# file (default: $env:TEMP\ScoopBucket-Cleanup-Ledger.json).  Two phases use it:
+#
+#   1. BEFORE discovery: if a stale ledger exists from a prior -Cleanup run
+#      that aborted mid-flight, replay it now so we don't double-install
+#      already-installed packages on a dirty box.
+#   2. AFTER all installs + verification: walk the ledger uninstalling each
+#      entry via the matching package manager, then delete the file.
+#
+# Idempotent and silent — uninstall failures emit a warning but never throw.
+
+if (-not $LedgerPath) {
+    $LedgerPath = Join-Path $env:TEMP 'ScoopBucket-Cleanup-Ledger.json'
+}
+$script:CleanupLedgerPath = $LedgerPath
+
+function Get-CleanupLedger {
+    if (-not (Test-Path $script:CleanupLedgerPath)) { return @() }
+    try {
+        $raw = Get-Content -LiteralPath $script:CleanupLedgerPath -Raw -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
+        $parsed = $raw | ConvertFrom-Json -ErrorAction Stop
+        return @($parsed)
+    } catch {
+        Write-Warning "Get-CleanupLedger: failed to read '$($script:CleanupLedgerPath)': $($_.Exception.Message)"
+        return @()
+    }
+}
+
+function Add-LedgerEntry {
+    param(
+        [Parameter(Mandatory)][ValidateSet('winget','choco','scoop','ps-module')][string]$InstallerType,
+        [Parameter(Mandatory)][string]$Name,
+        [string]$PackageId,
+        [string]$Scope = 'machine'
+    )
+    if (-not $Cleanup) { return }
+    if (-not $PackageId) { $PackageId = $Name }
+    $entry = [pscustomobject]@{
+        Timestamp     = (Get-Date).ToString('o')
+        InstallerType = $InstallerType
+        Name          = $Name
+        PackageId     = $PackageId
+        Scope         = $Scope
+    }
+    try {
+        $current = @(Get-CleanupLedger)
+        $current += $entry
+        ($current | ConvertTo-Json -Depth 5) | Out-File -LiteralPath $script:CleanupLedgerPath -Encoding UTF8
+    } catch {
+        Write-Warning "Add-LedgerEntry: failed to append to '$($script:CleanupLedgerPath)': $($_.Exception.Message)"
+    }
+}
+
+function Clear-CleanupLedger {
+    if (Test-Path $script:CleanupLedgerPath) {
+        try { Remove-Item -LiteralPath $script:CleanupLedgerPath -Force -ErrorAction Stop }
+        catch { Write-Warning "Clear-CleanupLedger: $($_.Exception.Message)" }
+    }
+}
+
+function Uninstall-WingetPackage {
+    param([string]$PackageId, [string]$Scope = 'machine')
+    $effectiveScope = if ($Scope -eq 'user') { 'user' } else { 'machine' }
+    $cmd = "winget uninstall --id $PackageId --scope $effectiveScope --silent --disable-interactivity --accept-source-agreements"
+    try {
+        $result = Invoke-WithTimeout -Command $cmd -TimeoutSeconds 600
+        Write-Host "  [cleanup/winget] $PackageId (exit $($result.ExitCode))"
+    } catch {
+        Write-Warning "Uninstall-WingetPackage '$PackageId': $($_.Exception.Message)"
+    }
+}
+
+function Uninstall-ChocoPackage {
+    param([string]$Name)
+    $cmd = "choco uninstall $Name -y --no-progress --skip-autouninstaller"
+    try {
+        $result = Invoke-WithTimeout -Command $cmd -TimeoutSeconds 600
+        Write-Host "  [cleanup/choco] $Name (exit $($result.ExitCode))"
+    } catch {
+        Write-Warning "Uninstall-ChocoPackage '$Name': $($_.Exception.Message)"
+    }
+}
+
+function Uninstall-ScoopPackage {
+    param([string]$Name)
+    $leaf = ($Name -split '/')[-1]
+    $cmd = "scoop uninstall -g $leaf"
+    try {
+        $result = Invoke-WithTimeout -Command $cmd -TimeoutSeconds 600
+        Write-Host "  [cleanup/scoop] $leaf (exit $($result.ExitCode))"
+    } catch {
+        Write-Warning "Uninstall-ScoopPackage '$Name': $($_.Exception.Message)"
+    }
+}
+
+function Uninstall-PSModuleEntry {
+    param([string]$Name)
+    try {
+        Uninstall-Module -Name $Name -AllVersions -Force -ErrorAction Stop
+        Write-Host "  [cleanup/ps-module] $Name"
+    } catch {
+        Write-Warning "Uninstall-PSModuleEntry '$Name': $($_.Exception.Message)"
+    }
+}
+
+function Invoke-CleanupLedger {
+    <#
+    .SYNOPSIS
+        Walks every ledger entry and dispatches to the matching uninstaller.
+        Idempotent: passing through a clean ledger is a no-op.  After
+        processing, the ledger file is deleted.
+    #>
+    [CmdletBinding()]
+    param([string]$Reason = 'end-of-run')
+
+    $entries = @(Get-CleanupLedger)
+    if ($entries.Count -eq 0) {
+        Write-Host "Cleanup ledger is empty ($Reason); nothing to do."
+        return
+    }
+    Write-Host "`n========== Cleanup ($Reason): $($entries.Count) ledger entries ==========" -ForegroundColor Cyan
+    foreach ($e in $entries) {
+        switch ($e.InstallerType) {
+            'winget'    { Uninstall-WingetPackage -PackageId $e.PackageId -Scope $e.Scope }
+            'choco'     { Uninstall-ChocoPackage  -Name $e.Name }
+            'scoop'     { Uninstall-ScoopPackage  -Name $e.Name }
+            'ps-module' { Uninstall-PSModuleEntry -Name $e.Name }
+            default     { Write-Warning "Invoke-CleanupLedger: unknown InstallerType '$($e.InstallerType)' for '$($e.Name)'" }
+        }
+    }
+    Clear-CleanupLedger
+}
+
+# ============================================================================
+# Probe-Before-Install helpers (Cleanup mode)
+# ============================================================================
+# Cleanup MUST NOT uninstall packages that were already on the host before
+# this run started — otherwise running `Test-Installs.ps1 -Cleanup` on a
+# dev box destroys user state.  Each Install-*Package function probes
+# *before* invoking the installer; only when the package was NOT already
+# installed (by the same manager at the same scope) does the success path
+# call Add-LedgerEntry.  Cross-manager state (e.g. choco-installed 7zip
+# vs winget-installed 7zip) is naturally safe: we only uninstall via the
+# manager that produced our ledger entry, against the scope we recorded.
+
+function Test-WingetInstalled {
+    param([Parameter(Mandatory)][string]$PackageId, [string]$Scope = 'machine')
+    $effectiveScope = if ($Scope -eq 'user') { 'user' } else { 'machine' }
+    $cmd = "winget list --id $PackageId --scope $effectiveScope --exact --disable-interactivity --accept-source-agreements"
+    try {
+        $result = Invoke-WithTimeout -Command $cmd -TimeoutSeconds 120
+        # winget list exits 0 only when a match is found.
+        return ($result.ExitCode -eq 0 -and $result.Output -match [regex]::Escape($PackageId))
+    } catch { return $false }
+}
+
+function Test-ChocoInstalled {
+    param([Parameter(Mandatory)][string]$Name)
+    try {
+        $result = Invoke-WithTimeout -Command "choco list --local-only --exact $Name --limit-output --no-color" -TimeoutSeconds 60
+        return (-not [string]::IsNullOrWhiteSpace($result.Output) -and $result.Output -match "^$([regex]::Escape($Name))\|")
+    } catch { return $false }
+}
+
+function Test-ScoopInstalled {
+    param([Parameter(Mandatory)][string]$Name)
+    $leaf = ($Name -split '/')[-1]
+    $scoopRoot = if ($env:SCOOP_GLOBAL) { $env:SCOOP_GLOBAL } else { Join-Path $env:ProgramData 'scoop' }
+    $userScoop = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
+    return (Test-Path (Join-Path $scoopRoot "apps\$leaf\current")) -or
+           (Test-Path (Join-Path $userScoop "apps\$leaf\current"))
+}
+
+function Test-PSModuleInstalled {
+    param([Parameter(Mandatory)][string]$Name)
+    return @(Get-Module -ListAvailable -Name $Name -ErrorAction SilentlyContinue).Count -gt 0
 }
 
 # ============================================================================
@@ -167,6 +366,11 @@ function Install-WingetPackage {
     # map both 'global' and the legacy 'machine' to winget's 'machine'.
     # Anything not 'user' falls back to 'machine'.
     $effectiveScope = if ($Scope -eq 'user') { 'user' } else { 'machine' }
+    # Probe BEFORE install so cleanup never uninstalls pre-existing user state.
+    $wasAlreadyInstalled = $false
+    if ($Cleanup) {
+        $wasAlreadyInstalled = Test-WingetInstalled -PackageId $PackageId -Scope $effectiveScope
+    }
     $cmd = "winget install --id $PackageId --scope $effectiveScope --accept-package-agreements --accept-source-agreements --disable-interactivity --silent"
     # Append per-package extras (e.g. --skip-dependencies for packages whose
     # declared dependencies have no applicable installer on hosted runners).
@@ -201,6 +405,13 @@ function Install-WingetPackage {
         elseif ($code -eq 0 -or $code -eq -1978335189) {
             Add-Result -Name $Name -PackageId $PackageId -InstallerType 'winget' `
                 -SourceScript $SourceScript -Command $cmd -Status 'pass'
+            # Only ledger when WE actually installed it: exit 0 (fresh install)
+            # AND the pre-install probe said it wasn't already there.  Exit
+            # -1978335189 (ALREADY_INSTALLED) means winget itself confirmed
+            # someone else put it on the box — don't touch it on cleanup.
+            if ($code -eq 0 -and -not $wasAlreadyInstalled) {
+                Add-LedgerEntry -InstallerType 'winget' -Name $Name -PackageId $PackageId -Scope $effectiveScope
+            }
         } else {
             Add-Result -Name $Name -PackageId $PackageId -InstallerType 'winget' `
                 -SourceScript $SourceScript -Command $cmd -Status 'fail' `
@@ -220,6 +431,8 @@ function Install-ChocoPackage {
         [string]$SourceScript
     )
     if (-not $PackageId) { $PackageId = $Name }
+    $wasAlreadyInstalled = $false
+    if ($Cleanup) { $wasAlreadyInstalled = Test-ChocoInstalled -Name $Name }
     $cmd = "choco install $PackageId -y --no-progress"
     try {
         Write-Host "  Installing [choco] $Name..."
@@ -232,6 +445,9 @@ function Install-ChocoPackage {
         } elseif ($code -eq 0) {
             Add-Result -Name $Name -PackageId $PackageId -InstallerType 'choco' `
                 -SourceScript $SourceScript -Command $cmd -Status 'pass'
+            if (-not $wasAlreadyInstalled) {
+                Add-LedgerEntry -InstallerType 'choco' -Name $Name -PackageId $PackageId
+            }
         } else {
             Add-Result -Name $Name -PackageId $PackageId -InstallerType 'choco' `
                 -SourceScript $SourceScript -Command $cmd -Status 'fail' `
@@ -251,6 +467,8 @@ function Install-ScoopPackage {
         [string]$SourceScript
     )
     if (-not $PackageId) { $PackageId = $Name }
+    $wasAlreadyInstalled = $false
+    if ($Cleanup) { $wasAlreadyInstalled = Test-ScoopInstalled -Name $Name }
     $cmd = "scoop install -g $PackageId"
     try {
         Write-Host "  Installing [scoop] $Name..."
@@ -263,6 +481,9 @@ function Install-ScoopPackage {
         } elseif ($code -eq 0) {
             Add-Result -Name $Name -PackageId $PackageId -InstallerType 'scoop' `
                 -SourceScript $SourceScript -Command $cmd -Status 'pass'
+            if (-not $wasAlreadyInstalled) {
+                Add-LedgerEntry -InstallerType 'scoop' -Name $Name -PackageId $PackageId
+            }
         } else {
             Add-Result -Name $Name -PackageId $PackageId -InstallerType 'scoop' `
                 -SourceScript $SourceScript -Command $cmd -Status 'fail' `
@@ -281,12 +502,17 @@ function Install-PSModule {
         [string]$SourceScript,
         [string]$AdditionalArgs = ''
     )
+    $wasAlreadyInstalled = $false
+    if ($Cleanup) { $wasAlreadyInstalled = Test-PSModuleInstalled -Name $Name }
     $cmd = "Install-Module $Name -Force -AllowClobber -Scope AllUsers $AdditionalArgs".Trim()
     try {
         Write-Host "  Installing [PS module] $Name..."
         Invoke-Expression $cmd
         Add-Result -Name $Name -PackageId $Name -InstallerType 'ps-module' `
             -SourceScript $SourceScript -Command $cmd -Status 'pass'
+        if (-not $wasAlreadyInstalled) {
+            Add-LedgerEntry -InstallerType 'ps-module' -Name $Name
+        }
     } catch {
         Add-Result -Name $Name -PackageId $Name -InstallerType 'ps-module' `
             -SourceScript $SourceScript -Command $cmd -Status 'fail' `
@@ -700,6 +926,22 @@ if (-not (Test-Path $bucketPath)) {
     exit 1
 }
 
+# ============================================================================
+# Pre-run ledger replay (Cleanup mode)
+# ============================================================================
+# If a prior `-Cleanup` run aborted mid-flight (Ctrl+C, OOM, runner cancellation),
+# the ledger file is still on disk and the packages it lists are still installed.
+# Replaying it here means the new run starts from a known-clean state instead of
+# getting "already installed" exit codes everywhere — and, more importantly,
+# the pre-install probes won't mistake the leftovers for pre-existing user
+# state, which would otherwise cause those installs to be silently excluded
+# from this run's cleanup ledger.
+if ($Cleanup) {
+    Write-Host "`n========== Cleanup mode: replaying any stale ledger ==========" -ForegroundColor Cyan
+    Write-Host "  Ledger path: $script:CleanupLedgerPath" -ForegroundColor DarkGray
+    Invoke-CleanupLedger -Reason 'pre-run replay'
+}
+
 # Set up PSGallery as trusted (needed for PS module installs)
 Write-Host "`n========== Setting up PSGallery ==========" -ForegroundColor Cyan
 if ((Get-PSRepository PSGallery).InstallationPolicy -ne 'Trusted') {
@@ -1029,6 +1271,19 @@ if ($failed -gt 0) {
 }
 
 } finally {
+    # ========================================================================
+    # End-of-run cleanup (when -Cleanup was set).  Runs BEFORE the partial
+    # results write so cleanup output appears in the workflow log even on
+    # cancellation.  Uninstalls every package recorded in the ledger via
+    # the matching package manager, then deletes the ledger file.  Packages
+    # the pre-install probe identified as already-installed never made it
+    # into the ledger, so user state is preserved.
+    # ========================================================================
+    if ($Cleanup) {
+        try { Invoke-CleanupLedger -Reason 'end-of-run' }
+        catch { Write-Warning "Invoke-CleanupLedger failed: $($_.Exception.Message)" }
+    }
+
     # ========================================================================
     # Ensure results are ALWAYS written, even if the script is interrupted or
     # cancelled mid-run.  The try block starts just before the install loop.

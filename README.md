@@ -421,3 +421,54 @@ canonical URL's content, not your working tree. Re-running
 `Install-LocalManifest` is the right way to iterate; `scoop update` is
 not.
 
+### Heavy validate-installs — local cleanup (`-Cleanup`)
+
+`Test-Installs.ps1` (the Heavy CI driver) installs every package in the
+bucket to prove they work on a clean Windows Server. On hosted runners
+the image is discarded at end-of-job so no cleanup is needed; if you
+ever run the same script **locally** to debug a CI failure, every
+successful install lingers on your dev box.
+
+The opt-in `-Cleanup` switch fixes that:
+
+```powershell
+& .github\scripts\Test-Installs.ps1 -Cleanup
+```
+
+Behavior:
+
+1. **Pre-install probe.** Before each install, the matching package
+   manager is queried for the package at the same scope. If it was
+   already there, the install proceeds (it's idempotent) but the
+   package is **not** recorded for cleanup. Pre-existing user state is
+   never touched.
+2. **Install ledger.** Each install that the run *actually added* is
+   appended to a JSON ledger
+   (default: `$env:TEMP\ScoopBucket-Cleanup-Ledger.json`).
+3. **End-of-run uninstall.** Inside the script's `finally` block, every
+   ledger entry is uninstalled via the same package manager and scope
+   that produced it (`winget uninstall --scope <scope>`,
+   `choco uninstall`, `scoop uninstall -g`, `Uninstall-Module`).
+4. **Crash recovery.** If a `-Cleanup` run aborts mid-flight (Ctrl+C,
+   OOM, runner cancellation), the ledger file survives on disk. The
+   next `-Cleanup` invocation replays it *before* discovery, so you
+   restart from a known-clean state.
+
+**Already-installed semantics:**
+
+| Case | Behavior |
+|---|---|
+| Package was on host before the run, same manager + scope | Probe sees it → no ledger entry → cleanup leaves it. |
+| Package was on host via a *different* manager (e.g. choco-installed 7zip vs winget bucket) | Each manager only sees its own database. Cleanup uninstalls only what *our* manager installed, against its own database. The other manager's copy is untouched. |
+| Package installed at a different scope than what the bundle requested | Probe is scope-scoped; cleanup uninstalls only at the scope we recorded. |
+
+**Why CI does not pass `-Cleanup`.** The workflow's subsequent steps
+("Apply post-install hooks", "CLI availability discovery", "CLI
+availability — pinned contract") all read from the installs left by
+Test-Installs.ps1. Uninstalling between them would break the contract
+checks. Runners are ephemeral so no state leaks anyway. `-Cleanup` is
+a dev-box convenience, not a CI invariant.
+
+Light unit coverage lives in
+`.github/scripts/Test-InstallsCleanup.Tests.ps1`.
+
