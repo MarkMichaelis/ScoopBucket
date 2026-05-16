@@ -43,13 +43,19 @@ function Import-PackageCompletion {
         [Parameter(ParameterSetName = 'ByCli', Position = 0)]
         [string[]]$Cli,
 
+        # `object[]` (not `Package[]`) because Install-Package's post-install
+        # path feeds in JSON-deserialized PSCustomObjects from
+        # Get-BundlePackages — PowerShell can't coerce PSCustomObject ->
+        # Package and parameter binding throws. The end-block only reads
+        # property names (Completion, CliCommands, NativeCommandScript,
+        # NativeCommandOutputs), which works uniformly on both.
         [Parameter(ParameterSetName = 'ByPackage', ValueFromPipeline)]
-        [Package[]]$Package
+        [object[]]$Package
     )
 
     begin {
         $results = New-Object System.Collections.Generic.List[object]
-        $packagesToProcess = New-Object System.Collections.Generic.List[Package]
+        $packagesToProcess = New-Object System.Collections.Generic.List[object]
     }
 
     process {
@@ -100,15 +106,38 @@ function Import-PackageCompletion {
             foreach ($cliName in @($p.CliCommands)) {
                 if (-not $seen.Add($cliName)) { continue }
 
-                $resolveSplat = @{ Cli = $cliName }
-                if ($p.NativeCommandScript -and $p.Completion -ne 'pscompletions') {
-                    $resolveSplat['NativeCommand'] = $p.NativeCommandScript
-                }
-                if ($p.Completion -eq 'pscompletions') {
-                    $resolveSplat['PreferPSCompletions'] = $true
+                # Prefer the bundle-loader's pre-captured native output
+                # (NativeCommandOutputs[$cliName]) when the package object
+                # is a PSCustomObject from Get-BundlePackages — the live
+                # NativeCommandScript scriptblock can't round-trip JSON,
+                # so it's $null on that path. For real in-memory [Package]
+                # callers, the script is intact and Resolve-... invokes
+                # it directly.
+                $preComputedNative = $null
+                if ($p.PSObject.Properties.Name -contains 'NativeCommandOutputs' -and $p.NativeCommandOutputs) {
+                    $no = $p.NativeCommandOutputs
+                    if ($no -is [hashtable] -and $no.ContainsKey($cliName)) {
+                        $preComputedNative = [string]$no[$cliName]
+                    } elseif ($no.PSObject -and ($no.PSObject.Properties.Name -contains $cliName)) {
+                        $preComputedNative = [string]$no.$cliName
+                    }
                 }
 
-                $resolved = Resolve-PackageCompletionSource @resolveSplat
+                $resolved = $null
+                if ($preComputedNative -and $preComputedNative.Trim() -and $p.Completion -ne 'pscompletions') {
+                    $guarded = "if (Get-Command $cliName -ErrorAction SilentlyContinue) {`r`n$preComputedNative}"
+                    $resolved = @{ Source = 'Native'; Code = $guarded; PSCompletionsName = $null }
+                } else {
+                    $resolveSplat = @{ Cli = $cliName }
+                    if ($p.NativeCommandScript -and $p.Completion -ne 'pscompletions') {
+                        $resolveSplat['NativeCommand'] = $p.NativeCommandScript
+                    }
+                    if ($p.Completion -eq 'pscompletions') {
+                        $resolveSplat['PreferPSCompletions'] = $true
+                    }
+                    $resolved = Resolve-PackageCompletionSource @resolveSplat
+                }
+
                 if ($p.Completion -eq 'native' -and $resolved.Source -eq 'PSCompletions') {
                     $resolved = @{ Source = 'Skipped'; Code = $null; PSCompletionsName = $null }
                 }
