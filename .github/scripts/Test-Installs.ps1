@@ -868,24 +868,20 @@ if ($scoopPackages.Count -gt 0) {
             continue
         }
         $leaf = Get-ScoopAppLeaf -Name $pkg.PackageId
-        # Authoritative: ask scoop. Some packages (e.g. dotnet) lay their
-        # global install down outside %ProgramData%\scoop\apps depending on
-        # the manifest's installer (msi/inno can target Program Files), so a
-        # bare Test-Path on the apps tree produces false negatives. 'scoop
-        # list <leaf>' returns a PSObject row whose 'Info' column reads
-        # 'Global install' when scoop tracks it globally. (Note: there is
-        # NO '-g' flag for `scoop list` -- earlier versions of this check
-        # used `scoop list -g <leaf>` which scoop interpreted as a query
-        # filter and silently matched nothing, marking every install as a
-        # verification failure.)
+        # Authoritative scope probe: scoop's global apps dir is
+        # %ProgramData%\scoop\apps (user scope lives under ~\scoop\apps).
+        # A *\current* link under ProgramData -> global install, full stop.
+        # The previous probe variants -- Test-Path elsewhere, 'scoop list
+        # -g <leaf>' (which scoop interpreted as a filter), and 'scoop
+        # list <leaf>' Info-column match -- all produced false negatives
+        # for at least one package (dotnet under the latter on Heavy CI).
+        # ProgramData paths are the source of truth scoop itself uses.
+        $globalRoot = Join-Path ${env:ProgramData} 'scoop\apps'
+        $globalLink = Join-Path $globalRoot ("$leaf\current")
         Test-Verification -Name "scoop-global:$($pkg.Name)" `
-            -Description "Scoop should report '$($pkg.Name)' as a global install ('scoop list $leaf' Info column == 'Global install')" `
+            -Description "Scoop should have a global install for '$($pkg.Name)' at '$globalLink'" `
             -Test ([scriptblock]::Create(@"
-                `$rows = @(scoop list '$leaf' 2>`$null)
-                `$match = `$rows | Where-Object {
-                    `$_.Name -eq '$leaf' -and (`$_.Info -as [string]) -match 'Global'
-                }
-                [bool](`$match)
+                Test-Path -LiteralPath '$globalLink'
 "@))
     }
 }
