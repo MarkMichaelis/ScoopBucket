@@ -869,22 +869,22 @@ if ($scoopPackages.Count -gt 0) {
         }
         $leaf = Get-ScoopAppLeaf -Name $pkg.PackageId
         # Authoritative probe: ask scoop itself whether it tracks the
-        # app. `scoop list <leaf>` returns a row when the app is in
-        # scoop's installed database, at either scope, regardless of
+        # app. `scoop list <leaf>` emits a PSObject per installed app
+        # whose Name column equals the leaf name when the app is in
+        # scoop's installed database -- at either scope, regardless of
         # whether the manifest's installer actually creates a real
         # apps\<leaf>\current junction. (Several MarkMichaelis bucket
         # manifests are no-op "phantom" packages whose URL is a 0-byte
         # `blank` file and whose installer only emits a Write-Warning;
         # those legitimately appear in scoop's list but never produce a
-        # populated apps dir.)
+        # populated apps dir.) Match on the Name property directly to
+        # avoid text-formatting quirks (e.g. dotnet's row used to slip
+        # past a regex match on its own name).
         Test-Verification -Name "scoop-global:$($pkg.Name)" `
             -Description "Scoop should track '$($pkg.Name)' via 'scoop list $leaf'" `
             -Test ([scriptblock]::Create(@"
-                `$out = (& scoop list '$leaf' 2>`$null | Out-String)
-                # A real row starts with the leaf name followed by
-                # whitespace and a version column; the empty-list
-                # header ('Installed apps:') has no such row.
-                `$out -match "(?im)^\s*$([regex]::Escape($leaf))\s+\S+"
+                `$rows = @(& scoop list '$leaf' 2>`$null | Where-Object { `$_.Name -eq '$leaf' })
+                `$rows.Count -gt 0
 "@))
     }
 }
