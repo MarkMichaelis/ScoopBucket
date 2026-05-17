@@ -1,0 +1,129 @@
+---
+description: 'Project-specific instructions and conventions. Edit this file in the consuming project; it is never overwritten by Pull-SDLC.ai.ps1.'
+applyTo: '**/*'
+---
+
+<!--
+This file is OWNED BY THE CONSUMING PROJECT.
+
+It was created from `project.instructions.md.template` (shipped by
+IntelliSDLC.ai) and is never modified by `Pull-SDLC.ai.ps1`.
+
+Use this file for ANY project-specific guidance that AI agents should follow:
+project name, architecture, tech stack, build/test commands, key conventions,
+and domain glossary. The upstream instruction files (`CLAUDE.md`,
+`.github/copilot-instructions.md`, `.github/agents/*`, generic
+`.github/instructions/*`, `.github/skills/*`) must NOT contain
+project-specific content -- put it here instead.
+
+Delete the comment blocks below as you fill in each section.
+-->
+
+# Project Instructions
+
+## Project Overview
+
+<!--
+What is this project? One short paragraph: name, purpose, target users,
+high-level scope. Example: "MyApp is a Windows tray utility that watches a
+folder and forwards new files to a webhook."
+-->
+
+## Architecture
+
+<!--
+Major components, how they fit together, deployment model. A short bullet list
+or a 5-10 line diagram in text. Mention any patterns that the agent must
+preserve (DI composition root, message bus, layered architecture, etc.).
+-->
+
+## Tech Stack
+
+<!--
+Concrete versions and the project's actual dependencies. Include only what
+matters for code generation:
+
+| Layer            | Technology |
+|------------------|------------|
+| Language/Runtime | (e.g. C# / .NET 9) |
+| Web framework    | (e.g. ASP.NET Core, Minimal APIs) |
+| Data access      | (e.g. EF Core, Dapper) |
+| Testing          | (e.g. xUnit + Moq + FluentAssertions) |
+| External APIs    | (list significant ones) |
+-->
+
+## Build, Test, Format
+
+<!--
+The exact commands the agent should run. Replace if the project uses a
+solution file with a non-standard name, a Makefile, npm scripts, etc.
+
+```bash
+# Build
+dotnet build --no-restore
+
+# Test
+dotnet test --no-build --verbosity normal
+
+# Format
+dotnet format
+```
+
+If there are project-specific gotchas (a test that needs an env var, a
+secrets file required for run, etc.), document them here.
+-->
+
+## Run / Debug
+
+<!--
+How the project is normally run locally. Single CLI invocation? Multiple
+services? Docker compose? Document the canonical happy path.
+-->
+
+## Key Conventions
+
+<!--
+Project-specific rules that override or extend the upstream conventions.
+Examples:
+
+- All HTTP handlers return `Result<T>` rather than throwing.
+- Database migrations live in `src/MyApp.Migrations/` and use FluentMigrator.
+- All public DTOs are records with init-only setters.
+- Async methods that take a `CancellationToken` MUST forward it.
+
+Do NOT repeat upstream conventions (TDD, naming, exception handling, etc.).
+Only document deviations or additions.
+-->
+
+## Domain Glossary
+
+<!--
+Define domain terms the agent will encounter in code, comments, or commit
+messages. Helps with naming and refactoring. Example:
+
+- **Tenant** -- a customer organization. One Azure AD tenant maps to one
+  Tenant row in our DB.
+- **Run** -- a single batch invocation; rows in `dbo.Runs`.
+- **Synthesizer** -- the component that combines headlines into a digest.
+-->
+
+## External Dependencies & Secrets
+
+<!--
+List external services the project talks to and how secrets are configured.
+Example:
+
+- Stripe API: secret in `dotnet user-secrets` key `Stripe:SecretKey`
+- SendGrid: env var `SENDGRID_API_KEY`
+- Local PostgreSQL on port 5432 (see `docker-compose.dev.yml`)
+-->
+
+## Known Limitations / Don'ts
+
+<!--
+Project-specific traps to avoid. Example:
+
+- The legacy `LegacyService` class is being phased out; do not add new
+  callers.
+- `Console.WriteLine` is forbidden in library projects; use `ILogger`.
+-->

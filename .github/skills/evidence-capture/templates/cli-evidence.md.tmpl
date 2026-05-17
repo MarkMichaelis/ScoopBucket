@@ -1,0 +1,47 @@
+# Evidence: {{CHANGE_TITLE}}
+
+**Issue:** {{ISSUE_LINK}}
+**PR:** {{PR_LINK}}
+**HEAD SHA:** `{{HEAD_SHA}}`
+**Captured:** {{CAPTURE_TIMESTAMP_UTC}}
+**Working dir:** `{{WORKING_DIR}}`
+
+## What changed
+
+{{CHANGE_SUMMARY_FROM_ISSUE}}
+
+## Command
+
+```{{SHELL}}
+{{COMMAND}}
+```
+
+## Exit code
+
+`{{EXIT_CODE}}`
+
+## stdout
+
+```
+{{STDOUT}}
+```
+
+## stderr
+
+```
+{{STDERR}}
+```
+
+## Verification
+
+The output above matches the expected behavior described in the issue:
+
+- {{EXPECTED_OBSERVATION_1}}
+- {{EXPECTED_OBSERVATION_2}}
+
+## Reproduce locally
+
+```{{SHELL}}
+cd {{WORKING_DIR}}
+{{COMMAND}}
+```

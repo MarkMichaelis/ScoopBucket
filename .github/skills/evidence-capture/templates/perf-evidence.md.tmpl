@@ -1,0 +1,40 @@
+# Performance Evidence: {{CHANGE_TITLE}}
+
+**Issue:** {{ISSUE_LINK}}
+**PR:** {{PR_LINK}}
+**HEAD SHA:** `{{HEAD_SHA}}`
+**Baseline SHA:** `{{BASELINE_SHA}}`
+**Captured:** {{CAPTURE_TIMESTAMP_UTC}}
+**Hardware:** {{HARDWARE_SUMMARY}}
+
+## Benchmark
+
+```{{SHELL}}
+{{BENCHMARK_COMMAND}}
+```
+
+## Results
+
+| Scenario | Baseline (`{{BASELINE_SHA_SHORT}}`) | This PR (`{{HEAD_SHA_SHORT}}`) | Delta |
+|---|---:|---:|---:|
+| {{SCENARIO_1}} | {{BASE_1}} | {{HEAD_1}} | {{DELTA_1}} |
+| {{SCENARIO_2}} | {{BASE_2}} | {{HEAD_2}} | {{DELTA_2}} |
+| {{SCENARIO_3}} | {{BASE_3}} | {{HEAD_3}} | {{DELTA_3}} |
+
+Units: {{UNITS}} (lower is better)
+
+## Raw output -- baseline
+
+```
+{{BASELINE_RAW_OUTPUT}}
+```
+
+## Raw output -- this PR
+
+```
+{{HEAD_RAW_OUTPUT}}
+```
+
+## Interpretation
+
+{{INTERPRETATION_OF_RESULTS}}
