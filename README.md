@@ -286,13 +286,62 @@ Bundles that install many CLIs (`AIAgents`, `ClientBasePackages`,
 `DeveloperBasePackages`) additionally call `Invoke-CliCompletionsSweep
 -Force` at the end of their install, which (a) ensures the
 [`PSCompletions`](https://github.com/abgox/PSCompletions) module is
-installed and (b) registers a PSCompletions-fallback block for any CLI
-on `PATH` whose owning bundle didn't supply a native command. To
-re-run the sweep manually after installing other tools by hand:
+installed and (b) registers a PSCompletions-fallback block for every
+CLI declared by a bucket package whose owning bundle didn't supply a
+native command. To re-run the sweep manually after installing other
+tools by hand:
 
 ```powershell
 Import-Module D:\Git\ScoopBucket\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1 -Force
 Invoke-CliCompletionsSweep -Force
+```
+
+By default the sweep is **bucket-scoped**: it registers completions only
+for CLIs declared in bucket package manifests (the union of `CliCommands`
+across every `[Package]` returned by `Get-Package` whose `Completion`
+field is not `'none'`). To opt into the legacy behavior of registering
+completions for every executable on `PATH`, pass `-IncludeAllPath`:
+
+```powershell
+Register-AllCliCompletions -IncludeAllPath
+```
+
+`-Names <cli1>,<cli2>` overrides scope entirely.
+
+### Recovering from a broken completion block
+
+`PSCompletions` is third-party content and has occasionally shipped
+completions whose PSReadLine key handler references a property that
+doesn't exist on the object PSReadLine actually passes — the symptom
+is every Tab press emitting:
+
+```
+An exception occurred in custom key handler, see $error for more
+information: The property 'buffer' cannot be found on this object.
+```
+
+`Register-CliCompletion` defends against this by re-invoking the
+freshly-added completion through `[CommandCompletion]::CompleteInput`
+in a fresh `pwsh -NoProfile` child runspace. If validation errors the
+add is rolled back with `psc remove <cli>` and the result row shows
+`Action='Failed'` with the underlying reason — no sentinel block is
+written.
+
+If a broken handler nonetheless lands in your shell, restore Tab
+behavior immediately with:
+
+```powershell
+Set-PSReadLineKeyHandler -Chord Tab -Function MenuComplete
+```
+
+Then surgically remove the offending sentinel block:
+
+```powershell
+$profile = $PROFILE.AllUsersAllHosts
+$pattern = '(?ms)^\# ScoopBucket:CliCompletion:<CLI>:BEGIN \w+.*?^\# ScoopBucket:CliCompletion:<CLI>:END\r?\n?'
+$text = Get-Content $profile -Raw
+[System.IO.File]::WriteAllText($profile, ($text -replace $pattern, ''))
+psc remove <CLI>
 ```
 
 To repair completion blocks for CLIs whose owning bundles are already
