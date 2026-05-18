@@ -182,6 +182,101 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
         }
     }
     [Package]@{
+        # Issue #183. OneDrive.exe is a Windows OS component pre-installed
+        # per-machine under C:\Program Files\Microsoft OneDrive\ but is NOT
+        # on PATH and has no first-party PowerShell completer. We create a
+        # thin .cmd shim under ~\scoop\shims (already on PATH via scoop)
+        # so `onedrive` works from a terminal, and register a native
+        # argument completer for the curated set of top-level switches.
+        #
+        # Curated switches are sourced from long-standing community/MS
+        # support documentation of OneDrive client command-line flags.
+        # Microsoft does not publish a stable PowerShell completion
+        # grammar, so we deliberately keep this list short and obvious.
+        Name        = 'OneDrive CLI shim'
+        Installer   = 'custom'
+        CliCommands = @('onedrive')
+        Completion  = 'native'
+        Notes       = 'OneDrive.exe ships with Windows (per-machine install). This package only manages a launcher shim plus tab-completion -- it does not install OneDrive itself. Switches curated from MS support docs; no upstream PSCompletions catalog entry exists.'
+        ExpectedCompletions = @{
+            onedrive = @('/background','/reset','/shutdown','/restart','/addaccount','/configure_business','/silentconfig','/diag','/checkforupdates','/forcedeleteonedrive','/InternalAddBusiness')
+        }
+        CustomInstallScript = {
+            param($pkg)
+
+            $candidates = @(
+                'C:\Program Files\Microsoft OneDrive\OneDrive.exe',
+                'C:\Program Files (x86)\Microsoft OneDrive\OneDrive.exe'
+            )
+            $binary = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+            if (-not $binary) {
+                throw "OneDrive.exe not found. Tried: $($candidates -join ', '). OneDrive ships with Windows; if it is missing, run 'winget install --id Microsoft.OneDrive' first."
+            }
+
+            $shimDir = Join-Path $env:USERPROFILE 'scoop\shims'
+            if (-not (Test-Path -LiteralPath $shimDir)) {
+                throw "Scoop shim directory '$shimDir' not found. Install scoop first (this bucket depends on it)."
+            }
+
+            $shimPath = Join-Path $shimDir 'onedrive.cmd'
+            # @start "" "<binary>" %* detaches the GUI from the terminal so
+            # the shell prompt returns immediately. The empty "" is the
+            # window-title arg required by cmd's start command when the path
+            # itself is quoted.
+            $content = "@echo off`r`n" +
+                       "@rem ScoopBucket:OneDriveShim -- managed by MicrosoftOffice365.ps1 (issue #183)`r`n" +
+                       "@start `"`" `"$binary`" %*`r`n"
+            Set-Content -LiteralPath $shimPath -Value $content -Encoding ASCII -NoNewline
+            Write-Host "  Created OneDrive shim: $shimPath -> $binary"
+        }
+        CustomUninstallScript = {
+            param($pkg)
+            $shimDir = Join-Path $env:USERPROFILE 'scoop\shims'
+            if (-not (Test-Path -LiteralPath $shimDir)) { return }
+            $shimPath = Join-Path $shimDir 'onedrive.cmd'
+            if (-not (Test-Path -LiteralPath $shimPath)) { return }
+            $raw = Get-Content -LiteralPath $shimPath -Raw -ErrorAction SilentlyContinue
+            if ($raw -and $raw -match 'ScoopBucket:OneDriveShim') {
+                Remove-Item -LiteralPath $shimPath -Force
+                Write-Host "  Removed OneDrive shim: $shimPath"
+            }
+        }
+        VerifyScript = {
+            $shimDir = Join-Path $env:USERPROFILE 'scoop\shims'
+            if (-not (Test-Path -LiteralPath $shimDir)) { return $false }
+            $shimPath = Join-Path $shimDir 'onedrive.cmd'
+            if (-not (Test-Path -LiteralPath $shimPath)) { return $false }
+            $raw = Get-Content -LiteralPath $shimPath -Raw -ErrorAction SilentlyContinue
+            if (-not $raw -or $raw -notmatch 'ScoopBucket:OneDriveShim') { return $false }
+            return $true
+        }
+        NativeCommandScript = {
+            param($Cli)
+
+            $switchMap = @{
+                onedrive = @(
+                    '/background','/reset','/shutdown','/restart','/addaccount',
+                    '/configure_business','/silentconfig','/diag','/checkforupdates',
+                    '/forcedeleteonedrive','/InternalAddBusiness'
+                )
+            }
+
+            $switches = $switchMap[$Cli]
+            if (-not $switches) { return '' }
+            $list = ($switches | ForEach-Object { "'$_'" }) -join ','
+@"
+Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @($list) |
+        Where-Object { `$_ -like "`$wordToComplete*" } |
+        ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+        }
+}
+"@
+        }
+    }
+    [Package]@{
         Name        = 'Claude for Excel'
         Installer   = 'custom'
         DependsOn   = @('Microsoft 365 Apps for Enterprise')
