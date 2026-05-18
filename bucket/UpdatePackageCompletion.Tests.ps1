@@ -63,7 +63,15 @@ if (Test-Path `$scoopBucketPsd1) { Import-Module `$scoopBucketPsd1 -Force } else
         Id                  = 'Test.AutoWithNative'
         CliCommands         = @('$($script:onPathCli)-native')
         Completion          = 'auto'
-        NativeCommandScript = { 'completion-source' }
+        NativeCommandScript = { 'auto-native-completion-source' }
+    }
+    [Package]@{
+        Name                = 'NativeOnly'
+        Installer           = 'winget'
+        Id                  = 'Test.NativeOnly'
+        CliCommands         = @('$($script:onPathCli)-nativeonly')
+        Completion          = 'native'
+        NativeCommandScript = { 'pure-native-completion-source' }
     }
     [Package]@{
         Name        = 'NoneMode'
@@ -88,7 +96,7 @@ Invoke-PackageInstall -Packages `$Packages -Bundle 'UpdateCompletionBundle'
     # of this Describe block.
     $script:shimDir = Join-Path $script:tmpBucket '_shims'
     New-Item -ItemType Directory -Path $script:shimDir | Out-Null
-    foreach ($shimName in @("$($script:onPathCli)-twin.ps1", "$($script:onPathCli)-native.ps1", "$($script:onPathCli)-none.ps1")) {
+    foreach ($shimName in @("$($script:onPathCli)-twin.ps1", "$($script:onPathCli)-native.ps1", "$($script:onPathCli)-nativeonly.ps1", "$($script:onPathCli)-none.ps1")) {
         Set-Content -Path (Join-Path $script:shimDir $shimName) -Value '# stub' -Encoding UTF8
     }
     $script:savedPath = $env:PATH
@@ -119,13 +127,39 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
         $offPath.Reason | Should -Match 'not on PATH'
     }
 
-    It "skips Completion='auto' packages with a NativeCommandScript" {
+    It "registers Completion='auto' packages with a NativeCommandScript using pre-captured native output" {
+        # Regression for #170: previously skipped with reason 'native scriptblock'.
+        # Get-BundlePackages pre-captures the NativeCommandScript output
+        # into NativeCommandOutputs[$cli], so we can now write a native
+        # block during a profile-repair walk without re-running the
+        # original installer.
         $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
-            -ProfilePath $script:profilePath -WhatIf
+            -ProfilePath $script:profilePath
         $native = $results | Where-Object Cli -EQ "$($script:onPathCli)-native"
         $native | Should -Not -BeNullOrEmpty
-        $native.Action | Should -Be 'Skipped'
-        $native.Reason | Should -Match 'native scriptblock'
+        $native.Action | Should -Be 'Registered'
+        $native.Source | Should -Be 'Native'
+        $native.Mode   | Should -Be 'native'
+
+        # The block written to the profile must contain the captured
+        # native completion source, wrapped in the standard
+        # Get-Command guard.
+        $profileContent = Get-Content -Raw -Encoding UTF8 $script:profilePath
+        $profileContent | Should -Match 'auto-native-completion-source'
+        $profileContent | Should -Match "ScoopBucket:CliCompletion:$($script:onPathCli)-native:BEGIN v1"
+    }
+
+    It "registers Completion='native' packages whose CLI is on PATH" {
+        $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
+            -ProfilePath $script:profilePath
+        $nativeOnly = $results | Where-Object Cli -EQ "$($script:onPathCli)-nativeonly"
+        $nativeOnly | Should -Not -BeNullOrEmpty
+        $nativeOnly.Action | Should -Be 'Registered'
+        $nativeOnly.Source | Should -Be 'Native'
+        $nativeOnly.Mode   | Should -Be 'native'
+
+        $profileContent = Get-Content -Raw -Encoding UTF8 $script:profilePath
+        $profileContent | Should -Match 'pure-native-completion-source'
     }
 
     It "ignores Completion='none' and packages without CliCommands" {
@@ -135,7 +169,7 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
         ($results | Where-Object Package -EQ 'NoCliCommands')          | Should -BeNullOrEmpty
     }
 
-    It 'reports WhatIf for eligible CLIs (pscompletions + auto-no-native) when -WhatIf supplied' {
+    It 'reports WhatIf for eligible CLIs (pscompletions + auto-no-native + native) when -WhatIf supplied' {
         $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
             -ProfilePath $script:profilePath -WhatIf
         $bw = $results | Where-Object Cli -EQ $script:onPathCli
@@ -149,6 +183,17 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
         # auto-mode without NativeCommandScript collapses to pscompletions
         # because that's the only registration path we can safely repair.
         $twin.Mode | Should -Be 'pscompletions'
+
+        # auto-mode WITH a NativeCommandScript now repairs via native too.
+        $autoNative = $results | Where-Object Cli -EQ "$($script:onPathCli)-native"
+        $autoNative | Should -Not -BeNullOrEmpty
+        $autoNative.Action | Should -Be 'WhatIf'
+        $autoNative.Mode   | Should -Be 'native'
+
+        $nativeOnly = $results | Where-Object Cli -EQ "$($script:onPathCli)-nativeonly"
+        $nativeOnly | Should -Not -BeNullOrEmpty
+        $nativeOnly.Action | Should -Be 'WhatIf'
+        $nativeOnly.Mode   | Should -Be 'native'
     }
 
     It "preserves existing sentinel blocks unless -Force is passed" {
