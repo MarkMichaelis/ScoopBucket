@@ -253,6 +253,16 @@ Describe 'Specific cross-bundle placement contracts' -Tag 'Light','Bundle' {
         $script:byBundle.ClientBasePackages.Name | Should -Not -Contain 'Claude for Excel'
     }
 
+    It 'OneDrive CLI shim is owned by the MicrosoftOffice365 bundle' {
+        # OneDrive.exe is a Windows OS component already present on every box,
+        # so we colocate its curated shim + tab-completion with the rest of
+        # the Microsoft 365 surface (same file already owns the OneDrive
+        # tenant-redirection policy). See issue #183.
+        $script:byBundle.MicrosoftOffice365.Name | Should -Contain 'OneDrive CLI shim'
+        $script:byBundle.AIAgents.Name           | Should -Not -Contain 'OneDrive CLI shim'
+        $script:byBundle.OSBasePackages.Name     | Should -Not -Contain 'OneDrive CLI shim'
+    }
+
     It 'Claude Desktop is owned by the AIAgents bundle' {
         $script:byBundle.AIAgents.Name           | Should -Contain 'Claude Desktop'
         $script:byBundle.ClientBasePackages.Name | Should -Not -Contain 'Claude Desktop'
