@@ -619,6 +619,83 @@ function Set-CompletionProfileBlock {
     return $newBlock
 }
 
+function Invoke-PscAdd {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Cli)
+    & psc add $Cli 2>$null | Out-Null
+}
+
+function Invoke-PscRemove {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Cli)
+    try { & psc remove $Cli 2>$null | Out-Null } catch { }
+}
+
+function Test-PSCompletionsHandler {
+    <#
+    .SYNOPSIS
+        Internal: validate that a freshly-added PSCompletions entry for
+        `$Cli` doesn't crash tab completion. Runs in a fresh pwsh
+        -NoProfile child runspace so it doesn't poison the caller's
+        session. Returns @{ Ok = $bool; Reason = <string> }.
+    .DESCRIPTION
+        Defensive guard for #179. PSCompletions is third-party content
+        and has historically shipped completions whose PSReadLine key
+        handler references properties that don't exist on the object
+        PSReadLine actually passes (e.g. lowercase `.buffer`). When
+        that happens the only feedback the user gets is a broken Tab
+        key in every shell after the next profile reload — extremely
+        difficult to diagnose. This probe attempts a synthetic
+        CommandCompletion against `<cli> ` and treats any error as a
+        validation failure so the caller can roll back.
+    #>
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Cli)
+
+    $pwsh = $null
+    try { $pwsh = (Get-Process -Id $PID).Path } catch { }
+    if (-not $pwsh) { $pwsh = 'pwsh' }
+
+    $probe = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+try { Import-Module PSReadLine -Force -ErrorAction Stop } catch { }
+try { Import-Module PSCompletions -Force -ErrorAction Stop } catch {
+    Write-Output ('__SBVAL_ERR__' + `$_.Exception.Message); return
+}
+`$Error.Clear()
+try {
+    `$line = '$Cli '
+    [void][System.Management.Automation.CommandCompletion]::CompleteInput(`$line, `$line.Length, `$null)
+} catch {
+    Write-Output ('__SBVAL_ERR__' + `$_.Exception.Message); return
+}
+if (`$Error.Count) {
+    `$msgs = (`$Error | ForEach-Object { `$_.Exception.Message } | Select-Object -Unique) -join '; '
+    Write-Output ('__SBVAL_ERR__' + `$msgs); return
+}
+Write-Output '__SBVAL_OK__'
+"@
+
+    $safe = ($Cli -replace '[^A-Za-z0-9_.-]','_')
+    $tmp = Join-Path $env:TEMP "ScoopBucket-pscval-$safe-$PID.ps1"
+    try {
+        Set-Content -Path $tmp -Value $probe -Encoding UTF8 -WhatIf:$false
+        $out = & $pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tmp 2>$null | Out-String
+        if ($out -match '__SBVAL_ERR__(.+)') {
+            return [pscustomobject]@{ Ok = $false; Reason = $Matches[1].Trim() }
+        }
+        if ($out -match '__SBVAL_OK__') {
+            return [pscustomobject]@{ Ok = $true; Reason = $null }
+        }
+        return [pscustomobject]@{ Ok = $false; Reason = "PSCompletions validation produced no verdict for '$Cli'." }
+    } catch {
+        return [pscustomobject]@{ Ok = $false; Reason = $_.Exception.Message }
+    } finally {
+        Remove-Item -Path $tmp -ErrorAction Ignore
+    }
+}
+
 function Register-CliCompletion {
     <#
     .SYNOPSIS
@@ -674,9 +751,25 @@ function Register-CliCompletion {
         if ($PSCmdlet.ShouldProcess($Cli, $pscAction)) {
             try {
                 Import-Module PSCompletions -ErrorAction Stop
-                & psc add $Cli 2>$null | Out-Null
+                Invoke-PscAdd -Cli $Cli
             } catch {
                 Write-Warning "psc add $Cli failed: $($_.Exception.Message)"
+            }
+
+            # #179: validate the freshly-added PSCompletions handler in a
+            # child runspace. If CommandCompletion errors (e.g. the handler
+            # references a property the input object doesn't expose, as has
+            # happened with several PSCompletions catalog entries), roll
+            # the add back via `psc remove` and report Action=Failed instead
+            # of polluting the user's profile.
+            $validation = Test-PSCompletionsHandler -Cli $Cli
+            if (-not $validation.Ok) {
+                Write-Warning "Register-CliCompletion: PSCompletions handler for '$Cli' failed validation: $($validation.Reason). Rolling back."
+                Invoke-PscRemove -Cli $Cli
+                return [pscustomobject]@{
+                    Cli         = $Cli; Source = 'PSCompletions'; Action = 'Failed'
+                    ProfilePath = $target; Reason = $validation.Reason
+                }
             }
         }
     }
@@ -721,21 +814,109 @@ function Install-PSCompletionsModule {
     }
 }
 
+function Get-BucketCliName {
+    <#
+    .SYNOPSIS
+        Internal: union of CLI command names declared by every bundle's
+        [Package] objects (excluding those with Completion='none').
+
+        Used as the default scope for Register-AllCliCompletions so we
+        only register completions for the CLIs the bucket actually
+        manages — not every executable on PATH (#180).
+    #>
+    [OutputType([string[]])]
+    [CmdletBinding()]
+    param([string]$BucketPath)
+
+    $set = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $pkgArgs = @{}
+    if ($BucketPath) { $pkgArgs['BucketPath'] = $BucketPath }
+    $packages = @()
+    try {
+        $packages = Get-Package @pkgArgs -ErrorAction Stop
+    } catch {
+        Write-Warning "Get-BucketCliName: Get-Package failed: $($_.Exception.Message)"
+    }
+    foreach ($pkg in $packages) {
+        # Skip packages that explicitly opt out of completion registration.
+        if ($pkg.Completion -and ([string]$pkg.Completion).ToLowerInvariant() -eq 'none') { continue }
+        foreach ($cli in @($pkg.CliCommands)) {
+            if ($cli) { [void]$set.Add([string]$cli) }
+        }
+    }
+    return @($set | Sort-Object)
+}
+
 function Register-AllCliCompletions {
+    <#
+    .SYNOPSIS
+        Register tab-completion for CLIs declared by this bucket's
+        bundles (default), an explicit -Names list, or every executable
+        on PATH (-IncludeAllPath).
+
+    .DESCRIPTION
+        Default scope is the union of `CliCommands` across every
+        [Package] returned by Get-Package whose `Completion` field is
+        not 'none'. This avoids the surprising and slow behavior
+        of sweeping every binary on PATH and registering PSCompletions
+        entries for tools the user never asked about (#180).
+
+        -IncludeAllPath restores the legacy PATH-sweep behavior for
+        power users who want completions registered for every CLI
+        they happen to have installed.
+
+        -Names <subset> overrides scope entirely.
+
+    .PARAMETER Force
+        Replace existing sentinel-delimited completion blocks instead
+        of preserving them.
+
+    .PARAMETER ProfilePath
+        Override the AllUsersAllHosts profile target (testing).
+
+    .PARAMETER Names
+        Explicit CLI names. When supplied, neither bucket discovery
+        nor PATH sweep runs.
+
+    .PARAMETER IncludeAllPath
+        Opt into the legacy PATH sweep: enumerate every
+        `Get-Command -CommandType Application` binary and try to
+        register completion for each.
+
+    .PARAMETER BucketPath
+        Override the auto-detected bucket directory used when
+        discovering CLIs from declared packages.
+    #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     [OutputType([pscustomobject[]])]
     param(
         [switch]$Force,
         [string]$ProfilePath,
-        [string[]]$Names
+        [string[]]$Names,
+        [switch]$IncludeAllPath,
+        [string]$BucketPath
     )
 
-    if (-not $Names) {
+    $scope = 'Bucket'
+    if ($Names) {
+        $scope = 'Explicit'
+    } elseif ($IncludeAllPath) {
+        $scope = 'PathSweep'
         $Names = Get-Command -CommandType Application -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty Name -Unique |
             ForEach-Object { [System.IO.Path]::GetFileNameWithoutExtension($_) } |
             Sort-Object -Unique
+    } else {
+        $bucketArgs = @{}
+        if ($BucketPath) { $bucketArgs['BucketPath'] = $BucketPath }
+        $Names = Get-BucketCliName @bucketArgs
+        if (-not $Names) {
+            Write-Warning "Register-AllCliCompletions: no bucket-declared CLIs found. Pass -Names <cli...> or -IncludeAllPath to scan PATH."
+            return @()
+        }
     }
+
+    Write-Verbose "Register-AllCliCompletions: scope=$scope, registering $($Names.Count) CLI(s)."
 
     $results = foreach ($n in $Names) {
         Register-CliCompletion -Cli $n -Force:$Force -ProfilePath $ProfilePath `
@@ -743,7 +924,7 @@ function Register-AllCliCompletions {
     }
 
     $byAction = $results | Group-Object Action | ForEach-Object { "$($_.Name)=$($_.Count)" }
-    Write-Host "Completion registration summary: $($byAction -join ', ')"
+    Write-Host "Completion registration summary [scope=$scope]: $($byAction -join ', ')"
     return @($results)
 }
 
@@ -753,7 +934,9 @@ function Invoke-CliCompletionsSweep {
     param(
         [switch]$Force,
         [string]$ProfilePath,
-        [string[]]$Names
+        [string[]]$Names,
+        [switch]$IncludeAllPath,
+        [string]$BucketPath
     )
 
     Write-Host 'Configuring PowerShell tab completion for installed CLI tools...'
@@ -763,6 +946,8 @@ function Invoke-CliCompletionsSweep {
     $splat = @{ Force = [bool]$Force }
     if ($ProfilePath) { $splat['ProfilePath'] = $ProfilePath }
     if ($Names) { $splat['Names'] = $Names }
+    if ($IncludeAllPath) { $splat['IncludeAllPath'] = $true }
+    if ($BucketPath) { $splat['BucketPath'] = $BucketPath }
 
     $results = Register-AllCliCompletions @splat -WhatIf:$WhatIfPreference
 
