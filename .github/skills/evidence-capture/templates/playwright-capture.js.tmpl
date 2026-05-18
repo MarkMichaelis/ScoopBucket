@@ -1,0 +1,84 @@
+// playwright-capture.js -- generic UI evidence capture script.
+//
+// Usage:
+//   node playwright-capture.js \
+//     --url https://example.com/page-under-test \
+//     --out .evidence/phase-5b-2026-05-22T120000Z \
+//     --baseline-sha HEAD~1 \
+//     --head-sha HEAD
+//
+// Produces:
+//   <out>/recording.mp4   -- screen recording of the scripted interaction
+//   <out>/before.png      -- pre-interaction screenshot (full page)
+//   <out>/after.png       -- post-interaction screenshot (full page)
+//
+// Customize the runScenario function for the change under test. Anything
+// requiring authentication should consume a storage state JSON file passed
+// via --storage-state.
+
+const { chromium } = require('playwright');
+const path = require('node:path');
+const fs = require('node:fs');
+
+function parseArgs(argv) {
+  const args = {};
+  for (let i = 2; i < argv.length; i += 2) {
+    const key = argv[i].replace(/^--/, '');
+    args[key] = argv[i + 1];
+  }
+  return args;
+}
+
+async function runScenario(page) {
+  // EDIT THIS for the change under test.
+  // Default scenario: load the page, wait for it to settle.
+  await page.waitForLoadState('networkidle');
+  // Example interaction (replace per-change):
+  //   await page.getByRole('button', { name: 'Submit' }).click();
+  //   await page.waitForLoadState('networkidle');
+}
+
+(async () => {
+  const args = parseArgs(process.argv);
+  const url = args.url;
+  const out = args.out || '.evidence/ui';
+  const storageState = args['storage-state']
+    ? path.resolve(args['storage-state'])
+    : undefined;
+
+  if (!url) {
+    console.error('Missing --url');
+    process.exit(2);
+  }
+
+  fs.mkdirSync(out, { recursive: true });
+
+  const browser = await chromium.launch();
+  const context = await browser.newContext({
+    storageState,
+    recordVideo: {
+      dir: out,
+      size: { width: 1280, height: 800 },
+    },
+    viewport: { width: 1280, height: 800 },
+  });
+  const page = await context.newPage();
+
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.screenshot({ path: path.join(out, 'before.png'), fullPage: true });
+
+  await runScenario(page);
+
+  await page.screenshot({ path: path.join(out, 'after.png'), fullPage: true });
+
+  // Close context first to finalize the video, then rename it.
+  const video = page.video();
+  await context.close();
+  await browser.close();
+
+  if (video) {
+    const finalPath = path.join(out, 'recording.mp4');
+    fs.renameSync(await video.path(), finalPath);
+    console.log('Wrote', finalPath);
+  }
+})();
