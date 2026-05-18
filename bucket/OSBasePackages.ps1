@@ -182,7 +182,7 @@ Register-ArgumentCompleter -Native -CommandName code -ScriptBlock {
         # tab-completion is registered for them. The full set is still on
         # PATH via scoop's shims; users who want completion for additional
         # tools can extend this list.
-        CliCommands = @('handle64','procexp64','autoruns','autorunsc','accesschk','psexec','pslist','sigcheck','procdump','tcpview')
+        CliCommands = @('handle','procexp','autoruns','autorunsc','accesschk','psexec','pslist','sigcheck','procdump','tcpview')
         Completion  = 'native'
         # Sysinternals tools share a small, stable set of universal flags
         # (Win32 conventions: both slash- and dash-prefixed). No upstream
@@ -204,8 +204,8 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
 "@
         }
         ExpectedCompletions = @{
-            handle64   = @('/?','/accepteula','/nobanner')
-            procexp64  = @('/?','/accepteula','/nobanner')
+            handle     = @('/?','/accepteula','/nobanner')
+            procexp    = @('/?','/accepteula','/nobanner')
             autoruns   = @('/?','/accepteula','/nobanner')
             autorunsc  = @('/?','/accepteula','/nobanner')
             accesschk  = @('/?','/accepteula','/nobanner')
