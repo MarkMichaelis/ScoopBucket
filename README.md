@@ -295,6 +295,26 @@ Import-Module D:\Git\ScoopBucket\module\MarkMichaelis.ScoopBucket\MarkMichaelis.
 Invoke-CliCompletionsSweep -Force
 ```
 
+To repair completion blocks for CLIs whose owning bundles are already
+installed -- for example after restoring a dev machine where the
+`AllUsersAllHosts` profile wasn't backed up, or after installing
+`PSCompletions` *after* the CLIs it covers -- use the declarative-bundle
+walker `Update-PackageCompletion`. It scans every declarative `[Package]`
+across the bucket, finds CLIs on `PATH` with no sentinel block in the
+profile, and registers them. Native, `PSCompletions`, and `auto`
+completion modes are all repaired:
+
+```powershell
+Import-Module MarkMichaelis.ScoopBucket -Force
+Update-PackageCompletion          # gap-fill: register only missing blocks
+Update-PackageCompletion -Force   # refresh every eligible block
+Update-PackageCompletion -WhatIf  # preview what would change
+```
+
+Native repairs reuse the `NativeCommandOutputs` text captured by
+`Get-BundlePackages` in its child runspace, so no re-install or live
+`<cli> completion powershell` call is needed.
+
 Behavior:
 
 - Each CLI is resolved in order: caller-supplied `-NativeCommand`

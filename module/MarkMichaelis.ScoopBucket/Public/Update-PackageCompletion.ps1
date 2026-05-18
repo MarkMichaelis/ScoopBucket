@@ -2,26 +2,36 @@ function Update-PackageCompletion {
     <#
     .SYNOPSIS
         Repair / refresh tab-completion sentinel blocks for every
-        Package in the bucket whose CliCommand is on PATH and whose
-        Completion mode requests PSCompletions-backed completion.
+        Package in the bucket whose CliCommand is on PATH but has no
+        block in $PROFILE.AllUsersAllHosts.
 
     .DESCRIPTION
-        Solves the "I installed Bitwarden CLI, then installed
-        PSCompletions, but `bw <Tab>` still only completes files"
-        scenario.
+        Solves two related "I have the CLI installed but `<cli> <Tab>`
+        only completes file names" scenarios:
 
-        The cause: when the CLI was originally installed, PSCompletions
-        was missing, so Register-PackageCompletion fell through to its
-        'Skipped' branch and never wrote a sentinel block. Installing
-        PSCompletions afterwards doesn't retroactively re-register the
-        already-installed CLIs.
+          (1) "I installed Bitwarden CLI, then installed PSCompletions,
+              but `bw <Tab>` still only completes files." Originally
+              Register-PackageCompletion fell through to its 'Skipped'
+              branch because PSCompletions wasn't there yet.
+
+          (2) "I restored my dev machine — the CLIs are back on PATH but
+              $PROFILE.AllUsersAllHosts was not part of the backup, so
+              no sentinel blocks exist." For native-completion CLIs
+              (`gh`, `rg`, …) this used to require running the original
+              Install-Package per bundle.
 
         Update-PackageCompletion walks every declarative bundle via
         Get-BundlePackages, finds Packages whose Completion mode is
-        'pscompletions' (or 'auto' without a NativeCommandScript) and
-        whose CliCommands resolve via Get-Command, then calls
-        Register-PackageCompletion for each. Existing sentinel blocks
-        are preserved unless -Force is passed.
+        'pscompletions', 'native', or 'auto' (with or without a
+        NativeCommandScript), confirms each CliCommand resolves via
+        Get-Command, and calls Register-PackageCompletion when no block
+        exists in the profile. Existing sentinel blocks are preserved
+        unless -Force is passed.
+
+        Native-mode repairs use the NativeCommandOutputs hashtable that
+        Get-BundlePackages pre-captures in its child runspace — so the
+        repair walks need no access to the original `<cli> completion
+        powershell` command and no re-install.
 
         Called automatically by the PSCompletions bundle's
         PostInstallScript so `Install-Package PSCompletions` heals
@@ -78,24 +88,19 @@ function Update-PackageCompletion {
             if (-not $p.CliCommands -or $p.CliCommands.Count -eq 0) { continue }
             $mode = "$($p.Completion)"
             if ([string]::IsNullOrWhiteSpace($mode)) { $mode = 'auto' }
-            if ($mode -notin @('pscompletions','auto')) { continue }
+            if ($mode -notin @('pscompletions','auto','native')) { continue }
 
-            # 'auto' with a native scriptblock is best-handled by the
-            # original install path which has the actual native command.
-            # We can only safely repair pscompletions-mode CLIs here.
+            # Decide the effective registration mode per package:
+            #   - 'native' or 'auto' + NativeCommandScript -> native (rebuild
+            #     the block from NativeCommandOutputs, the text the bundle
+            #     loader captured at $Packages-export time).
+            #   - 'auto' without a NativeCommandScript     -> pscompletions
+            #     (only safe repair path when no native source exists).
+            #   - 'pscompletions'                           -> pscompletions.
+            $hasNative = [bool]$p.HasNativeCommandScript -or [bool]$p.NativeCommandScript
             $effectiveMode = $mode
             if ($mode -eq 'auto') {
-                if ($p.HasNativeCommandScript) {
-                    foreach ($cli in $p.CliCommands) {
-                        $results.Add([pscustomobject]@{
-                            Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
-                            Mode = $mode; Action = 'Skipped'; Source = 'Skipped'
-                            Reason = "Package declares Completion='auto' with a native scriptblock; re-run Install-Package to refresh native completion."
-                        })
-                    }
-                    continue
-                }
-                $effectiveMode = 'pscompletions'
+                $effectiveMode = if ($hasNative) { 'native' } else { 'pscompletions' }
             }
 
             foreach ($cli in $p.CliCommands) {
@@ -119,7 +124,44 @@ function Update-PackageCompletion {
                     continue
                 }
 
-                $action = "Register PSCompletions block for '$cli'"
+                # When the package was loaded via Get-BundlePackages
+                # (PSCustomObject path) the live NativeCommandScript
+                # was stripped by JSON serialization, but its pre-invoked
+                # output is preserved in NativeCommandOutputs[$cli].
+                # Synthesize a scriptblock that re-emits that text so
+                # Register-PackageCompletion's resolver can wrap it in
+                # the standard Get-Command guard. For real in-memory
+                # [Package] callers we just forward the live scriptblock.
+                $nativeArg = $null
+                if ($effectiveMode -eq 'native') {
+                    if ($p.NativeCommandScript -is [scriptblock]) {
+                        $nativeArg = $p.NativeCommandScript
+                    } else {
+                        $preCaptured = $null
+                        $no = $p.NativeCommandOutputs
+                        if ($no) {
+                            if ($no -is [hashtable] -and $no.ContainsKey($cli)) {
+                                $preCaptured = [string]$no[$cli]
+                            } elseif ($no.PSObject -and ($no.PSObject.Properties.Name -contains $cli)) {
+                                $preCaptured = [string]$no.$cli
+                            }
+                        }
+                        if ($preCaptured -and $preCaptured.Trim()) {
+                            $literal = $preCaptured.Replace("'","''")
+                            $nativeArg = [scriptblock]::Create("'$literal'")
+                        }
+                    }
+                    if (-not $nativeArg) {
+                        $results.Add([pscustomobject]@{
+                            Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
+                            Mode = $effectiveMode; Action = 'Skipped'; Source = 'Skipped'
+                            Reason = "No pre-captured native completion source for '$cli' (NativeCommandOutputs empty); re-run Install-Package to refresh."
+                        })
+                        continue
+                    }
+                }
+
+                $action = "Register $effectiveMode completion block for '$cli'"
                 if (-not $PSCmdlet.ShouldProcess($profileTarget, $action)) {
                     $results.Add([pscustomobject]@{
                         Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
@@ -133,6 +175,7 @@ function Update-PackageCompletion {
                     Cli   = $cli
                     Mode  = $effectiveMode
                 }
+                if ($nativeArg) { $registerArgs['NativeCommand'] = $nativeArg }
                 if ($ProfilePath) { $registerArgs['ProfilePath'] = $ProfilePath }
 
                 try {
