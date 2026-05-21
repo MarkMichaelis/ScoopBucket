@@ -196,6 +196,9 @@ Current members:
   user reconfigures KFM via OneDrive Settings -> Backup -> Manage
   backup after re-sign-in.
 
+  Run `Get-Help .\bucket\MarkMichaelisOneDriveConfiguration.ps1 -Full`
+  for the full parameter reference and worked examples.
+
 ## Authoring guidelines
 
 ### Manifest versioning
