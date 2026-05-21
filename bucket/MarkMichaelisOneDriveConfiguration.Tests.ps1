@@ -964,6 +964,39 @@ Describe 'Plan-then-execute architecture' -Tag 'Light' {
     }
 }
 
+Describe 'Get-OneDriveMigrationSummaryLines' -Tag 'Light' {
+    It 'renders the detailed summary sections in a stable grouped structure' {
+        $accounts = @(
+            [pscustomobject]@{ AccountType = 'Business'; DisplayName = 'IntelliTect'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect' }
+        )
+        $sharePointSites = @(
+            [pscustomobject]@{ CurrentPath = 'C:\Users\Mark\IntelliTect - Engineering'; DesiredPath = 'C:\OneDrive\IntelliTect\IntelliTect - Engineering' }
+        )
+        $plan = @(
+            [pscustomobject]@{ Type='RegistryBackup'; Target='C:\Backup.reg'; CurrentValue=$null; DesiredValue=$null; Status='Done'; SkipReason=$null; FailureReason=$null },
+            [pscustomobject]@{ Type='WritePolicy'; Target='HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir\tid-1'; CurrentValue='old'; DesiredValue='new'; Status='Done'; SkipReason=$null; FailureReason=$null },
+            [pscustomobject]@{ Type='MoveAccount'; Target='C:\OneDrive\OneDrive - IntelliTect'; CurrentValue='C:\Users\me\OneDrive - IntelliTect'; DesiredValue='C:\OneDrive\OneDrive - IntelliTect'; Status='Skipped'; SkipReason='Current path already matches the canonical target.'; FailureReason=$null },
+            [pscustomobject]@{ Type='RewriteSPCache'; Target='C:\OneDrive\IntelliTect\IntelliTect - Engineering'; CurrentValue='C:\Users\Mark\IntelliTect - Engineering'; DesiredValue='C:\OneDrive\IntelliTect\IntelliTect - Engineering'; Status='Done'; SkipReason=$null; FailureReason=$null },
+            [pscustomobject]@{ Type='RewriteKfm'; Target='KFM'; CurrentValue='C:\Old\Documents'; DesiredValue='C:\New\Documents'; Status='Failed'; SkipReason=$null; FailureReason='boom' },
+            [pscustomobject]@{ Type='Verify'; Target='C:\OneDrive\OneDrive - IntelliTect'; CurrentValue='old'; DesiredValue='new'; Status='Done'; SkipReason=$null; FailureReason=$null }
+        )
+
+        $summary = (Get-OneDriveMigrationSummaryLines -Accounts $accounts -SharePointSites $sharePointSites -Plan $plan -DeferredCleanupPaths @('C:\Old.migrated-123')) -join "`n"
+
+        $summary | Should -Match 'Discovered Accounts:'
+        $summary | Should -Match 'Discovered SharePoint Sites:'
+        $summary | Should -Match 'Policy Writes:'
+        $summary | Should -Match 'Moves:'
+        $summary | Should -Match 'KFM Rewrites:'
+        $summary | Should -Match 'SharePoint Cache Rewrites:'
+        $summary | Should -Match 'Verification Results:'
+        $summary | Should -Match 'Backup Location:'
+        $summary | Should -Match 'MRU Warning:'
+        $summary | Should -Match '\.migrated-\* directories awaiting cleanup:'
+        $summary | Should -Match 'Failed: boom \| KFM'
+    }
+}
+
 Describe 'Resolve-FreshSyncAccounts' -Tag 'Light' {
     BeforeAll {
         $script:b1 = [pscustomobject]@{

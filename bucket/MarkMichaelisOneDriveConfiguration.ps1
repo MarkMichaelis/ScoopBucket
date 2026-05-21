@@ -1308,7 +1308,7 @@ function Invoke-OneDriveMigrationPlan {
                     } else {
                         $sameVolume = Test-IsSameVolume -Source $item.CurrentValue -Destination $item.DesiredValue
                         $registrySnapshot = $null
-                        if ($sameVolume) {
+                        if ($sameVolume -and -not $item.SharePointSite) {
                             $registrySnapshot = Get-OneDriveAccountRegistrySnapshot -Account $item.Account
                         }
                         $moveResult = Move-OneDriveFolder -Source $item.CurrentValue -Destination $item.DesiredValue -DeleteSourceOnSuccess:$DeleteSourceOnSuccess
@@ -1379,6 +1379,135 @@ function Invoke-OneDriveMigrationPlan {
     }
 }
 
+function Get-OneDrivePlanItemStatusText {
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][pscustomobject]$Item
+    )
+
+    switch ($Item.Status) {
+        'Done' { return 'Done' }
+        'Failed' { return "Failed: $($Item.FailureReason)" }
+        default {
+            if ($Item.SkipReason) {
+                return "Skipped: $($Item.SkipReason)"
+            }
+            return 'Skipped'
+        }
+    }
+}
+
+function Get-OneDriveMigrationSummaryLines {
+    [OutputType([string[]])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Accounts,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$SharePointSites,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
+        [AllowEmptyCollection()][string[]]$DeferredCleanupPaths = @()
+    )
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('MarkMichaelisOneDriveConfiguration summary:') | Out-Null
+    $lines.Add('Discovered Accounts:') | Out-Null
+    if ($Accounts.Count -eq 0) {
+        $lines.Add('  - none') | Out-Null
+    } else {
+        foreach ($account in $Accounts) {
+            $lines.Add(("  - [{0}] {1} -> {2}" -f $account.AccountType, $account.DisplayName, $account.UserFolder)) | Out-Null
+        }
+    }
+
+    $lines.Add('Discovered SharePoint Sites:') | Out-Null
+    if ($SharePointSites.Count -eq 0) {
+        $lines.Add('  - none') | Out-Null
+    } else {
+        foreach ($site in $SharePointSites) {
+            $lines.Add(("  - {0} -> {1}" -f $site.CurrentPath, $site.DesiredPath)) | Out-Null
+        }
+    }
+
+    $sections = @(
+        @{ Name = 'Policy Writes'; Types = @('RegistryBackup','WritePolicy') },
+        @{ Name = 'Moves'; Types = @('MoveAccount') },
+        @{ Name = 'KFM Rewrites'; Types = @('RewriteKfm') },
+        @{ Name = 'SharePoint Cache Rewrites'; Types = @('RewriteSPCache') },
+        @{ Name = 'App Fix-ups'; Types = @('AppFixUp') },
+        @{ Name = 'Verification Results'; Types = @('Verify') }
+    )
+
+    foreach ($section in $sections) {
+        $lines.Add("$($section.Name):") | Out-Null
+        $items = @($Plan | Where-Object { $section.Types -contains $_.Type })
+        if ($items.Count -eq 0) {
+            $lines.Add('  - none') | Out-Null
+            continue
+        }
+        foreach ($item in $items) {
+            $status = Get-OneDrivePlanItemStatusText -Item $item
+            $detail = if ($item.CurrentValue -or $item.DesiredValue) {
+                " ($($item.CurrentValue) -> $($item.DesiredValue))"
+            } else {
+                ''
+            }
+            $lines.Add(("  - {0} | {1}{2}" -f $status, $item.Target, $detail)) | Out-Null
+        }
+    }
+
+    $backupItem = $Plan | Where-Object Type -eq 'RegistryBackup' | Select-Object -First 1
+    $lines.Add('Backup Location:') | Out-Null
+    if ($backupItem) {
+        $lines.Add(("  - {0} | {1}" -f (Get-OneDrivePlanItemStatusText -Item $backupItem), $backupItem.Target)) | Out-Null
+    } else {
+        $lines.Add('  - none') | Out-Null
+    }
+
+    $lines.Add('MRU Warning:') | Out-Null
+    $lines.Add('  - Office / Snagit / VS recent-file lists may still reference old OneDrive paths.') | Out-Null
+
+    $lines.Add('.migrated-* directories awaiting cleanup:') | Out-Null
+    if (@($DeferredCleanupPaths).Count -eq 0) {
+        $lines.Add('  - none') | Out-Null
+    } else {
+        foreach ($path in @($DeferredCleanupPaths)) {
+            $lines.Add(("  - {0}" -f $path)) | Out-Null
+        }
+    }
+
+    return $lines.ToArray()
+}
+
+function Write-OneDriveMigrationSummary {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Lines
+    )
+
+    foreach ($line in $Lines) {
+        $color = $null
+        if ($line -match ':$') {
+            $color = 'Cyan'
+        } elseif ($line -like '  - Done*') {
+            $color = 'Green'
+        } elseif ($line -like '  - Skipped*') {
+            $color = 'Yellow'
+        } elseif ($line -like '  - Failed*') {
+            $color = 'Red'
+        }
+
+        try {
+            if ($color -and $Host.UI -and $Host.UI.RawUI) {
+                Write-Host $line -ForegroundColor $color
+            } else {
+                Write-Host $line
+            }
+        } catch {
+            Write-Host $line
+        }
+    }
+}
+
 function Invoke-MarkMichaelisOneDriveConfiguration {
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -1439,21 +1568,12 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         throw
     }
 
-    Write-Host ''
-    Write-Host 'MarkMichaelisOneDriveConfiguration complete:'
-    Write-Host ("  Accounts found:   {0}" -f $accounts.Count)
-    Write-Host ("  Planned items:    {0}" -f $plan.Count)
-    Write-Host ("  Completed items:  {0}" -f @($plan | Where-Object Status -eq 'Done').Count)
-    Write-Host ("  Skipped items:    {0}" -f @($plan | Where-Object Status -eq 'Skipped').Count)
-    Write-Host ''
+    $summaryLines = Get-OneDriveMigrationSummaryLines -Accounts $accounts -SharePointSites @($sharePointSites) -Plan $plan -DeferredCleanupPaths @($deferredCleanupPaths)
+    Write-OneDriveMigrationSummary -Lines $summaryLines
 
     if ($freshSyncAccounts.Count -gt 0) {
-        Write-Host 'FRESH-SYNC accounts unlinked:'
-        foreach ($fa in $freshSyncAccounts) {
-            Write-Host ("  - {0} ({1})" -f $fa.DisplayName, $fa.Slot)
-        }
         Write-Host ''
-        Write-Host 'To complete the migration:'
+        Write-Host 'To complete the fresh-sync flow:'
         Write-Host "  1. Open OneDrive Settings (right-click cloud icon -> Settings -> Account)"
         Write-Host "  2. Click 'Add an account'"
         foreach ($fa in $freshSyncAccounts) {
@@ -1462,16 +1582,6 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
             Write-Host ("     Policy will direct the new sync root to: {0}" -f $newTarget)
         }
         Write-Host '  4. OneDrive will create cloud-only placeholders (no bulk download).'
-        Write-Host ''
-    }
-
-    if ($deferredCleanupPaths.Count -gt 0) {
-        Write-Host ''
-        Write-Host 'Cross-volume recovery folders preserved for manual cleanup:'
-        foreach ($path in $deferredCleanupPaths) {
-            Write-Host ("  - {0}" -f $path)
-        }
-        Write-Host '  Review the destination, confirm OneDrive is healthy, then delete the .migrated-* folder(s) manually or re-run with -DeleteSourceOnSuccess.'
     }
 
     $fodGatedItems = @($plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.SkipReason -like 'Refusing cross-volume move of *cloud-only files*' })
