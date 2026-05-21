@@ -116,7 +116,7 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result = Resolve-KfmRebindAction `
             -Accounts @($script:owner, $script:other) `
             -KfmCurrentPath 'C:\OneDrive\OneDrive - Michaelis Consulting\Documents' `
-            -KfmOwner 'Michaelis'
+            -KfmOwner 'Michaelis Consulting'
         $result.Action | Should -Be 'Track'
         $result.OwnerAccount.Slot | Should -Be 'Business1'
     }
@@ -125,7 +125,7 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result = Resolve-KfmRebindAction `
             -Accounts @($script:owner, $script:other) `
             -KfmCurrentPath 'C:\OneDrive\OneDrive - IntelliTect\Documents' `
-            -KfmOwner 'Michaelis'
+            -KfmOwner 'Michaelis Consulting'
         $result.Action | Should -Be 'Rebind'
         $result.OwnerAccount.Slot | Should -Be 'Business1'
     }
@@ -134,7 +134,7 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result = Resolve-KfmRebindAction `
             -Accounts @($script:owner, $script:other) `
             -KfmCurrentPath 'C:\OneDrive\OneDrive - IntelliTect\Documents' `
-            -KfmOwner 'Michaelis' -NoKfmRebind
+            -KfmOwner 'Michaelis Consulting' -NoKfmRebind
         $result.Action | Should -Be 'WarnOnly'
     }
 
@@ -142,7 +142,7 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result = Resolve-KfmRebindAction `
             -Accounts @($script:owner) `
             -KfmCurrentPath $null `
-            -KfmOwner 'Michaelis'
+            -KfmOwner 'Michaelis Consulting'
         $result.Action | Should -Be 'None'
     }
 
@@ -150,7 +150,7 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result = Resolve-KfmRebindAction `
             -Accounts @($script:other, $script:personal) `
             -KfmCurrentPath 'C:\OneDrive\OneDrive - IntelliTect\Documents' `
-            -KfmOwner 'Michaelis'
+            -KfmOwner 'Michaelis Consulting'
         $result.Action | Should -Be 'OwnerNotSignedIn'
         $result.OwnerAccount | Should -BeNullOrEmpty
     }
@@ -165,7 +165,7 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result = Resolve-KfmRebindAction `
             -Accounts @($personalNamedMichaelis, $script:other) `
             -KfmCurrentPath 'C:\OneDrive\OneDrive - IntelliTect\Documents' `
-            -KfmOwner 'Michaelis'
+            -KfmOwner 'Mark Michaelis'
         $result.Action | Should -Be 'OwnerNotSignedIn'
     }
 
@@ -173,16 +173,34 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result = Resolve-KfmRebindAction `
             -Accounts @($script:other, $script:personal) `
             -KfmCurrentPath $null `
-            -KfmOwner 'Michaelis'
+            -KfmOwner 'Michaelis Consulting'
         $result.Action | Should -Be 'None'
         $result.OwnerAccount | Should -BeNullOrEmpty
+    }
+
+    It 'matches KfmOwner by case-insensitive equality by default' {
+        $result = Resolve-KfmRebindAction `
+            -Accounts @($script:owner, $script:other) `
+            -KfmCurrentPath 'C:\OneDrive\OneDrive - IntelliTect\Documents' `
+            -KfmOwner 'michaelis consulting'
+        $result.Action | Should -Be 'Rebind'
+        $result.OwnerAccount.Slot | Should -Be 'Business1'
+    }
+
+    It 'supports opt-in substring owner matching with -KfmOwnerContains' {
+        $result = Resolve-KfmRebindAction `
+            -Accounts @($script:owner, $script:other) `
+            -KfmCurrentPath 'C:\OneDrive\OneDrive - IntelliTect\Documents' `
+            -KfmOwner 'Michaelis' -KfmOwnerContains
+        $result.Action | Should -Be 'Rebind'
+        $result.OwnerAccount.Slot | Should -Be 'Business1'
     }
 
     It 'returns an empty-accounts result as None when KFM is inactive' {
         $result = Resolve-KfmRebindAction `
             -Accounts @() `
             -KfmCurrentPath $null `
-            -KfmOwner 'Michaelis'
+            -KfmOwner 'Michaelis Consulting'
         $result.Action | Should -Be 'None'
     }
 }
@@ -273,6 +291,57 @@ Describe 'Update-OneDriveSharePointCache' -Tag 'Light' {
             $Name -eq 'Site' -and
             $Value -eq $Expected
         }
+    }
+}
+
+Describe 'Invoke-RobocopyMirror' -Tag 'Light' {
+    It 'uses /ZB so cross-volume copies stay restartable and can fall back to backup mode' {
+        $script:capturedRobocopyArgs = $null
+        function global:robocopy {
+            param([Parameter(ValueFromRemainingArguments = $true)] $Args)
+            $script:capturedRobocopyArgs = @($Args)
+            $global:LASTEXITCODE = 3
+        }
+
+        try {
+            Invoke-RobocopyMirror -Source 'C:\Source' -Destination 'D:\Dest' | Should -Be 3
+            $script:capturedRobocopyArgs | Should -Contain '/ZB'
+            $script:capturedRobocopyArgs | Should -Not -Contain '/B'
+        }
+        finally {
+            Remove-Item function:\global:robocopy -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe 'Update-KfmBindings' -Tag 'Light' {
+    It 'rewrites extended known-folder GUID entries including Downloads and Screenshots' {
+        $oldRoot = 'C:\Users\me\OneDrive - IntelliTect'
+        $newRoot = 'C:\OneDrive\OneDrive - IntelliTect'
+        $downloadsGuid = '{374DE290-123F-4565-9164-39C4925E467B}'
+        $screenshotsGuid = '{B7BEDE81-DF94-4682-A7D8-57A52620B86F}'
+        $folderKeys = @(
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\$downloadsGuid",
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\$screenshotsGuid"
+        )
+
+        Mock -CommandName Test-Path -MockWith { param($Path) $Path -in $folderKeys }
+        Mock -CommandName Get-ItemProperty -MockWith {
+            param($Path)
+            switch ($Path) {
+                $folderKeys[0] { [pscustomobject]@{ RelativePath = "$oldRoot\Downloads"; ParsingName = "$oldRoot\Downloads" } ; break }
+                $folderKeys[1] { [pscustomobject]@{ RelativePath = "$oldRoot\Pictures\Screenshots"; ParsingName = "$oldRoot\Pictures\Screenshots" } ; break }
+                default { [pscustomobject]@{} }
+            }
+        }
+        Mock -CommandName Set-ItemProperty
+
+        Update-KfmBindings -OldRoot $oldRoot -NewRoot $newRoot -Confirm:$false
+
+        Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter { $Path -eq $folderKeys[0] -and $Name -eq 'RelativePath' -and $Value -eq "$newRoot\Downloads" }
+        Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter { $Path -eq $folderKeys[0] -and $Name -eq 'ParsingName' -and $Value -eq "$newRoot\Downloads" }
+        Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter { $Path -eq $folderKeys[1] -and $Name -eq 'RelativePath' -and $Value -eq "$newRoot\Pictures\Screenshots" }
+        Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter { $Path -eq $folderKeys[1] -and $Name -eq 'ParsingName' -and $Value -eq "$newRoot\Pictures\Screenshots" }
     }
 }
 
@@ -750,7 +819,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration KFM rebind' -Tag 'Heavy' {
         Mock -CommandName Get-Process -MockWith { $null }
         Mock -CommandName Update-KfmBindings
 
-        Invoke-MarkMichaelisOneDriveConfiguration -RootDir $rootDir -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir $rootDir -KfmOwner 'Michaelis Consulting' -FreshSync @() -Confirm:$false
 
         Should -Invoke Update-KfmBindings -Times 1 -ParameterFilter {
             $OldRoot -eq 'C:\OneDrive\OneDrive - IntelliTect' -and
@@ -785,7 +854,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration KFM rebind' -Tag 'Heavy' {
         Mock -CommandName Update-KfmBindings
         Mock -CommandName Write-Warning
 
-        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis Consulting' -FreshSync @() -Confirm:$false
 
         Should -Invoke Update-KfmBindings -Times 0
         Should -Invoke Write-Warning -Times 1 -ParameterFilter { $Message -like '*not under any discovered OneDrive account UserFolder*' }

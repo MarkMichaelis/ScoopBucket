@@ -24,7 +24,7 @@
       - Auto-migrates any account whose UserFolder doesn't match the
         target convention. Same-volume migrations use Move-Item (NTFS
         rename, preserves Cloud Files reparse + ACLs). Cross-volume
-        migrations use robocopy /MIR /COPYALL /DCOPY:DAT /B and warn
+        migrations use robocopy /MIR /COPYALL /DCOPY:DAT /ZB and warn
         about Files-On-Demand placeholders.
       - Rewrites KFM bindings (User Shell Folders / Shell Folders /
         KNOWNFOLDERID GUIDs) when the owning account moves.
@@ -38,8 +38,13 @@
 
 .PARAMETER KfmOwner
     Account whose DisplayName identifies the canonical KFM owner.
-    Default: 'Michaelis'. Resolved via a substring/equality match
-    against the DisplayName of Business* registry slots.
+    Default: 'Michaelis'. Resolved via case-insensitive equality
+    against the DisplayName of Business* registry slots unless
+    -KfmOwnerContains is supplied.
+
+.PARAMETER KfmOwnerContains
+    Treat -KfmOwner as a case-insensitive substring match instead of an
+    exact DisplayName match.
 
 .PARAMETER NoKfmRebind
     Suppress the warning + automatic rebind that fires when KFM is
@@ -88,6 +93,7 @@ Confirmed policy shape baked into this script:
 param(
     [string] $RootDir   = 'C:\OneDrive',
     [string] $KfmOwner  = 'Michaelis',
+    [switch] $KfmOwnerContains,
     [switch] $NoKfmRebind,
     [string[]] $FreshSync = @(),
     [switch] $DeleteSourceOnSuccess,
@@ -145,6 +151,26 @@ function Test-IsSameVolume {
             [string]::Equals($srcRoot, $dstRoot, [System.StringComparison]::OrdinalIgnoreCase))
 }
 
+function Test-KfmOwnerMatch {
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$DisplayName,
+        [Parameter(Mandatory)][string]$KfmOwner,
+        [switch]$KfmOwnerContains
+    )
+
+    if ([string]::IsNullOrWhiteSpace($DisplayName)) {
+        return $false
+    }
+
+    if ($KfmOwnerContains) {
+        return ($DisplayName.IndexOf($KfmOwner, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)
+    }
+
+    return [string]::Equals($DisplayName, $KfmOwner, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 function Resolve-KfmRebindAction {
     <#
     .SYNOPSIS
@@ -155,7 +181,9 @@ function Resolve-KfmRebindAction {
             UserFolder, AccountType).
           - $KfmCurrentPath: current resolved Documents/Pictures path (or
             $null if KFM is not active).
-          - $KfmOwner: the DisplayName substring of the desired owner.
+          - $KfmOwner: the desired owner DisplayName.
+          - $KfmOwnerContains: switch -- use substring matching instead of
+            exact DisplayName equality.
           - $NoKfmRebind: switch -- if set, suppress rebind.
 
         Outputs an object with:
@@ -169,6 +197,7 @@ function Resolve-KfmRebindAction {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Accounts,
         [AllowNull()][string]$KfmCurrentPath,
         [Parameter(Mandatory)][string]$KfmOwner,
+        [switch]$KfmOwnerContains,
         [switch]$NoKfmRebind
     )
 
@@ -181,7 +210,7 @@ function Resolve-KfmRebindAction {
     }
 
     $ownerAcct = $Accounts |
-        Where-Object { $_.AccountType -ne 'Personal' -and $_.DisplayName -and ($_.DisplayName -match [regex]::Escape($KfmOwner)) } |
+        Where-Object { $_.AccountType -ne 'Personal' -and (Test-KfmOwnerMatch -DisplayName $_.DisplayName -KfmOwner $KfmOwner -KfmOwnerContains:$KfmOwnerContains) } |
         Select-Object -First 1
 
     if (-not $ownerAcct) {
@@ -271,7 +300,12 @@ function Resolve-FreshSyncAccounts {
 $KnownFolderGuids = @(
     '{F42EE2D3-909F-4907-8871-4C22FC0BF756}',  # Documents
     '{0DDD015D-B06C-45D5-8C4C-F59713854639}',  # Pictures
-    '{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}'   # Desktop
+    '{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}',  # Desktop
+    '{4BD8D571-6D19-48D3-BE97-422220080E43}',  # Music
+    '{18989B1D-99B5-455B-841C-AB7C74E4DDFC}',  # Videos
+    '{374DE290-123F-4565-9164-39C4925E467B}',  # Downloads
+    '{1777F761-68AD-4D8A-87BD-30B759FA33DD}',  # Favorites
+    '{B7BEDE81-DF94-4682-A7D8-57A52620B86F}'   # Screenshots
 )
 
 function Get-OneDriveAccountList {
@@ -463,7 +497,7 @@ function Invoke-RobocopyMirror {
         [Parameter(Mandatory)][string]$Destination
     )
 
-    $args = @($Source, $Destination, '/MIR','/COPYALL','/DCOPY:DAT','/B','/R:1','/W:1','/XJ','/NFL','/NDL')
+    $args = @($Source, $Destination, '/MIR','/COPYALL','/DCOPY:DAT','/ZB','/R:1','/W:1','/XJ','/NFL','/NDL')
     & robocopy @args | Out-Null
     return $LASTEXITCODE
 }
@@ -1513,6 +1547,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     param(
         [Parameter(Mandatory)][string]$RootDir,
         [Parameter(Mandatory)][string]$KfmOwner,
+        [switch]$KfmOwnerContains,
         [switch]$NoKfmRebind,
         [AllowEmptyCollection()][AllowNull()][string[]]$FreshSync,
         [switch]$DeleteSourceOnSuccess,
@@ -1520,6 +1555,9 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     )
 
     Write-Host "MarkMichaelisOneDriveConfiguration: RootDir=$RootDir, KfmOwner=$KfmOwner"
+    if ($KfmOwnerContains) {
+        Write-Host '  KfmOwnerContains requested: using substring owner matching'
+    }
     if ($FreshSync -and $FreshSync.Count -gt 0) {
         Write-Host "  FreshSync requested: $($FreshSync -join ', ')"
     }
@@ -1539,7 +1577,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     }
 
     $kfmCurrent = Get-CurrentKfmPath
-    $kfmDecision = Resolve-KfmRebindAction -Accounts $accounts -KfmCurrentPath $kfmCurrent -KfmOwner $KfmOwner -NoKfmRebind:$NoKfmRebind
+    $kfmDecision = Resolve-KfmRebindAction -Accounts $accounts -KfmCurrentPath $kfmCurrent -KfmOwner $KfmOwner -KfmOwnerContains:$KfmOwnerContains -NoKfmRebind:$NoKfmRebind
     Write-Host "  KFM: [$($kfmDecision.Action)] $($kfmDecision.Reason)"
     if ($kfmDecision.Action -eq 'OwnerNotSignedIn') {
         throw "KFM owner '$KfmOwner' is not signed in. Sign in to the matching Work account in OneDrive and re-run."
@@ -1598,5 +1636,5 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
 # `& "$dir\MarkMichaelisOneDriveConfiguration.ps1"`). When dot-sourced
 # (Pester tests), expose the helpers without running migration.
 if ($MyInvocation.InvocationName -ne '.') {
-    Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner -NoKfmRebind:$NoKfmRebind -FreshSync $FreshSync -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -ForceHydrate:$ForceHydrate
+    Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner -KfmOwnerContains:$KfmOwnerContains -NoKfmRebind:$NoKfmRebind -FreshSync $FreshSync -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -ForceHydrate:$ForceHydrate
 }
