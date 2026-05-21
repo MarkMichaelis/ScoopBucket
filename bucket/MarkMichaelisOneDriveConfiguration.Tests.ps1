@@ -177,3 +177,74 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result.Action | Should -Be 'OwnerNotSignedIn'
     }
 }
+
+Describe 'Get-OneDriveAccountList (zombie slot filter)' -Tag 'Light' {
+    # Regression for issue #192: a Business slot left over from a failed
+    # sign-in has no DisplayName / UserFolder / UserEmail and must be
+    # skipped, else Get-OneDriveTargetPath throws downstream.
+
+    BeforeAll {
+        function New-FakeSlot {
+            param([string]$Name, [hashtable]$Props)
+            [pscustomobject]@{
+                PSChildName = $Name
+                PSPath      = "TestRegistry::OneDrive\Accounts\$Name"
+                _Props      = [pscustomobject]$Props
+            }
+        }
+    }
+
+    It 'skips a Business slot with empty DisplayName and UserFolder' {
+        $real = New-FakeSlot 'Business1' @{
+            DisplayName        = 'IntelliTect'
+            ConfiguredTenantId = 'tid-1'
+            UserEmail          = 'a@example.com'
+            UserFolder         = 'C:\Users\me\OneDrive - IntelliTect'
+        }
+        $zombie = New-FakeSlot 'Business2' @{
+            DisplayName        = $null
+            ConfiguredTenantId = $null
+            UserEmail          = $null
+            UserFolder         = $null
+        }
+
+        Mock -CommandName Test-Path -ParameterFilter {
+            $Path -eq 'HKCU:\Software\Microsoft\OneDrive\Accounts'
+        } -MockWith { $true }
+
+        Mock -CommandName Get-ChildItem -ParameterFilter {
+            $Path -eq 'HKCU:\Software\Microsoft\OneDrive\Accounts'
+        } -MockWith { @($real, $zombie) }
+
+        Mock -CommandName Get-ItemProperty -MockWith {
+            param($Path)
+            ($real, $zombie | Where-Object { $_.PSPath -eq $Path } | Select-Object -First 1)._Props
+        }
+
+        $accounts = Get-OneDriveAccountList
+        $accounts | Should -HaveCount 1
+        $accounts[0].Slot | Should -Be 'Business1'
+        $accounts[0].DisplayName | Should -Be 'IntelliTect'
+    }
+
+    It 'skips a Business slot with DisplayName but no UserFolder' {
+        $halfZombie = New-FakeSlot 'Business1' @{
+            DisplayName        = 'Foo'
+            ConfiguredTenantId = 'tid-1'
+            UserEmail          = 'a@example.com'
+            UserFolder         = $null
+        }
+
+        Mock -CommandName Test-Path -ParameterFilter {
+            $Path -eq 'HKCU:\Software\Microsoft\OneDrive\Accounts'
+        } -MockWith { $true }
+
+        Mock -CommandName Get-ChildItem -ParameterFilter {
+            $Path -eq 'HKCU:\Software\Microsoft\OneDrive\Accounts'
+        } -MockWith { @($halfZombie) }
+
+        Mock -CommandName Get-ItemProperty -MockWith { $halfZombie._Props }
+
+        Get-OneDriveAccountList | Should -BeNullOrEmpty
+    }
+}

@@ -222,6 +222,14 @@ function Get-OneDriveAccountList {
         # Personal slot is only meaningful when populated (UserFolder set).
         if ($isPersonal -and -not $props.UserFolder) { continue }
 
+        # Business slot may be a zombie left over from a failed sign-in:
+        # no DisplayName, no UserFolder, no UserEmail. Skip it -- there is
+        # nothing to compute a target path from and nothing to migrate.
+        if ($isBusiness -and (-not $props.DisplayName -or -not $props.UserFolder)) {
+            Write-Verbose "Skipping empty/zombie Business slot '$name' (no DisplayName or UserFolder)."
+            continue
+        }
+
         $tenantId = $props.ConfiguredTenantId
         if (-not $tenantId) { $tenantId = $props.cid }
 
