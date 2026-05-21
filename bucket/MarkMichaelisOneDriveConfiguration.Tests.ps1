@@ -460,6 +460,57 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration running state' -Tag 'Light' 
     }
 }
 
+Describe 'Invoke-MarkMichaelisOneDriveConfiguration rollback' -Tag 'Light' {
+    It 'moves the source back when a same-volume registry update fails' {
+        $rootDir = 'C:\OneDrive'
+        $oldPath = 'C:\Users\me\OneDrive - IntelliTect'
+        $newPath = 'C:\OneDrive\OneDrive - IntelliTect'
+        $script:afterMove = $false
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = $oldPath; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                $rootDir { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                $oldPath { if ($script:afterMove) { $false } else { $true }; break }
+                $newPath { if ($script:afterMove) { $true } else { $false }; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($acct) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $null }
+        Mock -CommandName Resolve-KfmRebindAction -MockWith {
+            [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+        }
+        Mock -CommandName Set-OneDrivePolicy
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Move-OneDriveFolder -MockWith { $script:afterMove = $true }
+        Mock -CommandName Get-OneDriveAccountRegistrySnapshot -MockWith { [pscustomobject]@{ UserFolder = $oldPath; CacheValues = @{} } }
+        Mock -CommandName Update-OneDriveAccountRegistry -MockWith { throw 'registry write failed' }
+        Mock -CommandName Restore-OneDriveAccountRegistrySnapshot
+        Mock -CommandName Move-Item -MockWith { $script:afterMove = $false }
+        Mock -CommandName Invoke-AppFixUps
+        Mock -CommandName Start-OneDriveExe
+        Mock -CommandName New-Item
+        Mock -CommandName Get-Process -MockWith { [pscustomobject]@{ Name = 'OneDrive' } }
+        Mock -CommandName Write-Error
+
+        { Invoke-MarkMichaelisOneDriveConfiguration -RootDir $rootDir -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false } |
+            Should -Throw -ExpectedMessage '*registry write failed*'
+
+        Should -Invoke Move-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq $newPath -and $Destination -eq $oldPath
+        }
+        Should -Invoke Restore-OneDriveAccountRegistrySnapshot -Times 1
+        Should -Invoke Start-OneDriveExe -Times 0
+    }
+}
+
 Describe 'Invoke-MarkMichaelisOneDriveConfiguration KFM rebind' -Tag 'Light' {
     It 'preserves the known-folder suffix by rebinding from the owning account root for <Suffix>' -ForEach @(
         @{ Suffix = 'Documents' }

@@ -539,6 +539,59 @@ function Update-OneDriveAccountRegistry {
     }
 }
 
+function Get-OneDriveAccountRegistrySnapshot {
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][pscustomobject]$Account
+    )
+
+    $regPath = $Account.RegistryPath
+    $snapshot = [ordered]@{
+        UserFolder  = (Get-ItemProperty -Path $regPath -Name 'UserFolder' -ErrorAction SilentlyContinue).UserFolder
+        CacheValues = @{}
+    }
+
+    foreach ($valueName in 'ScopeIdToMountPointPathCache','ScopeIdToMountPointPathCacheRoot') {
+        $cacheKey = Join-Path $regPath $valueName
+        if (-not (Test-Path $cacheKey)) { continue }
+        $props = Get-ItemProperty -Path $cacheKey -ErrorAction SilentlyContinue
+        if (-not $props) { continue }
+        foreach ($pName in $props.PSObject.Properties.Name) {
+            if ($pName -like 'PS*') { continue }
+            $cur = $props.$pName
+            if ($cur -is [string] -and $Account.UserFolder -and
+                $cur.StartsWith($Account.UserFolder, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $snapshot.CacheValues["$cacheKey|$pName"] = $cur
+            }
+        }
+    }
+
+    return [pscustomobject]$snapshot
+}
+
+function Restore-OneDriveAccountRegistrySnapshot {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][pscustomobject]$Account,
+        [Parameter(Mandatory)][pscustomobject]$Snapshot
+    )
+
+    $regPath = $Account.RegistryPath
+    if ($PSCmdlet.ShouldProcess("$regPath\UserFolder", "Restore -> $($Snapshot.UserFolder)")) {
+        Set-ItemProperty -Path $regPath -Name 'UserFolder' -Value $Snapshot.UserFolder -Type String
+    }
+
+    foreach ($entry in $Snapshot.CacheValues.GetEnumerator()) {
+        $parts = $entry.Key -split '\|', 2
+        $cacheKey = $parts[0]
+        $pName = $parts[1]
+        if ($PSCmdlet.ShouldProcess("$cacheKey\$pName", "Restore -> $($entry.Value)")) {
+            Set-ItemProperty -Path $cacheKey -Name $pName -Value $entry.Value
+        }
+    }
+}
+
 function Update-KfmBindings {
     <#
     .SYNOPSIS
@@ -747,10 +800,27 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         $stoppedOneDrive = $true
 
         foreach ($m in $migrations) {
+            $sameVolume = Test-IsSameVolume -Source $m.OldPath -Destination $m.NewPath
+            $registrySnapshot = $null
             try {
                 Write-Host "  Migrating $($m.Account.DisplayName): $($m.OldPath) -> $($m.NewPath)"
+                if ($sameVolume) {
+                    $registrySnapshot = Get-OneDriveAccountRegistrySnapshot -Account $m.Account
+                }
                 Move-OneDriveFolder -Source $m.OldPath -Destination $m.NewPath
-                Update-OneDriveAccountRegistry -Account $m.Account -NewPath $m.NewPath
+                try {
+                    Update-OneDriveAccountRegistry -Account $m.Account -NewPath $m.NewPath
+                } catch {
+                    if ($sameVolume) {
+                        if ((Test-Path $m.NewPath) -and -not (Test-Path $m.OldPath)) {
+                            Move-Item -LiteralPath $m.NewPath -Destination $m.OldPath
+                        }
+                        if ($registrySnapshot) {
+                            Restore-OneDriveAccountRegistrySnapshot -Account $m.Account -Snapshot $registrySnapshot
+                        }
+                    }
+                    throw
+                }
 
                 # Rewrite KFM if this account is the (tracked) owner.
                 if (-not $kfmOwnerInFreshSync -and
@@ -761,7 +831,12 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
                 }
                 Invoke-AppFixUps -OldRoot $m.OldPath -NewRoot $m.NewPath
             } catch {
-                Write-Error "Migration failed for $($m.Account.DisplayName): $($_.Exception.Message). Source left in place; OneDrive NOT restarted."
+                $recovery = if ($sameVolume) {
+                    "Best-effort rollback attempted. Inspect '$($m.OldPath)' and '$($m.NewPath)', then verify OneDrive account registry under '$($m.Account.RegistryPath)' before restarting OneDrive."
+                } else {
+                    "Registry may still point to '$($m.OldPath)' while copied data remains at '$($m.NewPath)'. Inspect both paths and '$($m.Account.RegistryPath)' before restarting OneDrive."
+                }
+                Write-Error "Migration failed for $($m.Account.DisplayName): $($_.Exception.Message) $recovery OneDrive NOT restarted automatically."
                 throw
             }
         }
