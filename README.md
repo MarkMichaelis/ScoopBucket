@@ -175,6 +175,17 @@ Current members:
   Work account when its folder moves. Supports `-WhatIf` for dry-run
   preview before a real migration.
 
+  For Business tenants with large cloud-only datasets (where a
+  cross-volume robocopy migration would hydrate every Files-On-Demand
+  placeholder), pass `-FreshSync <Slot-or-DisplayName>...`. Matching
+  accounts are unlinked instead -- the per-account registry slot and
+  local sync folder are deleted, the `DefaultRootDir` policy is still
+  applied, and the user re-signs-in via the OneDrive UI so OneDrive
+  recreates cloud-only placeholders at the policy-directed path. If
+  the KFM owner is in `-FreshSync`, KFM rewrite is skipped and the
+  user reconfigures KFM via OneDrive Settings -> Backup -> Manage
+  backup after re-sign-in.
+
 ## Authoring guidelines
 
 ### Manifest versioning

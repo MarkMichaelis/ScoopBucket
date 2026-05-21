@@ -248,3 +248,70 @@ Describe 'Get-OneDriveAccountList (zombie slot filter)' -Tag 'Light' {
         Get-OneDriveAccountList | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Resolve-FreshSyncAccounts' -Tag 'Light' {
+    BeforeAll {
+        $script:b1 = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'
+            DisplayName = 'Michaelis Consulting'; UserFolder = 'C:\OneDrive\OneDrive - Michaelis Consulting'
+        }
+        $script:b2 = [pscustomobject]@{
+            Slot = 'Business2'; AccountType = 'Business'
+            DisplayName = 'IntelliTect'; UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'
+        }
+        $script:personal = [pscustomobject]@{
+            Slot = 'Personal'; AccountType = 'Personal'
+            DisplayName = $null; UserFolder = 'C:\OneDrive\OneDrive - Personal'
+        }
+        $script:allAccounts = @($script:b1, $script:b2, $script:personal)
+    }
+
+    It 'returns an empty array when -FreshSync is empty' {
+        $result = Resolve-FreshSyncAccounts -Accounts $script:allAccounts -FreshSync @()
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'returns an empty array when -FreshSync is $null' {
+        $result = Resolve-FreshSyncAccounts -Accounts $script:allAccounts -FreshSync $null
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'resolves a Slot name (e.g. Business2) to the matching account' {
+        $result = Resolve-FreshSyncAccounts -Accounts $script:allAccounts -FreshSync @('Business2')
+        @($result) | Should -HaveCount 1
+        $result[0].Slot | Should -Be 'Business2'
+        $result[0].DisplayName | Should -Be 'IntelliTect'
+    }
+
+    It 'resolves a DisplayName case-insensitively' {
+        $result = Resolve-FreshSyncAccounts -Accounts $script:allAccounts -FreshSync @('intellitect')
+        @($result) | Should -HaveCount 1
+        $result[0].Slot | Should -Be 'Business2'
+    }
+
+    It 'resolves multiple entries (Slot + DisplayName mix) without duplicates' {
+        $result = Resolve-FreshSyncAccounts -Accounts $script:allAccounts `
+            -FreshSync @('Business2','IntelliTect','Business1')
+        @($result) | Should -HaveCount 2
+        ($result | ForEach-Object Slot) | Should -Contain 'Business1'
+        ($result | ForEach-Object Slot) | Should -Contain 'Business2'
+    }
+
+    It 'throws when an entry matches no discovered account' {
+        { Resolve-FreshSyncAccounts -Accounts $script:allAccounts -FreshSync @('Bogus') } |
+            Should -Throw -ExpectedMessage "*'Bogus'*"
+    }
+
+    It 'throws when an entry matches the Personal account slot' {
+        { Resolve-FreshSyncAccounts -Accounts $script:allAccounts -FreshSync @('Personal') } |
+            Should -Throw -ExpectedMessage '*only Business accounts*'
+    }
+
+    It 'partitions the discovered accounts so FreshSync matches are excluded from a file-copy list' {
+        # Mirrors the partitioning the orchestrator performs.
+        $fs = Resolve-FreshSyncAccounts -Accounts $script:allAccounts -FreshSync @('Business2')
+        $fsSlots = @($fs | ForEach-Object Slot)
+        $fileCopy = $script:allAccounts | Where-Object { $fsSlots -notcontains $_.Slot }
+        @($fileCopy | ForEach-Object Slot) | Should -Be @('Business1','Personal')
+    }
+}
