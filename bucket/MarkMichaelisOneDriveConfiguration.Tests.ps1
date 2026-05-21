@@ -371,6 +371,124 @@ Describe 'Resolve-FreshSyncAccounts' -Tag 'Light' {
 }
 
 
+Describe 'Format-OneDrivePlanBanner' -Tag 'Light' {
+    BeforeAll {
+        $script:b1 = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'
+            DisplayName = 'Michaelis'; UserEmail = 'mark@example.com'
+            UserFolder = 'C:\Users\Mark\OneDrive - Michaelis'
+        }
+        $script:b2 = [pscustomobject]@{
+            Slot = 'Business2'; AccountType = 'Business'
+            DisplayName = 'IntelliTect'; UserEmail = 'mark@intellitect.com'
+            UserFolder = 'C:\Users\Mark\OneDrive - IntelliTect'
+        }
+        $script:personal = [pscustomobject]@{
+            Slot = 'Personal'; AccountType = 'Personal'
+            DisplayName = $null; UserEmail = 'mark@outlook.com'
+            UserFolder = 'C:\Users\Mark\OneDrive'
+        }
+        $script:allAccounts = @($script:b1, $script:b2, $script:personal)
+    }
+
+    It "header reads '[PLAN | -WhatIf]' under -WhatIf and '[APPLY]' otherwise" {
+        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+            -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
+            -FreshSyncAccounts @() -WhatIfMode -HomeDir 'C:\Users\Mark'
+        $plan[0] | Should -Match '\[PLAN \| -WhatIf\]'
+
+        $apply = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+            -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
+            -FreshSyncAccounts @() -HomeDir 'C:\Users\Mark'
+        $apply[0] | Should -Match '\[APPLY\]'
+    }
+
+    It 'mentions cross-volume warning when RootDir is on a different drive than HomeDir' {
+        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+            -RootDir 'D:\OneDrive' -KfmOwner 'Michaelis' `
+            -FreshSyncAccounts @() -HomeDir 'C:\Users\Mark'
+        ($plan -join "`n") | Should -Match 'cross-volume'
+        ($plan -join "`n") | Should -Match 'hydrate'
+    }
+
+    It 'does NOT mention cross-volume when RootDir is on the same drive as HomeDir' {
+        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+            -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
+            -FreshSyncAccounts @() -HomeDir 'C:\Users\Mark'
+        ($plan -join "`n") | Should -Not -Match 'cross-volume'
+    }
+
+    It "marks FreshSync accounts with 'FRESH-SYNC' in the account list" {
+        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+            -RootDir 'D:\OneDrive' -KfmOwner 'Michaelis' `
+            -FreshSyncAccounts @($script:b2) -HomeDir 'C:\Users\Mark'
+        $b2Line = $plan | Where-Object { $_ -match 'IntelliTect' }
+        $b2Line | Should -Match 'FRESH-SYNC'
+        # And Business1 (Michaelis) should NOT be marked fresh-sync.
+        $b1Line = $plan | Where-Object { $_ -match 'Michaelis' -and $_ -notmatch 'KFM owner' }
+        $b1Line | Should -Not -Match 'FRESH-SYNC'
+    }
+
+    It "produces 'KFM:  suppressed' line when -NoKfmRebind is supplied" {
+        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+            -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
+            -FreshSyncAccounts @() -NoKfmRebind -HomeDir 'C:\Users\Mark'
+        ($plan -join "`n") | Should -Match 'KFM:\s+suppressed \(-NoKfmRebind\)'
+    }
+
+    It 'emits a WARNING line when -SkipElevationCheck is used without actual elevation' {
+        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+            -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
+            -FreshSyncAccounts @() -SkipElevationCheck -IsElevated $false `
+            -HomeDir 'C:\Users\Mark'
+        ($plan -join "`n") | Should -Match 'NOT ELEVATED'
+        ($plan -join "`n") | Should -Match 'WARNING'
+    }
+
+    It 'reports elevation OK when running elevated' {
+        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+            -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
+            -FreshSyncAccounts @() -IsElevated $true -HomeDir 'C:\Users\Mark'
+        ($plan -join "`n") | Should -Match 'Elevation:\s+OK \(Administrator\)'
+    }
+}
+
+Describe 'Format-OneDriveSummaryReport' -Tag 'Light' {
+    BeforeAll {
+        $script:b1 = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'
+            DisplayName = 'Michaelis'; UserEmail = 'mark@example.com'
+            UserFolder = 'C:\Users\Mark\OneDrive - Michaelis'
+        }
+        $script:noneDecision = [pscustomobject]@{
+            Action = 'None'; OwnerAccount = $null; Reason = 'n/a'
+        }
+        $script:trackDecision = [pscustomobject]@{
+            Action = 'Track'; OwnerAccount = $script:b1; Reason = 'tracking'
+        }
+    }
+
+    It "uses 'Migrated:' phrasing in apply mode and 'Would migrate:' under -WhatIf" {
+        $apply = Format-OneDriveSummaryReport -Migrations @() -FreshSyncAccounts @() `
+            -KfmDecision $script:noneDecision -RootDir 'C:\OneDrive' `
+            -RestartedOneDrive $false -KfmOwnerInFreshSync $false
+        ($apply -join "`n") | Should -Match 'Migrated:'
+
+        $whatif = Format-OneDriveSummaryReport -Migrations @() -FreshSyncAccounts @() `
+            -KfmDecision $script:noneDecision -RootDir 'C:\OneDrive' `
+            -RestartedOneDrive $false -KfmOwnerInFreshSync $false -WhatIfMode
+        ($whatif -join "`n") | Should -Match 'Would migrate:'
+    }
+
+    It "calls out 'ACTION REQUIRED' for fresh-synced accounts" {
+        $report = Format-OneDriveSummaryReport -Migrations @() `
+            -FreshSyncAccounts @($script:b1) `
+            -KfmDecision $script:trackDecision -RootDir 'D:\OneDrive' `
+            -RestartedOneDrive $true -KfmOwnerInFreshSync $false
+        ($report -join "`n") | Should -Match 'ACTION REQUIRED'
+    }
+}
+
 Describe 'Elevation pre-flight' -Tag 'Light' {
     BeforeAll {
         $script:bundlePath = "$PSScriptRoot\MarkMichaelisOneDriveConfiguration.ps1"
