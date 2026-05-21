@@ -443,36 +443,8 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
 
 Invoke-PackageInstall -Packages $Packages -Bundle 'MicrosoftOffice365'
 
-# OneDrive tenant-redirection policy. Tied to Office, not a package, so it
-# runs after the package pass instead of being modelled as a Package entry.
-Function Get-Office365TenantId {
-    [OutputType([string])]
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory,ValueFromPipeline)][string]$TenantName
-    )
-    Invoke-RestMethod -Uri "https://login.windows.net/$TenantName.onmicrosoft.com/.well-known/openid-configuration" -UseBasicParsing | `
-        Select-Object 'token_endpoint' | Where-Object {
-            $_ -match 'https://login.windows.net/(?<TenantId>.+)/oauth2/token'
-        } | ForEach-Object { [PSCustomObject]$matches } | Select-Object TenantId
-}
-
-Function Set-OneDriveConfig {
-    if (-not (Test-Path 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive')) {
-        New-Item -Path 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive' | Out-Null
-    }
-    if (-not (Test-Path 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir')) {
-        New-Item -Path 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir' | Out-Null
-    }
-    Set-ItemProperty -Path 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir' `
-        -Name "$(Get-Office365TenantId 'IntelliTectSP')" -Value 'C:\OneDrive\IntelliTect'
-    Set-ItemProperty -Path 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir' `
-        -Name "$(Get-Office365TenantId 'Michaelises')"  -Value 'C:\OneDrive\Michaelises'
-
-    Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive' `
-        -Name 'GPOSetUpdateRing' -Value 'dword:00000004'
-}
-
-try { Set-OneDriveConfig } catch {
-    Write-Warning "Set-OneDriveConfig failed: $($_.Exception.Message)"
-}
+# OneDrive tenant-redirection policy and KFM rewriting moved to the
+# personal post-install customization bundle
+# MarkMichaelisOneDriveConfiguration. That bundle runs AFTER all install
+# bundles to reshape state (sync roots, KFM, per-app settings) and is
+# the first member of the MarkMichaelis* run-last category.

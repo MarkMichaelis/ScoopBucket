@@ -141,6 +141,40 @@ the small config-only bundles (`GitConfigVisualStudio`,
 `SetPowerConfiguration`, `McAfeeUninstall`) remain imperative for now;
 the discovery and validation tools handle both forms transparently.
 
+### Personal post-install customization (`MarkMichaelis*` bundles)
+
+A separate category of bundle whose name is prefixed with
+`MarkMichaelis*`. These bundles do **not** install software; they
+reshape state on the machine (sync roots, Known Folder Move bindings,
+per-app settings) to match the author's personal layout. Members of
+this family are designed to run **after** all install bundles --
+ordering matters because they reference the accounts and folders
+those installs created.
+
+Intended run order:
+
+```powershell
+# 1. Install bundles first (in any order).
+scoop install MarkMichaelis/OSBasePackages
+scoop install MarkMichaelis/DeveloperBasePackages
+scoop install MarkMichaelis/ClientBasePackages
+scoop install MarkMichaelis/MicrosoftOffice365
+scoop install MarkMichaelis/AIAgents
+
+# 2. Personal post-install customization LAST.
+scoop install MarkMichaelis/MarkMichaelisOneDriveConfiguration
+```
+
+Current members:
+
+- **`MarkMichaelisOneDriveConfiguration`** -- pins every signed-in
+  OneDrive account's sync root under a single configurable parent
+  (default `C:\OneDrive`), applies tenant-redirection policy so future
+  sign-ins land in the right place, and rewrites KFM bindings (Known
+  Folder Move: Documents / Pictures / Desktop) to follow the canonical
+  Work account when its folder moves. Supports `-WhatIf` for dry-run
+  preview before a real migration.
+
 ## Authoring guidelines
 
 ### Manifest versioning
