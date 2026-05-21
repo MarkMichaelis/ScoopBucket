@@ -173,7 +173,9 @@ Current members:
   sign-ins land in the right place, and rewrites KFM bindings (Known
   Folder Move: Documents / Pictures / Desktop) to follow the canonical
   Work account when its folder moves. Supports `-WhatIf` for dry-run
-  preview before a real migration.
+  preview before a real migration. On creation, the `RootDir` ACL is
+  hardened to match home-directory permissions so sync roots on
+  alternate volumes are not readable by other local accounts.
 
   For Business tenants with large cloud-only datasets (where a
   cross-volume robocopy migration would hydrate every Files-On-Demand
