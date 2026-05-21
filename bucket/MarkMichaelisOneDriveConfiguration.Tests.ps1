@@ -300,6 +300,80 @@ Describe 'Set-OneDrivePolicy' -Tag 'Light' {
     }
 }
 
+Describe 'Move-OneDriveFolder' -Tag 'Light' {
+    It 'moves successfully when only the destination parent exists' {
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                'C:\OneDrive\OneDrive - IntelliTect' { $false; break }
+                'C:\OneDrive' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Move-Item
+        Mock -CommandName New-Item
+
+        { Move-OneDriveFolder -Source 'C:\Users\me\OneDrive - IntelliTect' -Destination 'C:\OneDrive\OneDrive - IntelliTect' -Confirm:$false } |
+            Should -Not -Throw
+
+        Should -Invoke Move-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq 'C:\Users\me\OneDrive - IntelliTect' -and
+            $Destination -eq 'C:\OneDrive\OneDrive - IntelliTect'
+        }
+        Should -Invoke New-Item -Times 0
+    }
+}
+
+Describe 'Invoke-MarkMichaelisOneDriveConfiguration pre-create behavior' -Tag 'Light' {
+    It 'creates RootDir and bare tenant directories but not the per-account destination' {
+        $rootDir = 'C:\OneDrive'
+        $tenantDir = 'C:\OneDrive\IntelliTect'
+        $targetDir = 'C:\OneDrive\OneDrive - IntelliTect'
+        $sourceDir = 'C:\Users\me\OneDrive - IntelliTect'
+        $createdPaths = New-Object System.Collections.Generic.List[string]
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = $sourceDir; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                $rootDir { $false; break }
+                $tenantDir { $false; break }
+                $sourceDir { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName New-Item -MockWith {
+            param($ItemType, $Path)
+            $createdPaths.Add($Path) | Out-Null
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($acct) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $null }
+        Mock -CommandName Resolve-KfmRebindAction -MockWith {
+            [pscustomobject]@{ Action = 'None'; OwnerAccount = $acct; Reason = 'KFM inactive' }
+        }
+        Mock -CommandName Set-OneDrivePolicy
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Move-OneDriveFolder
+        Mock -CommandName Update-OneDriveAccountRegistry
+        Mock -CommandName Invoke-AppFixUps
+        Mock -CommandName Start-OneDriveExe
+
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir $rootDir -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+
+        $createdPaths | Should -Contain $rootDir
+        $createdPaths | Should -Contain $tenantDir
+        $createdPaths | Should -Not -Contain $targetDir
+        Should -Invoke Move-OneDriveFolder -Times 1 -ParameterFilter {
+            $Source -eq $sourceDir -and $Destination -eq $targetDir
+        }
+    }
+}
+
 Describe 'Resolve-FreshSyncAccounts' -Tag 'Light' {
     BeforeAll {
         $script:b1 = [pscustomobject]@{

@@ -662,14 +662,17 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         Write-Host ("    [{0}] {1} <{2}> -> {3}{4}" -f $a.AccountType, $a.DisplayName, $a.UserEmail, $a.UserFolder, $tag)
     }
 
-    # 3. Pre-create per-account target directories under $RootDir.
-    #    Skip FreshSync accounts: OneDrive will create the folder on re-sign-in.
+    # 3. Pre-create bare Work-tenant directories under $RootDir for SharePoint
+    #    sibling nesting only (e.g. <RootDir>\IntelliTect\Library). Do NOT
+    #    pre-create the per-account destination itself; Move-OneDriveFolder must
+    #    keep refusing to merge into an existing destination.
     foreach ($a in $accounts) {
         if ($freshSyncSlots -contains $a.Slot) { continue }
-        $target = Get-OneDriveTargetPath -Account $a -RootDir $RootDir
-        if (-not (Test-Path $target)) {
-            if ($PSCmdlet.ShouldProcess($target, 'Create directory')) {
-                New-Item -ItemType Directory -Path $target -Force | Out-Null
+        if ($a.AccountType -ne 'Business' -or [string]::IsNullOrWhiteSpace($a.DisplayName)) { continue }
+        $tenantDir = Join-Path $RootDir $a.DisplayName
+        if (-not (Test-Path $tenantDir)) {
+            if ($PSCmdlet.ShouldProcess($tenantDir, 'Create directory')) {
+                New-Item -ItemType Directory -Path $tenantDir -Force | Out-Null
             }
         }
     }
