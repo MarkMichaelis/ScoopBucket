@@ -89,7 +89,8 @@ param(
     [string] $RootDir   = 'C:\OneDrive',
     [string] $KfmOwner  = 'Michaelis',
     [switch] $NoKfmRebind,
-    [string[]] $FreshSync = @()
+    [string[]] $FreshSync = @(),
+    [switch] $DeleteSourceOnSuccess
 )
 
 $ErrorActionPreference = 'Stop'
@@ -453,25 +454,62 @@ function Start-OneDriveExe {
     }
 }
 
-function Move-OneDriveFolder {
-    <#
-    .SYNOPSIS
-        Move an account's UserFolder from $Source to $Destination,
-        using NTFS rename when possible and robocopy /MIR /COPYALL
-        otherwise. Throws on failure (leaves source in place).
-    #>
-    [CmdletBinding(SupportsShouldProcess)]
+function Invoke-RobocopyMirror {
+    [OutputType([int])]
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Source,
         [Parameter(Mandatory)][string]$Destination
     )
 
+    $args = @($Source, $Destination, '/MIR','/COPYALL','/DCOPY:DAT','/B','/R:1','/W:1','/XJ','/NFL','/NDL')
+    & robocopy @args | Out-Null
+    return $LASTEXITCODE
+}
+
+function Test-OneDriveFolderMoveVerification {
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Destination,
+        [AllowNull()][string]$DeferredSource
+    )
+
+    if (-not (Test-Path $Destination)) { return $false }
+    if ($DeferredSource) {
+        return (Test-Path $DeferredSource)
+    }
+    return $true
+}
+
+function Move-OneDriveFolder {
+    <#
+    .SYNOPSIS
+        Move an account's UserFolder from $Source to $Destination,
+        using NTFS rename when possible and robocopy /MIR /COPYALL
+        otherwise. Cross-volume moves rename the original source to a
+        .migrated-* recovery folder and only delete it when explicitly
+        requested via -DeleteSourceOnSuccess.
+    #>
+    [OutputType([pscustomobject])]
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination,
+        [switch]$DeleteSourceOnSuccess
+    )
+
+    $result = [pscustomobject]@{
+        SameVolume         = $null
+        DeferredDeletePath = $null
+    }
+
     if (-not (Test-Path $Source)) {
         Write-Verbose "Source '$Source' does not exist; treating as new account folder."
-        return
+        return $result
     }
     if ((Test-Path $Destination) -and ((Get-Item $Destination).FullName -ieq (Get-Item $Source).FullName)) {
-        return
+        return $result
     }
     if (Test-Path $Destination) {
         throw "Refusing to merge: destination '$Destination' already exists. Resolve manually."
@@ -484,25 +522,40 @@ function Move-OneDriveFolder {
         }
     }
 
-    if (Test-IsSameVolume -Source $Source -Destination $Destination) {
+    $result.SameVolume = Test-IsSameVolume -Source $Source -Destination $Destination
+    if ($result.SameVolume) {
         if ($PSCmdlet.ShouldProcess($Source, "Move-Item -> $Destination (same volume)")) {
             Move-Item -LiteralPath $Source -Destination $Destination
         }
-    } else {
-        Write-Warning "Cross-volume migration: Files-On-Demand placeholders will be materialized by robocopy. To force-hydrate cloud-only files first, run: attrib -O '$Source\*' /S /D"
-        if ($PSCmdlet.ShouldProcess($Source, "robocopy /MIR /COPYALL -> $Destination (cross volume)")) {
-            $args = @($Source, $Destination, '/MIR','/COPYALL','/DCOPY:DAT','/B','/R:1','/W:1','/XJ','/NFL','/NDL')
-            & robocopy @args | Out-Null
-            $rc = $LASTEXITCODE
-            # robocopy success: 0-7. >=8 is failure.
-            if ($rc -ge 8) {
-                throw "robocopy failed (exit $rc) -- leaving source '$Source' in place."
+        return $result
+    }
+
+    Write-Warning "Cross-volume migration copies data first, then renames the original source to a .migrated-* recovery folder. Use -DeleteSourceOnSuccess only after you are comfortable auto-removing that recovery folder."
+    if ($PSCmdlet.ShouldProcess($Source, "robocopy /MIR /COPYALL -> $Destination (cross volume)")) {
+        $rc = Invoke-RobocopyMirror -Source $Source -Destination $Destination
+        # robocopy success: 0-7. >=8 is failure.
+        if ($rc -ge 8) {
+            throw "robocopy failed (exit $rc) -- leaving source '$Source' in place."
+        }
+
+        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $migratedPath = "$Source.migrated-$timestamp"
+        Move-Item -LiteralPath $Source -Destination $migratedPath
+
+        if (-not (Test-OneDriveFolderMoveVerification -Destination $Destination -DeferredSource $migratedPath)) {
+            throw "Cross-volume verification failed after copying '$Source' to '$Destination'. Original data was preserved at '$migratedPath'."
+        }
+
+        if ($DeleteSourceOnSuccess) {
+            if ($PSCmdlet.ShouldProcess($migratedPath, 'Remove-Item -Recurse (verified cross-volume source cleanup)')) {
+                Remove-Item -LiteralPath $migratedPath -Recurse -Force
             }
-            if ($PSCmdlet.ShouldProcess($Source, 'Remove-Item -Recurse (after successful robocopy)')) {
-                Remove-Item -LiteralPath $Source -Recurse -Force
-            }
+        } else {
+            $result.DeferredDeletePath = $migratedPath
         }
     }
+
+    return $result
 }
 
 function Update-OneDriveAccountRegistry {
@@ -716,7 +769,8 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         [Parameter(Mandatory)][string]$RootDir,
         [Parameter(Mandatory)][string]$KfmOwner,
         [switch]$NoKfmRebind,
-        [AllowEmptyCollection()][AllowNull()][string[]]$FreshSync
+        [AllowEmptyCollection()][AllowNull()][string[]]$FreshSync,
+        [switch]$DeleteSourceOnSuccess
     )
 
     Write-Host "MarkMichaelisOneDriveConfiguration: RootDir=$RootDir, KfmOwner=$KfmOwner"
@@ -784,6 +838,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     #    accounts are excluded from the file-copy list and handled
     #    separately via Remove-OneDriveAccountLink.
     $stoppedOneDrive = $false
+    $deferredCleanupPaths = New-Object System.Collections.Generic.List[string]
     $migrations = @()
     foreach ($a in $accounts) {
         if ($freshSyncSlots -contains $a.Slot) { continue }
@@ -807,7 +862,10 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
                 if ($sameVolume) {
                     $registrySnapshot = Get-OneDriveAccountRegistrySnapshot -Account $m.Account
                 }
-                Move-OneDriveFolder -Source $m.OldPath -Destination $m.NewPath
+                $moveResult = Move-OneDriveFolder -Source $m.OldPath -Destination $m.NewPath -DeleteSourceOnSuccess:$DeleteSourceOnSuccess
+                if ($moveResult -and $moveResult.DeferredDeletePath) {
+                    $deferredCleanupPaths.Add($moveResult.DeferredDeletePath) | Out-Null
+                }
                 try {
                     Update-OneDriveAccountRegistry -Account $m.Account -NewPath $m.NewPath
                 } catch {
@@ -906,6 +964,15 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         Write-Host ""
     }
 
+    if ($deferredCleanupPaths.Count -gt 0) {
+        Write-Host ""
+        Write-Host "Cross-volume recovery folders preserved for manual cleanup:"
+        foreach ($path in $deferredCleanupPaths) {
+            Write-Host ("  - {0}" -f $path)
+        }
+        Write-Host "  Review the destination, confirm OneDrive is healthy, then delete the .migrated-* folder(s) manually or re-run with -DeleteSourceOnSuccess."
+    }
+
     Write-Warning "MRU staleness: Office recent docs / Snagit Recent File List / VS recent files may reference old OneDrive paths; reopen as needed."
 }
 
@@ -913,5 +980,5 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
 # `& "$dir\MarkMichaelisOneDriveConfiguration.ps1"`). When dot-sourced
 # (Pester tests), expose the helpers without running migration.
 if ($MyInvocation.InvocationName -ne '.') {
-    Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner -NoKfmRebind:$NoKfmRebind -FreshSync $FreshSync
+    Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner -NoKfmRebind:$NoKfmRebind -FreshSync $FreshSync -DeleteSourceOnSuccess:$DeleteSourceOnSuccess
 }

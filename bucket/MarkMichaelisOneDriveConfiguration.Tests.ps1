@@ -361,6 +361,82 @@ Describe 'Move-OneDriveFolder' -Tag 'Light' {
         }
         Should -Invoke New-Item -Times 0
     }
+
+    It 'renames the source to a .migrated-* folder after successful cross-volume copy by default' {
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                'D:\OneDrive\OneDrive - IntelliTect' { $false; break }
+                'D:\OneDrive' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Test-IsSameVolume -MockWith { $false }
+        Mock -CommandName Invoke-RobocopyMirror -MockWith { 1 }
+        Mock -CommandName Get-Date -MockWith { '20240102-030405' }
+        Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $true }
+        Mock -CommandName Move-Item
+        Mock -CommandName Remove-Item
+
+        $result = Move-OneDriveFolder -Source 'C:\Users\me\OneDrive - IntelliTect' -Destination 'D:\OneDrive\OneDrive - IntelliTect' -Confirm:$false
+
+        $result.DeferredDeletePath | Should -Be 'C:\Users\me\OneDrive - IntelliTect.migrated-20240102-030405'
+        Should -Invoke Move-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq 'C:\Users\me\OneDrive - IntelliTect' -and
+            $Destination -eq 'C:\Users\me\OneDrive - IntelliTect.migrated-20240102-030405'
+        }
+        Should -Invoke Remove-Item -Times 0
+    }
+
+    It 'only deletes the renamed source when -DeleteSourceOnSuccess is supplied and verification passed' {
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                'D:\OneDrive\OneDrive - IntelliTect' { $false; break }
+                'D:\OneDrive' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Test-IsSameVolume -MockWith { $false }
+        Mock -CommandName Invoke-RobocopyMirror -MockWith { 1 }
+        Mock -CommandName Get-Date -MockWith { '20240102-030405' }
+        Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $true }
+        Mock -CommandName Move-Item
+        Mock -CommandName Remove-Item
+
+        $result = Move-OneDriveFolder -Source 'C:\Users\me\OneDrive - IntelliTect' -Destination 'D:\OneDrive\OneDrive - IntelliTect' -DeleteSourceOnSuccess -Confirm:$false
+
+        $result.DeferredDeletePath | Should -BeNullOrEmpty
+        Should -Invoke Remove-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq 'C:\Users\me\OneDrive - IntelliTect.migrated-20240102-030405'
+        }
+    }
+
+    It 'refuses delete cleanup when cross-volume verification fails' {
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                'D:\OneDrive\OneDrive - IntelliTect' { $false; break }
+                'D:\OneDrive' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Test-IsSameVolume -MockWith { $false }
+        Mock -CommandName Invoke-RobocopyMirror -MockWith { 1 }
+        Mock -CommandName Get-Date -MockWith { '20240102-030405' }
+        Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $false }
+        Mock -CommandName Move-Item
+        Mock -CommandName Remove-Item
+
+        { Move-OneDriveFolder -Source 'C:\Users\me\OneDrive - IntelliTect' -Destination 'D:\OneDrive\OneDrive - IntelliTect' -DeleteSourceOnSuccess -Confirm:$false } |
+            Should -Throw -ExpectedMessage '*Original data was preserved*'
+
+        Should -Invoke Move-Item -Times 1
+        Should -Invoke Remove-Item -Times 0
+    }
 }
 
 Describe 'Invoke-MarkMichaelisOneDriveConfiguration pre-create behavior' -Tag 'Light' {
