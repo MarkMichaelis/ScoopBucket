@@ -758,6 +758,107 @@ function Invoke-AppFixUps {
     }
 }
 
+function Get-OneDriveRegistryStringValuesUnderPath {
+    [OutputType([object[]])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    if (-not (Test-Path $Path)) { return @() }
+
+    $results = New-Object System.Collections.Generic.List[object]
+    $keys = @([pscustomobject]@{ PSPath = $Path }) + @(Get-ChildItem -Path $Path -Recurse -ErrorAction SilentlyContinue)
+    foreach ($key in $keys) {
+        $props = Get-ItemProperty -Path $key.PSPath -ErrorAction SilentlyContinue
+        if (-not $props) { continue }
+        foreach ($pName in $props.PSObject.Properties.Name) {
+            if ($pName -like 'PS*') { continue }
+            $value = $props.$pName
+            if ($value -is [string] -and [System.IO.Path]::IsPathRooted($value)) {
+                $results.Add([pscustomobject]@{
+                    KeyPath    = $key.PSPath
+                    ValueName  = $pName
+                    Value      = $value
+                }) | Out-Null
+            }
+        }
+    }
+    return $results.ToArray()
+}
+
+function Get-OneDriveSharePointSiteList {
+    [OutputType([object[]])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Accounts,
+        [Parameter(Mandatory)][string]$RootDir
+    )
+
+    $sites = New-Object System.Collections.Generic.List[object]
+    foreach ($account in $Accounts) {
+        if ($account.AccountType -ne 'Business' -or -not $account.TenantId -or -not $account.DisplayName) { continue }
+        $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        $paths = New-Object System.Collections.Generic.List[string]
+
+        $tenantRoot = Join-Path $account.RegistryPath ("Tenants\{0}" -f $account.TenantId)
+        foreach ($entry in @(Get-OneDriveRegistryStringValuesUnderPath -Path $tenantRoot)) {
+            if ($entry.Value -and $entry.Value -ne $account.UserFolder -and $seen.Add($entry.Value)) {
+                $paths.Add($entry.Value) | Out-Null
+            }
+        }
+
+        foreach ($cacheLeaf in 'ScopeIdToMountPointPathCache','ScopeIdToMountPointPathCacheRoot') {
+            $cacheKey = Join-Path $account.RegistryPath $cacheLeaf
+            foreach ($entry in @(Get-OneDriveRegistryStringValuesUnderPath -Path $cacheKey)) {
+                if ($entry.Value -and $entry.Value -ne $account.UserFolder -and $seen.Add($entry.Value)) {
+                    $paths.Add($entry.Value) | Out-Null
+                }
+            }
+        }
+
+        foreach ($pathValue in $paths) {
+            $leafName = Split-Path -Leaf $pathValue
+            if ([string]::IsNullOrWhiteSpace($leafName)) { continue }
+            $desiredPath = Join-Path (Join-Path $RootDir $account.DisplayName) $leafName
+            $sites.Add([pscustomobject]@{
+                OwnerAccount = $account
+                CurrentPath  = $pathValue
+                LeafName     = $leafName
+                DesiredPath  = $desiredPath
+            }) | Out-Null
+        }
+    }
+
+    return $sites.ToArray()
+}
+
+function Update-OneDriveSharePointCache {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][pscustomobject]$Account,
+        [Parameter(Mandatory)][string]$OldPath,
+        [Parameter(Mandatory)][string]$NewPath
+    )
+
+    $candidateRoots = @(
+        (Join-Path $Account.RegistryPath ("Tenants\{0}" -f $Account.TenantId)),
+        (Join-Path $Account.RegistryPath 'ScopeIdToMountPointPathCache'),
+        (Join-Path $Account.RegistryPath 'ScopeIdToMountPointPathCacheRoot')
+    )
+
+    foreach ($root in $candidateRoots) {
+        foreach ($entry in @(Get-OneDriveRegistryStringValuesUnderPath -Path $root)) {
+            if ($entry.Value.StartsWith($OldPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $newValue = $NewPath + $entry.Value.Substring($OldPath.Length)
+                if ($PSCmdlet.ShouldProcess("$($entry.KeyPath)\$($entry.ValueName)", "Rewrite '$($entry.Value)' -> '$newValue'")) {
+                    Set-ItemProperty -Path $entry.KeyPath -Name $entry.ValueName -Value $newValue -Type String
+                }
+            }
+        }
+    }
+}
+
 # ---------------------------------------------------------------------------
 # Main orchestration. Skipped when the script is dot-sourced (so unit
 # tests can pull in just the helper functions above).
@@ -847,6 +948,7 @@ function New-OneDriveMigrationPlan {
         [Parameter(Mandatory)][string]$RootDir,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Accounts,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$FreshSyncAccounts,
+        [AllowEmptyCollection()][object[]]$SharePointSites = @(),
         [AllowNull()][string]$KfmCurrentPath,
         [Parameter(Mandatory)][pscustomobject]$KfmDecision,
         [bool]$WasRunning
@@ -890,6 +992,7 @@ function New-OneDriveMigrationPlan {
             $hasFolder = $a.UserFolder -and (Test-Path $a.UserFolder)
             $moveItem = New-OneDriveMigrationPlanItem -Type 'MoveAccount' -Target $a.UserFolder -CurrentValue $a.UserFolder -DesiredValue $null -SameVolume $null -Account $a -Reason 'Fresh-sync unlink instead of migrating the existing local OneDrive tree.' -Skipped:(-not $hasFolder) -SkipReason $(if (-not $hasFolder) { 'Fresh-sync account has no local folder to remove.' } else { $null })
             $moveItem | Add-Member -NotePropertyName FreshSync -NotePropertyValue $true
+            $moveItem | Add-Member -NotePropertyName SharePointSite -NotePropertyValue $false
             $executionItems.Add($moveItem) | Out-Null
             continue
         }
@@ -908,6 +1011,7 @@ function New-OneDriveMigrationPlan {
 
         $moveItem = New-OneDriveMigrationPlanItem -Type 'MoveAccount' -Target $target -CurrentValue $a.UserFolder -DesiredValue $target -SameVolume $sameVolume -Account $a -Reason 'Move the account sync root to the canonical target path.' -Skipped:([bool]$moveSkipReason) -SkipReason $moveSkipReason
         $moveItem | Add-Member -NotePropertyName FreshSync -NotePropertyValue $false
+        $moveItem | Add-Member -NotePropertyName SharePointSite -NotePropertyValue $false
         $executionItems.Add($moveItem) | Out-Null
         $moveItemsBySlot[$a.Slot] = $moveItem
 
@@ -919,13 +1023,47 @@ function New-OneDriveMigrationPlan {
         } else {
             $null
         }
-        $executionItems.Add((New-OneDriveMigrationPlanItem -Type 'UpdateAccountRegistry' -Target "$($a.RegistryPath)\UserFolder" -CurrentValue $regCurrent -DesiredValue $target -SameVolume $sameVolume -Account $a -Reason 'Rewrite OneDrive account registry paths after the move.' -Skipped:([bool]$regSkipReason) -SkipReason $regSkipReason)) | Out-Null
+        $regItem = New-OneDriveMigrationPlanItem -Type 'UpdateAccountRegistry' -Target "$($a.RegistryPath)\UserFolder" -CurrentValue $regCurrent -DesiredValue $target -SameVolume $sameVolume -Account $a -Reason 'Rewrite OneDrive account registry paths after the move.' -Skipped:([bool]$regSkipReason) -SkipReason $regSkipReason
+        $regItem | Add-Member -NotePropertyName MoveItem -NotePropertyValue $moveItem
+        $executionItems.Add($regItem) | Out-Null
 
         if ($AppFixUps.Count -gt 0) {
             $executionItems.Add((New-OneDriveMigrationPlanItem -Type 'AppFixUp' -Target $target -CurrentValue $a.UserFolder -DesiredValue $target -SameVolume $sameVolume -Account $a -Reason 'Run application-specific path fix-ups after the move.' -Skipped:$moveItem.Skipped -SkipReason $moveItem.SkipReason)) | Out-Null
         }
 
         $verifyItem = New-OneDriveMigrationPlanItem -Type 'Verify' -Target $target -CurrentValue $a.UserFolder -DesiredValue $target -SameVolume $sameVolume -Account $a -Reason 'Verify the migrated sync root exists where expected.' -Skipped:$moveItem.Skipped -SkipReason $moveItem.SkipReason
+        $verifyItem | Add-Member -NotePropertyName DeferredDeletePath -NotePropertyValue $null
+        $moveItem | Add-Member -NotePropertyName VerifyItem -NotePropertyValue $verifyItem
+        $executionItems.Add($verifyItem) | Out-Null
+    }
+
+    foreach ($site in $SharePointSites) {
+        if ($freshSyncSlots -contains $site.OwnerAccount.Slot) { continue }
+        $sourceExists = $site.CurrentPath -and (Test-Path $site.CurrentPath)
+        $alreadyTarget = $site.CurrentPath -and ($site.CurrentPath.TrimEnd('\') -ieq $site.DesiredPath.TrimEnd('\'))
+        $sameVolume = if ($sourceExists) { Test-IsSameVolume -Source $site.CurrentPath -Destination $site.DesiredPath } else { $null }
+        $moveSkipReason = $null
+        if (-not $site.CurrentPath) {
+            $moveSkipReason = 'SharePoint site has no current mount path.'
+        } elseif ($alreadyTarget) {
+            $moveSkipReason = 'SharePoint site already matches the canonical target.'
+        } elseif (-not $sourceExists) {
+            $moveSkipReason = 'SharePoint site source folder is missing; migration skipped for safety.'
+        }
+
+        $moveItem = New-OneDriveMigrationPlanItem -Type 'MoveAccount' -Target $site.DesiredPath -CurrentValue $site.CurrentPath -DesiredValue $site.DesiredPath -SameVolume $sameVolume -Account $site.OwnerAccount -Reason 'Move the SharePoint site/library mount to the canonical tenant sibling path.' -Skipped:([bool]$moveSkipReason) -SkipReason $moveSkipReason
+        $moveItem | Add-Member -NotePropertyName FreshSync -NotePropertyValue $false
+        $moveItem | Add-Member -NotePropertyName SharePointSite -NotePropertyValue $true
+        $moveItem | Add-Member -NotePropertyName Site -NotePropertyValue $site
+        $executionItems.Add($moveItem) | Out-Null
+
+        $rewriteSkipReason = if ($moveItem.Skipped) { $moveItem.SkipReason } else { $null }
+        $rewriteItem = New-OneDriveMigrationPlanItem -Type 'RewriteSPCache' -Target $site.DesiredPath -CurrentValue $site.CurrentPath -DesiredValue $site.DesiredPath -SameVolume $sameVolume -Account $site.OwnerAccount -Reason 'Rewrite SharePoint mount-point cache entries after the site move.' -Skipped:([bool]$rewriteSkipReason) -SkipReason $rewriteSkipReason
+        $rewriteItem | Add-Member -NotePropertyName Site -NotePropertyValue $site
+        $rewriteItem | Add-Member -NotePropertyName MoveItem -NotePropertyValue $moveItem
+        $executionItems.Add($rewriteItem) | Out-Null
+
+        $verifyItem = New-OneDriveMigrationPlanItem -Type 'Verify' -Target $site.DesiredPath -CurrentValue $site.CurrentPath -DesiredValue $site.DesiredPath -SameVolume $sameVolume -Account $site.OwnerAccount -Reason 'Verify the SharePoint site/library mount exists where expected.' -Skipped:$moveItem.Skipped -SkipReason $moveItem.SkipReason
         $verifyItem | Add-Member -NotePropertyName DeferredDeletePath -NotePropertyValue $null
         $moveItem | Add-Member -NotePropertyName VerifyItem -NotePropertyValue $verifyItem
         $executionItems.Add($verifyItem) | Out-Null
@@ -1070,6 +1208,9 @@ function Invoke-OneDriveMigrationPlan {
                 'UpdateAccountRegistry' {
                     Update-OneDriveAccountRegistry -Account $item.Account -NewPath $item.DesiredValue
                 }
+                'RewriteSPCache' {
+                    Update-OneDriveSharePointCache -Account $item.Account -OldPath $item.CurrentValue -NewPath $item.DesiredValue
+                }
                 'RewriteKfm' {
                     if ($item.CurrentValue -and $item.DesiredValue) {
                         Update-KfmBindings -OldRoot $item.CurrentValue -NewRoot $item.DesiredValue
@@ -1099,12 +1240,16 @@ function Invoke-OneDriveMigrationPlan {
         } catch {
             $item.Status = 'Failed'
             $item.FailureReason = $_.Exception.Message
-            if ($item.Type -eq 'UpdateAccountRegistry' -and $item.SameVolume) {
-                $moveItem = $Plan | Where-Object { $_.Type -eq 'MoveAccount' -and -not $_.FreshSync -and $_.Account -and $_.Account.Slot -eq $item.Account.Slot } | Select-Object -First 1
+            if ($item.Type -in @('UpdateAccountRegistry','RewriteSPCache') -and $item.SameVolume) {
+                $moveItem = if ($item.PSObject.Properties.Name -contains 'MoveItem') {
+                    $item.MoveItem
+                } else {
+                    $Plan | Where-Object { $_.Type -eq 'MoveAccount' -and -not $_.FreshSync -and $_.Account -and $_.Account.Slot -eq $item.Account.Slot } | Select-Object -First 1
+                }
                 if ($moveItem -and (Test-Path $moveItem.DesiredValue) -and -not (Test-Path $moveItem.CurrentValue)) {
                     Move-Item -LiteralPath $moveItem.DesiredValue -Destination $moveItem.CurrentValue
                 }
-                if ($moveItem -and $moveItem.RegistrySnapshot) {
+                if ($item.Type -eq 'UpdateAccountRegistry' -and $moveItem -and $moveItem.RegistrySnapshot) {
                     Restore-OneDriveAccountRegistrySnapshot -Account $item.Account -Snapshot $moveItem.RegistrySnapshot
                 }
             }
@@ -1135,6 +1280,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
 
     $accounts = Get-OneDriveAccountList
     $freshSyncAccounts = Resolve-FreshSyncAccounts -Accounts $accounts -FreshSync $FreshSync
+    $sharePointSites = Get-OneDriveSharePointSiteList -Accounts $accounts -RootDir $RootDir
     $freshSyncSlots = @($freshSyncAccounts | ForEach-Object { $_.Slot })
 
     Write-Host "  Discovered $($accounts.Count) account(s):"
@@ -1151,7 +1297,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     }
 
     $wasRunning = [bool](Get-Process -Name 'OneDrive' -ErrorAction SilentlyContinue)
-    $plan = New-OneDriveMigrationPlan -RootDir $RootDir -Accounts $accounts -FreshSyncAccounts @($freshSyncAccounts) -KfmCurrentPath $kfmCurrent -KfmDecision $kfmDecision -WasRunning:$wasRunning
+    $plan = New-OneDriveMigrationPlan -RootDir $RootDir -Accounts $accounts -FreshSyncAccounts @($freshSyncAccounts) -SharePointSites @($sharePointSites) -KfmCurrentPath $kfmCurrent -KfmDecision $kfmDecision -WasRunning:$wasRunning
     Format-OneDriveMigrationPlan -Plan $plan
 
     if ($WhatIfPreference) {
