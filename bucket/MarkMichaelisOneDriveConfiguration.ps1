@@ -85,13 +85,13 @@ function Get-OneDriveTargetPath {
         [Parameter(Mandatory)][string]$RootDir
     )
     if ($Account.AccountType -eq 'Personal') {
-        return (Join-Path $RootDir 'OneDrive - Personal')
+        return ([System.IO.Path]::Combine($RootDir, 'OneDrive - Personal'))
     }
     $name = $Account.DisplayName
     if ([string]::IsNullOrWhiteSpace($name)) {
         throw "Account has no DisplayName; cannot compute target path."
     }
-    return (Join-Path $RootDir ("OneDrive - {0}" -f $name))
+    return ([System.IO.Path]::Combine($RootDir, ("OneDrive - {0}" -f $name)))
 }
 
 function Test-IsSameVolume {
