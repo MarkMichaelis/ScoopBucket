@@ -369,3 +369,46 @@ Describe 'Resolve-FreshSyncAccounts' -Tag 'Light' {
         @($fileCopy | ForEach-Object Slot) | Should -Be @('Business1','Personal')
     }
 }
+
+
+Describe 'Elevation pre-flight' -Tag 'Light' {
+    BeforeAll {
+        $script:bundlePath = "$PSScriptRoot\MarkMichaelisOneDriveConfiguration.ps1"
+    }
+
+    AfterEach {
+        # Clear the test escape hatch so one test cannot leak state into
+        # another (or into a subsequent dot-source).
+        if (Test-Path 'Variable:Global:__MMOD_ForceIsElevated') {
+            Remove-Variable -Name '__MMOD_ForceIsElevated' -Scope Global -Force
+        }
+    }
+
+    It 'Test-IsElevated returns a [bool]' {
+        $result = Test-IsElevated
+        $result | Should -BeOfType [bool]
+    }
+
+    It 'throws with an "elevated PowerShell" message when not elevated and -SkipElevationCheck is absent' {
+        $global:__MMOD_ForceIsElevated = $false
+        {
+            & $script:bundlePath -RootDir 'TestDrive:\OD' -WhatIf
+        } | Should -Throw -ExpectedMessage '*elevated PowerShell*'
+    }
+
+    It 'does not throw the elevation message when -SkipElevationCheck is passed (even when not elevated)' {
+        $global:__MMOD_ForceIsElevated = $false
+        # The orchestrator may fail later for unrelated reasons (TestDrive,
+        # missing registry, etc.); we only assert that the *elevation*
+        # pre-flight does not fire.
+        $threw = $null
+        try {
+            & $script:bundlePath -RootDir 'TestDrive:\OD' -SkipElevationCheck -WhatIf
+        } catch {
+            $threw = $_
+        }
+        if ($threw) {
+            $threw.Exception.Message | Should -Not -Match 'elevated PowerShell'
+        }
+    }
+}
