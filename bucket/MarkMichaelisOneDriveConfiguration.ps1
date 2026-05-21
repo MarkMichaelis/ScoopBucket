@@ -336,6 +336,35 @@ function Get-CurrentKfmPath {
     return $props.Personal  # the "Personal" value here = Documents
 }
 
+function Resolve-KfmCurrentOwnerRoot {
+    <#
+    .SYNOPSIS
+        Find the discovered OneDrive account whose UserFolder is the longest
+        prefix of the current KFM path.
+    #>
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Accounts,
+        [AllowNull()][string]$KfmCurrentPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($KfmCurrentPath)) { return $null }
+
+    $match = $Accounts |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_.UserFolder) } |
+        Sort-Object { $_.UserFolder.TrimEnd('\').Length } -Descending |
+        Where-Object {
+            $root = $_.UserFolder.TrimEnd('\')
+            $current = $KfmCurrentPath.TrimEnd('\')
+            $current.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $current.StartsWith("$root\", [System.StringComparison]::OrdinalIgnoreCase)
+        } |
+        Select-Object -First 1
+
+    return $match
+}
+
 function Set-OneDrivePolicy {
     <#
     .SYNOPSIS
@@ -753,10 +782,14 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     if (-not $kfmOwnerInFreshSync) {
         if ($kfmDecision.Action -eq 'Rebind' -and $kfmDecision.OwnerAccount) {
             $ownerTarget = Get-OneDriveTargetPath -Account $kfmDecision.OwnerAccount -RootDir $RootDir
-            $kfmRoot = $kfmCurrent
-            # Trim to drive root if it doesn't match a known account folder.
-            if ($PSCmdlet.ShouldProcess("KFM root '$kfmRoot' -> '$ownerTarget'", "Rebind KFM")) {
-                Update-KfmBindings -OldRoot $kfmRoot -NewRoot $ownerTarget
+            $kfmCurrentOwner = Resolve-KfmCurrentOwnerRoot -Accounts $accounts -KfmCurrentPath $kfmCurrent
+            if (-not $kfmCurrentOwner) {
+                Write-Warning "KFM is currently bound to '$kfmCurrent', which is not under any discovered OneDrive account UserFolder. Skipping automatic rebind."
+            } else {
+                $kfmOwnerOldRoot = $kfmCurrentOwner.UserFolder
+                if ($PSCmdlet.ShouldProcess("KFM root '$kfmOwnerOldRoot' -> '$ownerTarget'", "Rebind KFM")) {
+                    Update-KfmBindings -OldRoot $kfmOwnerOldRoot -NewRoot $ownerTarget
+                }
             }
         } elseif ($kfmDecision.Action -eq 'WarnOnly') {
             Write-Warning $kfmDecision.Reason

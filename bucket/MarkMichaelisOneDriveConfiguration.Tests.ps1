@@ -187,6 +187,35 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
     }
 }
 
+Describe 'Resolve-KfmCurrentOwnerRoot' -Tag 'Light' {
+    BeforeAll {
+        $script:kfmOwner1 = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'Michaelis Consulting'
+            UserFolder = 'C:\OneDrive\OneDrive - Michaelis Consulting'
+        }
+        $script:kfmOwner2 = [pscustomobject]@{
+            Slot = 'Business2'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'
+        }
+    }
+
+    It 'returns the owning account for <Path>' -ForEach @(
+        @{ Path = 'C:\OneDrive\OneDrive - IntelliTect\Documents'; ExpectedSlot = 'Business2' }
+        @{ Path = 'C:\OneDrive\OneDrive - IntelliTect\Desktop'; ExpectedSlot = 'Business2' }
+        @{ Path = 'C:\OneDrive\OneDrive - IntelliTect\Pictures'; ExpectedSlot = 'Business2' }
+        @{ Path = 'C:\OneDrive\OneDrive - IntelliTect\Music'; ExpectedSlot = 'Business2' }
+        @{ Path = 'C:\OneDrive\OneDrive - IntelliTect\Videos'; ExpectedSlot = 'Business2' }
+    ) {
+        $result = Resolve-KfmCurrentOwnerRoot -Accounts @($script:kfmOwner1, $script:kfmOwner2) -KfmCurrentPath $Path
+        $result.Slot | Should -Be $ExpectedSlot
+    }
+
+    It 'returns $null for an orphaned KFM path outside discovered roots' {
+        Resolve-KfmCurrentOwnerRoot -Accounts @($script:kfmOwner1, $script:kfmOwner2) -KfmCurrentPath 'D:\Elsewhere\Documents' |
+            Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Get-OneDriveAccountList (zombie slot filter)' -Tag 'Light' {
     # Regression for issue #192: a Business slot left over from a failed
     # sign-in has no DisplayName / UserFolder / UserEmail and must be
@@ -428,6 +457,86 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration running state' -Tag 'Light' 
         Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
 
         Should -Invoke Start-OneDriveExe -Times 1
+    }
+}
+
+Describe 'Invoke-MarkMichaelisOneDriveConfiguration KFM rebind' -Tag 'Light' {
+    It 'preserves the known-folder suffix by rebinding from the owning account root for <Suffix>' -ForEach @(
+        @{ Suffix = 'Documents' }
+        @{ Suffix = 'Desktop' }
+        @{ Suffix = 'Pictures' }
+        @{ Suffix = 'Music' }
+        @{ Suffix = 'Videos' }
+    ) {
+        $rootDir = 'C:\OneDrive'
+        $owner = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'Michaelis Consulting'
+            UserEmail = 'owner@example.com'; UserFolder = 'C:\OneDrive\OneDrive - Michaelis Consulting'; TenantId = 'tid-owner'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $other = [pscustomobject]@{
+            Slot = 'Business2'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'other@example.com'; UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'; TenantId = 'tid-other'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business2'
+        }
+        $kfmCurrent = "C:\OneDrive\OneDrive - IntelliTect\$Suffix"
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $true; break }
+                'C:\OneDrive\Michaelis Consulting' { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($owner, $other) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $kfmCurrent }
+        Mock -CommandName Set-OneDrivePolicy
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Move-OneDriveFolder
+        Mock -CommandName Update-OneDriveAccountRegistry
+        Mock -CommandName Invoke-AppFixUps
+        Mock -CommandName Start-OneDriveExe
+        Mock -CommandName New-Item
+        Mock -CommandName Get-Process -MockWith { $null }
+        Mock -CommandName Update-KfmBindings
+
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir $rootDir -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+
+        Should -Invoke Update-KfmBindings -Times 1 -ParameterFilter {
+            $OldRoot -eq 'C:\OneDrive\OneDrive - IntelliTect' -and
+            $NewRoot -eq 'C:\OneDrive\OneDrive - Michaelis Consulting'
+        }
+    }
+
+    It 'warns and skips rebind when the current KFM path is orphaned' {
+        $owner = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'Michaelis Consulting'
+            UserEmail = 'owner@example.com'; UserFolder = 'C:\OneDrive\OneDrive - Michaelis Consulting'; TenantId = 'tid-owner'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            $Path -eq 'C:\OneDrive'
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($owner) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { 'D:\Elsewhere\Documents' }
+        Mock -CommandName Set-OneDrivePolicy
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Move-OneDriveFolder
+        Mock -CommandName Update-OneDriveAccountRegistry
+        Mock -CommandName Invoke-AppFixUps
+        Mock -CommandName Start-OneDriveExe
+        Mock -CommandName New-Item
+        Mock -CommandName Get-Process -MockWith { $null }
+        Mock -CommandName Update-KfmBindings
+        Mock -CommandName Write-Warning
+
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+
+        Should -Invoke Update-KfmBindings -Times 0
+        Should -Invoke Write-Warning -Times 1 -ParameterFilter { $Message -like '*not under any discovered OneDrive account UserFolder*' }
     }
 }
 
