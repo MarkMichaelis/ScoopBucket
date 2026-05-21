@@ -69,6 +69,21 @@
     Run for real: pre-create $RootDir, apply policy, migrate any
     mis-located accounts, rewrite KFM, restart OneDrive.
 #>
+
+<#
+Policy research (authoritative: https://learn.microsoft.com/sharepoint/use-group-policy)
+
+Confirmed policy shape baked into this script:
+  1. DefaultRootDir lives at HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir
+     (per-user policy, not machine-wide).
+  2. Each DefaultRootDir value name is the TenantId (GUID), and each value's
+     data is the final tenant folder path, e.g. C:\OneDrive\OneDrive - Contoso.
+  3. GPOSetUpdateRing lives at HKLM:\SOFTWARE\Policies\Microsoft\OneDrive
+     and therefore requires elevation to write.
+  4. GPOSetUpdateRing must be 0 for the Deferred/Enterprise ring (stable
+     updates). 4 would opt the machine into Insider/Preview builds; 5 is
+     Production.
+#>
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [string] $RootDir   = 'C:\OneDrive',
@@ -326,6 +341,12 @@ function Set-OneDrivePolicy {
     .SYNOPSIS
         Apply tenant-redirection policy (DefaultRootDir per Work tenant)
         and the GPOSetUpdateRing policy in HKLM.
+    .DESCRIPTION
+        Policy shape verified against https://learn.microsoft.com/sharepoint/use-group-policy:
+          - DefaultRootDir is a per-user HKCU policy whose value name is the
+            tenant GUID and whose value data is the final tenant folder.
+          - GPOSetUpdateRing is a machine HKLM policy. Value 0 selects the
+            Deferred/Enterprise ring (stable updates).
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -365,10 +386,10 @@ function Set-OneDrivePolicy {
         }
     }
     $existingRing = (Get-ItemProperty -Path $hklmPolicy -Name 'GPOSetUpdateRing' -ErrorAction SilentlyContinue).GPOSetUpdateRing
-    if ($existingRing -ne 4) {
-        if ($PSCmdlet.ShouldProcess("$hklmPolicy\GPOSetUpdateRing", 'Set DWord = 4 (Deferred ring)')) {
+    if ($existingRing -ne 0) {
+        if ($PSCmdlet.ShouldProcess("$hklmPolicy\GPOSetUpdateRing", 'Set DWord = 0 (Deferred/Enterprise ring; stable updates)')) {
             try {
-                Set-ItemProperty -Path $hklmPolicy -Name 'GPOSetUpdateRing' -Value 4 -Type DWord
+                Set-ItemProperty -Path $hklmPolicy -Name 'GPOSetUpdateRing' -Value 0 -Type DWord
             } catch {
                 Write-Warning "Could not set GPOSetUpdateRing (requires elevation): $($_.Exception.Message)"
             }

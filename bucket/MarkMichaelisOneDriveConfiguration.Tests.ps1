@@ -249,6 +249,57 @@ Describe 'Get-OneDriveAccountList (zombie slot filter)' -Tag 'Light' {
     }
 }
 
+Describe 'Set-OneDrivePolicy' -Tag 'Light' {
+    It 'writes DefaultRootDir in HKCU per tenant and GPOSetUpdateRing=0 in HKLM' {
+        $accounts = @(
+            [pscustomobject]@{
+                Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+                TenantId = '11111111-1111-1111-1111-111111111111'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'
+            },
+            [pscustomobject]@{
+                Slot = 'Personal'; AccountType = 'Personal'; DisplayName = $null
+                TenantId = $null; UserFolder = 'C:\Users\me\OneDrive'
+            }
+        )
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            $Path -in @(
+                'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive',
+                'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir',
+                'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive'
+            )
+        }
+        Mock -CommandName Get-ItemProperty -MockWith {
+            param($Path, $Name)
+            if ($Path -eq 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir' -and $Name -eq '11111111-1111-1111-1111-111111111111') {
+                return [pscustomobject]@{ '11111111-1111-1111-1111-111111111111' = 'C:\SomewhereElse' }
+            }
+            if ($Path -eq 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive' -and $Name -eq 'GPOSetUpdateRing') {
+                return [pscustomobject]@{ GPOSetUpdateRing = 4 }
+            }
+            return [pscustomobject]@{}
+        }
+        Mock -CommandName Set-ItemProperty
+        Mock -CommandName New-Item
+
+        Set-OneDrivePolicy -Accounts $accounts -RootDir 'C:\OneDrive' -Confirm:$false
+
+        Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter {
+            $Path -eq 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir' -and
+            $Name -eq '11111111-1111-1111-1111-111111111111' -and
+            $Value -eq 'C:\OneDrive\OneDrive - IntelliTect' -and
+            $Type -eq 'String'
+        }
+        Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter {
+            $Path -eq 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive' -and
+            $Name -eq 'GPOSetUpdateRing' -and
+            $Value -eq 0 -and
+            $Type -eq 'DWord'
+        }
+    }
+}
+
 Describe 'Resolve-FreshSyncAccounts' -Tag 'Light' {
     BeforeAll {
         $script:b1 = [pscustomobject]@{
