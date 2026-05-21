@@ -182,101 +182,6 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
         }
     }
     [Package]@{
-        # Issue #183. OneDrive.exe is a Windows OS component pre-installed
-        # per-machine under C:\Program Files\Microsoft OneDrive\ but is NOT
-        # on PATH and has no first-party PowerShell completer. We create a
-        # thin .cmd shim under ~\scoop\shims (already on PATH via scoop)
-        # so `onedrive` works from a terminal, and register a native
-        # argument completer for the curated set of top-level switches.
-        #
-        # Curated switches are sourced from long-standing community/MS
-        # support documentation of OneDrive client command-line flags.
-        # Microsoft does not publish a stable PowerShell completion
-        # grammar, so we deliberately keep this list short and obvious.
-        Name        = 'OneDrive CLI shim'
-        Installer   = 'custom'
-        CliCommands = @('onedrive')
-        Completion  = 'native'
-        Notes       = 'OneDrive.exe ships with Windows (per-machine install). This package only manages a launcher shim plus tab-completion -- it does not install OneDrive itself. Switches curated from MS support docs; no upstream PSCompletions catalog entry exists.'
-        ExpectedCompletions = @{
-            onedrive = @('/background','/reset','/shutdown','/restart','/addaccount','/configure_business','/silentconfig','/diag','/checkforupdates','/forcedeleteonedrive','/InternalAddBusiness')
-        }
-        CustomInstallScript = {
-            param($pkg)
-
-            $candidates = @(
-                'C:\Program Files\Microsoft OneDrive\OneDrive.exe',
-                'C:\Program Files (x86)\Microsoft OneDrive\OneDrive.exe'
-            )
-            $binary = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-            if (-not $binary) {
-                throw "OneDrive.exe not found. Tried: $($candidates -join ', '). OneDrive ships with Windows; if it is missing, run 'winget install --id Microsoft.OneDrive' first."
-            }
-
-            $shimDir = Join-Path $env:USERPROFILE 'scoop\shims'
-            if (-not (Test-Path -LiteralPath $shimDir)) {
-                throw "Scoop shim directory '$shimDir' not found. Install scoop first (this bucket depends on it)."
-            }
-
-            $shimPath = Join-Path $shimDir 'onedrive.cmd'
-            # @start "" "<binary>" %* detaches the GUI from the terminal so
-            # the shell prompt returns immediately. The empty "" is the
-            # window-title arg required by cmd's start command when the path
-            # itself is quoted.
-            $content = "@echo off`r`n" +
-                       "@rem ScoopBucket:OneDriveShim -- managed by MicrosoftOffice365.ps1 (issue #183)`r`n" +
-                       "@start `"`" `"$binary`" %*`r`n"
-            Set-Content -LiteralPath $shimPath -Value $content -Encoding ASCII -NoNewline
-            Write-Host "  Created OneDrive shim: $shimPath -> $binary"
-        }
-        CustomUninstallScript = {
-            param($pkg)
-            $shimDir = Join-Path $env:USERPROFILE 'scoop\shims'
-            if (-not (Test-Path -LiteralPath $shimDir)) { return }
-            $shimPath = Join-Path $shimDir 'onedrive.cmd'
-            if (-not (Test-Path -LiteralPath $shimPath)) { return }
-            $raw = Get-Content -LiteralPath $shimPath -Raw -ErrorAction SilentlyContinue
-            if ($raw -and $raw -match 'ScoopBucket:OneDriveShim') {
-                Remove-Item -LiteralPath $shimPath -Force
-                Write-Host "  Removed OneDrive shim: $shimPath"
-            }
-        }
-        VerifyScript = {
-            $shimDir = Join-Path $env:USERPROFILE 'scoop\shims'
-            if (-not (Test-Path -LiteralPath $shimDir)) { return $false }
-            $shimPath = Join-Path $shimDir 'onedrive.cmd'
-            if (-not (Test-Path -LiteralPath $shimPath)) { return $false }
-            $raw = Get-Content -LiteralPath $shimPath -Raw -ErrorAction SilentlyContinue
-            if (-not $raw -or $raw -notmatch 'ScoopBucket:OneDriveShim') { return $false }
-            return $true
-        }
-        NativeCommandScript = {
-            param($Cli)
-
-            $switchMap = @{
-                onedrive = @(
-                    '/background','/reset','/shutdown','/restart','/addaccount',
-                    '/configure_business','/silentconfig','/diag','/checkforupdates',
-                    '/forcedeleteonedrive','/InternalAddBusiness'
-                )
-            }
-
-            $switches = $switchMap[$Cli]
-            if (-not $switches) { return '' }
-            $list = ($switches | ForEach-Object { "'$_'" }) -join ','
-@"
-Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
-    param(`$wordToComplete, `$commandAst, `$cursorPosition)
-    @($list) |
-        Where-Object { `$_ -like "`$wordToComplete*" } |
-        ForEach-Object {
-            [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
-        }
-}
-"@
-        }
-    }
-    [Package]@{
         Name        = 'Claude for Excel'
         Installer   = 'custom'
         DependsOn   = @('Microsoft 365 Apps for Enterprise')
@@ -341,6 +246,197 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
                     }
                 } | Where-Object { $_ }
             return [bool]$hit
+        }
+    }
+    [Package]@{
+        # Windows ships OneDrive as a per-user install under
+        # %LOCALAPPDATA%\Microsoft\OneDrive. This entry replaces that with
+        # the machine-wide install (`OneDriveSetup.exe /allusers /silent`)
+        # so every user on the box shares one C:\Program Files\Microsoft
+        # OneDrive\OneDrive.exe binary -- mandatory for IT-managed
+        # tenant-redirect policy (see Set-OneDriveConfig below) and for
+        # the `onedrive` scoop shim to resolve to a stable path.
+        #
+        # Install nuances:
+        # 1. The per-user install (if any) is uninstalled first via
+        #    OneDriveSetup.exe /uninstall as a best-effort step.
+        # 2. /allusers /silent spawns OneDrive.Sync.Service.exe
+        #    /silentConfig as a background child. That child NEVER exits
+        #    on its own and pins Start-Process -Wait against the parent
+        #    job tree. We use Process.WaitForExit(timeout) on the parent
+        #    only, then explicitly Stop-Process the sync service.
+        # 3. OneDrive.exe is a GUI app with flat (not subcommand) switch
+        #    surface; the shim uses the same `@start "" "<exe>" %*`
+        #    detach pattern as the Office shims so the terminal returns
+        #    immediately after e.g. `onedrive /addaccount`.
+        Name        = 'Microsoft OneDrive (machine-wide)'
+        Installer   = 'custom'
+        CliCommands = @('onedrive')
+        Completion  = 'native'
+        Notes       = 'Replaces the Windows-default per-user OneDrive with a machine-wide install via OneDriveSetup.exe /allusers /silent. /allusers requires admin; the per-user uninstall is best-effort. Shim at ~\scoop\shims\onedrive.cmd resolves to C:\Program Files\Microsoft OneDrive\OneDrive.exe. Switches per support.microsoft.com OneDrive command-line reference (flat switches, no subcommands).'
+        ExpectedCompletions = @{
+            onedrive = @('/addaccount','/background','/reset','/resetauthstate','/shutdown','/signout','/configure_business:')
+        }
+        CustomInstallScript = {
+            param($pkg)
+
+            $machineExe = Join-Path $env:ProgramFiles 'Microsoft OneDrive\OneDrive.exe'
+            $perUserExe = Join-Path $env:LOCALAPPDATA 'Microsoft\OneDrive\OneDriveSetup.exe'
+            $sysWow64Exe = Join-Path $env:SystemRoot 'SysWOW64\OneDriveSetup.exe'
+            $system32Exe = Join-Path $env:SystemRoot 'System32\OneDriveSetup.exe'
+
+            Write-Host '  Stopping any running OneDrive instances...'
+            Get-Process OneDrive, OneDriveSetup, 'OneDrive.Sync.Service' -ErrorAction SilentlyContinue |
+                ForEach-Object { try { Stop-Process -Id $_.Id -Force -ErrorAction Stop } catch {} }
+
+            # Best-effort per-user uninstall. Failures are tolerated --
+            # /allusers will install alongside, but co-existence is messy.
+            $perUserUninstaller = @($perUserExe, $sysWow64Exe, $system32Exe) |
+                Where-Object { Test-Path -LiteralPath $_ } |
+                Select-Object -First 1
+            if ($perUserUninstaller) {
+                Write-Host "  Uninstalling per-user OneDrive via $perUserUninstaller /uninstall ..."
+                try {
+                    $p = Start-Process -FilePath $perUserUninstaller -ArgumentList '/uninstall' -PassThru -WindowStyle Hidden
+                    if (-not $p.WaitForExit(60000)) {
+                        Write-Warning "  Per-user OneDrive /uninstall did not exit in 60s; killing."
+                        try { $p.Kill() } catch {}
+                    }
+                } catch {
+                    Write-Warning "  Per-user OneDrive uninstall failed: $($_.Exception.Message)"
+                }
+            } else {
+                Write-Host '  No per-user OneDriveSetup.exe found; skipping per-user uninstall.'
+            }
+
+            # Download the latest OneDriveSetup.exe.
+            $installerPath = Join-Path $env:TEMP 'OneDriveSetup.exe'
+            $downloadUrl   = 'https://go.microsoft.com/fwlink/?linkid=844652'
+            Write-Host "  Downloading OneDriveSetup.exe from $downloadUrl ..."
+            $oldProgress = $ProgressPreference
+            $ProgressPreference = 'SilentlyContinue'
+            try {
+                Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -UseBasicParsing
+            } finally {
+                $ProgressPreference = $oldProgress
+            }
+
+            Write-Host '  Installing OneDrive machine-wide (/allusers /silent)...'
+            $proc = Start-Process -FilePath $installerPath -ArgumentList '/allusers','/silent' -PassThru
+            if (-not $proc.WaitForExit(180000)) {
+                Write-Warning '  OneDriveSetup.exe did not exit within 180s; killing.'
+                try { $proc.Kill() } catch {}
+            }
+            if ($proc.HasExited -and $proc.ExitCode -ne 0) {
+                Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
+                throw "OneDriveSetup.exe exited with code $($proc.ExitCode)"
+            }
+
+            # /allusers spawns OneDrive.Sync.Service.exe /silentConfig
+            # which runs indefinitely and would block any caller using
+            # Start-Process -Wait. The binary install is already complete
+            # by the time the parent exits, so stopping the sync service
+            # is safe.
+            Get-CimInstance Win32_Process -Filter "Name='OneDrive.Sync.Service.exe'" -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    try {
+                        Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop
+                        Write-Host "  Stopped post-install OneDrive.Sync.Service.exe (PID $($_.ProcessId))."
+                    } catch {}
+                }
+
+            Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
+
+            if (-not (Test-Path -LiteralPath $machineExe)) {
+                throw "OneDriveSetup.exe completed but expected binary '$machineExe' is missing."
+            }
+            $ver = (Get-Item -LiteralPath $machineExe).VersionInfo.FileVersion
+            Write-Host "  OneDrive installed: $machineExe (v$ver)"
+
+            # Scoop shim so `onedrive` resolves on PATH. Uses the same
+            # `@start "" "<exe>" %*` detach pattern as the Office shims so
+            # the terminal returns immediately after launching the GUI.
+            $shimDir = Join-Path $env:USERPROFILE 'scoop\shims'
+            if (-not (Test-Path -LiteralPath $shimDir)) {
+                throw "Scoop shim directory '$shimDir' not found. Install scoop first (this bucket depends on it)."
+            }
+            $shimPath = Join-Path $shimDir 'onedrive.cmd'
+            $content  = "@echo off`r`n" +
+                        "@rem ScoopBucket:OneDriveShim:onedrive -- managed by MicrosoftOffice365.ps1`r`n" +
+                        "@start `"`" `"$machineExe`" %*`r`n"
+            Set-Content -LiteralPath $shimPath -Value $content -Encoding ASCII -NoNewline
+            Write-Host "  Created OneDrive shim: $shimPath -> $machineExe"
+        }
+        CustomUninstallScript = {
+            param($pkg)
+
+            # Stop OneDrive cleanly then remove the shim and uninstall
+            # the machine-wide binary. Restoring the per-user install is
+            # left to Windows -- nothing to do here for that.
+            Get-Process OneDrive, 'OneDrive.Sync.Service' -ErrorAction SilentlyContinue |
+                ForEach-Object { try { Stop-Process -Id $_.Id -Force -ErrorAction Stop } catch {} }
+
+            $shimDir  = Join-Path $env:USERPROFILE 'scoop\shims'
+            $shimPath = Join-Path $shimDir 'onedrive.cmd'
+            if (Test-Path -LiteralPath $shimPath) {
+                $raw = Get-Content -LiteralPath $shimPath -Raw -ErrorAction SilentlyContinue
+                if ($raw -and $raw -match 'ScoopBucket:OneDriveShim:') {
+                    Remove-Item -LiteralPath $shimPath -Force
+                    Write-Host "  Removed OneDrive shim: $shimPath"
+                }
+            }
+
+            $machineSetup = Join-Path $env:ProgramFiles 'Microsoft OneDrive\OneDriveSetup.exe'
+            if (Test-Path -LiteralPath $machineSetup) {
+                Write-Host "  Uninstalling machine-wide OneDrive via $machineSetup /uninstall /allusers ..."
+                try {
+                    $p = Start-Process -FilePath $machineSetup -ArgumentList '/uninstall','/allusers' -PassThru -WindowStyle Hidden
+                    if (-not $p.WaitForExit(120000)) {
+                        Write-Warning '  OneDrive /uninstall did not exit in 120s; killing.'
+                        try { $p.Kill() } catch {}
+                    }
+                } catch {
+                    Write-Warning "  OneDrive uninstall failed: $($_.Exception.Message)"
+                }
+            }
+        }
+        VerifyScript = {
+            $machineExe = Join-Path $env:ProgramFiles 'Microsoft OneDrive\OneDrive.exe'
+            if (-not (Test-Path -LiteralPath $machineExe)) { return $false }
+            $shimPath = Join-Path $env:USERPROFILE 'scoop\shims\onedrive.cmd'
+            if (-not (Test-Path -LiteralPath $shimPath)) { return $false }
+            $raw = Get-Content -LiteralPath $shimPath -Raw -ErrorAction SilentlyContinue
+            if (-not $raw -or $raw -notmatch 'ScoopBucket:OneDriveShim:') { return $false }
+            return $true
+        }
+        NativeCommandScript = {
+            param($Cli)
+
+            if ($Cli -ne 'onedrive') { return '' }
+
+            # OneDrive.exe accepts flat switches (no subcommand tree).
+            # Sources: Microsoft Learn OneDrive admin docs and the
+            # OneDrive client itself. Switches are stable across versions.
+            $switches = @(
+                '/addaccount'
+                '/background'
+                '/reset'
+                '/resetauthstate'
+                '/shutdown'
+                '/signout'
+                '/configure_business:'
+            )
+            $list = ($switches | ForEach-Object { "'$_'" }) -join ','
+@"
+Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @($list) |
+        Where-Object { `$_ -like "`$wordToComplete*" } |
+        ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+        }
+}
+"@
         }
     }
 )
