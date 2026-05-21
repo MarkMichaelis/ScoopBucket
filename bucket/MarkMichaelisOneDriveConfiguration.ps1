@@ -107,6 +107,40 @@ function Get-OneDriveTargetPath {
     return ([System.IO.Path]::Combine($RootDir, ("OneDrive - {0}" -f $name)))
 }
 
+function Set-RootDirAclFromHome {
+    <#
+    .SYNOPSIS
+        Copy the ACL from the user's home directory onto $Path.
+    .DESCRIPTION
+        When $RootDir is created on a volume other than the system
+        drive (e.g. D:\OneDrive), it inherits the volume-root ACL,
+        which on a default Windows install grants Read+Execute to
+        BUILTIN\Users. That makes the OneDrive sync root readable
+        by every local account on the box.
+
+        This helper copies the explicit ACL from the user's home
+        directory (which Windows provisions as user-only) onto the
+        target path so the sync root is hardened to match home-dir
+        permissions. Gated by $PSCmdlet.ShouldProcess so -WhatIf
+        previews the intended Set-Acl call.
+
+        Accepts an optional -ReferenceAcl so unit tests can supply
+        a synthetic ACL without touching the real filesystem.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string] $Path,
+        [string] $ReferencePath = $env:USERPROFILE,
+        [object] $ReferenceAcl
+    )
+    if (-not $ReferenceAcl) {
+        $ReferenceAcl = Get-Acl -LiteralPath $ReferencePath
+    }
+    if ($PSCmdlet.ShouldProcess($Path, "Apply ACL from '$ReferencePath'")) {
+        Set-Acl -LiteralPath $Path -AclObject $ReferenceAcl
+    }
+}
+
 function Test-IsSameVolume {
     <#
     .SYNOPSIS
@@ -621,10 +655,23 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         Write-Host "  FreshSync requested: $($FreshSync -join ', ')"
     }
 
-    # 1. Pre-create $RootDir.
+    # 1. Pre-create $RootDir and harden its ACL to match $env:USERPROFILE.
+    #    On alternate volumes (e.g. D:\OneDrive), a freshly-created
+    #    directory inherits the volume-root ACL which grants Read+Execute
+    #    to BUILTIN\Users. Copy the home-dir ACL so the sync root is
+    #    user-only, matching what Windows provisions for C:\Users\<me>.
     if (-not (Test-Path $RootDir)) {
         if ($PSCmdlet.ShouldProcess($RootDir, 'Create directory')) {
             New-Item -ItemType Directory -Path $RootDir -Force | Out-Null
+        }
+        Write-Verbose "Applying home-directory ACL ($env:USERPROFILE) to '$RootDir'..."
+        Set-RootDirAclFromHome -Path $RootDir
+    }
+    else {
+        $homeAcl = Get-Acl -LiteralPath $env:USERPROFILE
+        $rootAcl = Get-Acl -LiteralPath $RootDir
+        if ($homeAcl.Sddl -ne $rootAcl.Sddl) {
+            Write-Warning "$RootDir already exists; ACL differs from $env:USERPROFILE. Leaving ACL unchanged. Run icacls or re-create the directory to harden it."
         }
     }
 

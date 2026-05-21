@@ -249,6 +249,60 @@ Describe 'Get-OneDriveAccountList (zombie slot filter)' -Tag 'Light' {
     }
 }
 
+Describe 'Set-RootDirAclFromHome' -Tag 'Light' {
+    It 'does not call Set-Acl when -WhatIf is supplied' {
+        Mock -CommandName Set-Acl -MockWith {}
+        Mock -CommandName Get-Acl -MockWith {
+            [pscustomobject]@{ Sddl = 'O:S-1-5-21-fake' }
+        }
+
+        Set-RootDirAclFromHome -Path 'TestDrive:\nope' -ReferencePath 'TestDrive:\home' -WhatIf
+
+        Should -Invoke -CommandName Set-Acl -Times 0 -Exactly
+    }
+
+    It 'calls Set-Acl with the reference ACL when not in WhatIf' {
+        $synthetic = [pscustomobject]@{ Sddl = 'O:S-1-5-21-synthetic' }
+        Mock -CommandName Set-Acl -MockWith {}
+
+        Set-RootDirAclFromHome -Path 'TestDrive:\target' -ReferenceAcl $synthetic
+
+        Should -Invoke -CommandName Set-Acl -Times 1 -Exactly -ParameterFilter {
+            $LiteralPath -eq 'TestDrive:\target' -and $AclObject -eq $synthetic
+        }
+    }
+
+    It 'reads the reference ACL via Get-Acl on $ReferencePath when -ReferenceAcl is not supplied' {
+        $synthetic = [pscustomobject]@{ Sddl = 'O:S-1-5-21-fromhome' }
+        Mock -CommandName Get-Acl -MockWith { $synthetic } -ParameterFilter {
+            $LiteralPath -eq 'TestDrive:\home'
+        }
+        Mock -CommandName Set-Acl -MockWith {}
+
+        Set-RootDirAclFromHome -Path 'TestDrive:\target' -ReferencePath 'TestDrive:\home'
+
+        Should -Invoke -CommandName Get-Acl -Times 1 -Exactly -ParameterFilter {
+            $LiteralPath -eq 'TestDrive:\home'
+        }
+        Should -Invoke -CommandName Set-Acl -Times 1 -Exactly -ParameterFilter {
+            $AclObject -eq $synthetic
+        }
+    }
+
+    It 'still calls Set-Acl on the target even when the target path does not exist (mock-only)' {
+        # The helper is a pure transform: it doesn't probe the target.
+        # The orchestrator is responsible for sequencing Create-then-ACL.
+        $synthetic = [pscustomobject]@{ Sddl = 'O:S-1-5-21-x' }
+        Mock -CommandName Set-Acl -MockWith {}
+
+        Set-RootDirAclFromHome -Path 'TestDrive:\does-not-exist' -ReferenceAcl $synthetic
+
+        Should -Invoke -CommandName Set-Acl -Times 1 -Exactly -ParameterFilter {
+            $LiteralPath -eq 'TestDrive:\does-not-exist'
+        }
+    }
+}
+
 Describe 'Resolve-FreshSyncAccounts' -Tag 'Light' {
     BeforeAll {
         $script:b1 = [pscustomobject]@{
