@@ -74,7 +74,8 @@ param(
     [string] $RootDir   = 'C:\OneDrive',
     [string] $KfmOwner  = 'Michaelis',
     [switch] $NoKfmRebind,
-    [string[]] $FreshSync = @()
+    [string[]] $FreshSync = @(),
+    [switch] $SkipElevationCheck
 )
 
 $ErrorActionPreference = 'Stop'
@@ -82,6 +83,45 @@ $ErrorActionPreference = 'Stop'
 # ---------------------------------------------------------------------------
 # Pure helpers (no side effects -- the unit tests target these directly).
 # ---------------------------------------------------------------------------
+
+function Test-IsElevated {
+    <#
+    .SYNOPSIS
+        Return $true when the current PowerShell session is running with
+        Administrator privileges, else $false.
+    .DESCRIPTION
+        The bundle writes HKLM:\SOFTWARE\Policies\Microsoft\OneDrive
+        (DefaultRootDir / KFMSilentOptIn etc.), which requires admin.
+        Centralizing the check in a function makes it overridable for
+        unit tests.
+    #>
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param()
+    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# ---------------------------------------------------------------------------
+# Elevation pre-flight: fail fast (even under -WhatIf) before the banner
+# or any state-changing side effect. Tests dot-source the script, so this
+# block must only fire when invoked as a script.
+#
+# The $global:__MMOD_ForceIsElevated escape hatch lets unit tests poke a
+# deterministic value into the pre-flight check without mocking
+# Test-IsElevated itself (the script-local function definition would
+# otherwise shadow any Pester Mock).
+# ---------------------------------------------------------------------------
+if ($MyInvocation.InvocationName -ne '.') {
+    $__mmodIsElevated = if ((Test-Path 'Variable:Global:__MMOD_ForceIsElevated') -and
+                            ($global:__MMOD_ForceIsElevated -is [bool])) {
+        $global:__MMOD_ForceIsElevated
+    } else {
+        Test-IsElevated
+    }
+    if (-not $SkipElevationCheck -and -not $__mmodIsElevated) {
+        throw "MarkMichaelisOneDriveConfiguration must be run from an elevated PowerShell session (HKLM policy write requires admin). Re-launch with Run as Administrator, or pass -SkipElevationCheck if you have pre-applied HKLM\SOFTWARE\Policies\Microsoft\OneDrive via Group Policy."
+    }
+}
 
 function Get-OneDriveTargetPath {
     <#

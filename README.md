@@ -177,6 +177,14 @@ Current members:
   hardened to match home-directory permissions so sync roots on
   alternate volumes are not readable by other local accounts.
 
+  **Requires an elevated PowerShell session** (Run as Administrator):
+  the bundle writes `HKLM:\SOFTWARE\Policies\Microsoft\OneDrive`
+  (`DefaultRootDir`, `KFMSilentOptIn`), which is HKLM and admin-only.
+  The script fails fast with a clear message if launched without
+  elevation. If you have already pre-applied the HKLM policy via
+  Group Policy and only want the per-user reshape, pass
+  `-SkipElevationCheck` to bypass the pre-flight.
+
   For Business tenants with large cloud-only datasets (where a
   cross-volume robocopy migration would hydrate every Files-On-Demand
   placeholder), pass `-FreshSync <Slot-or-DisplayName>...`. Matching
