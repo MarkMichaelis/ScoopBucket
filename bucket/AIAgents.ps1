@@ -108,6 +108,120 @@ Register-ArgumentCompleter -Native -CommandName npx -ScriptBlock {
         Id        = 'MarkMichaelis/MicrosoftCopilot'
     }
     [Package]@{
+        Name        = 'Warp'
+        Installer   = 'winget'
+        Id          = 'Warp.Warp'
+        # Warp ships only a per-user installer on Windows (drops warp.exe at
+        # %LOCALAPPDATA%\Programs\Warp\warp.exe). Force --scope user so winget
+        # doesn't fall back to a machine-context selection that fails on
+        # headless CI runners (mirrors the Claude Desktop note above).
+        Scope       = 'user'
+        # Two surfaces from a single binary:
+        #   * `warp` — launches the Warp terminal UI (GUI) when run bare,
+        #              or the embedded Oz CLI when run with subcommands.
+        #   * `oz`   — Warp's canonical CLI name per
+        #              docs.warp.dev/reference/cli, used in every CLI
+        #              example in Warp's own docs (`oz agent run`,
+        #              `oz mcp`, `oz whoami`, etc.). On Windows Warp's
+        #              "Install Oz CLI Command" Command Palette action
+        #              normally creates this alias; PostInstallScript
+        #              below mirrors that headlessly.
+        CliCommands = @('warp','oz')
+        Completion  = 'auto'
+        Notes       = 'Agentic AI terminal (warp.dev). One binary, two exposed entry points: `warp` (UI + CLI passthrough) and `oz` (the canonical "Oz CLI" used in Warp''s docs for agent / MCP / run management). The winget installer drops warp.exe at %LOCALAPPDATA%\Programs\Warp\ but does NOT add it to PATH; PostInstallScript copies warp.exe -> oz.exe in-place (warp uses argv[0] to brand its --help text and Register-ArgumentCompleter target, so a rename is required — a launcher shim would leave argv[0] as warp.exe) and registers both as scoop shims, mirroring the bcomp.com pattern in DeveloperBasePackages. Tab completion is sourced from the binary itself via `warp completions powershell` / `oz completions powershell` so it tracks whatever subcommands Warp ships. MCP wiring below intentionally skips Warp: Warp manages MCP servers via its in-app Settings > Agents > MCP servers UI (its own store); use `oz mcp` from CLI if parity with the JSON/TOML-wired agents is needed.'
+        ExpectedCompletions = @{
+            warp = @('--help','--version','agent','mcp','run','completions')
+            oz   = @('--help','--version','agent','mcp','run','completions')
+        }
+        NativeCommandScript = {
+            @"
+# Warp ships its own clap-derived PowerShell completer. Dot-source it for
+# each surface so the completion catalog tracks whatever subcommands the
+# installed Warp build actually supports. Warp brands the completer using
+# argv[0], so warp.exe registers for `warp.exe` and oz.exe (a copy)
+# registers for `oz.exe`; we invoke both. Fall back to a curated top-level
+# list per command if the bundled completer is missing or returns
+# something we can't recognize (e.g., Warp regressed `… completions
+# powershell`, or the binary is not yet on disk when the completion
+# profile is being generated).
+`$warpDir = Join-Path `$env:LOCALAPPDATA 'Programs\Warp'
+`$warpExe = Join-Path `$warpDir 'warp.exe'
+`$ozExe   = Join-Path `$warpDir 'oz.exe'
+
+`$fallbackTokens = @(
+    '--help','--version','--api-key','--output-format','--debug',
+    '--crash-recovery-mechanism',
+    'agent','environment','mcp','run','model','login','logout','whoami',
+    'integration','schedule','secret','federate','artifact','completions','help'
+)
+
+foreach (`$pair in @(
+    @{ Cli = 'warp'; Exe = `$warpExe },
+    @{ Cli = 'oz';   Exe = `$ozExe   }
+)) {
+    `$registered = `$false
+    if (Test-Path `$pair.Exe) {
+        try {
+            `$script = & `$pair.Exe completions powershell 2>`$null | Out-String
+            if (`$script -match 'Register-ArgumentCompleter') {
+                Invoke-Expression `$script
+                `$registered = `$true
+            }
+        } catch { }
+    }
+    if (-not `$registered) {
+        `$cliName = `$pair.Cli
+        `$tokens  = `$fallbackTokens
+        Register-ArgumentCompleter -Native -CommandName `$cliName -ScriptBlock {
+            param(`$wordToComplete, `$commandAst, `$cursorPosition)
+            `$tokens | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+                [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+            }
+        }.GetNewClosure()
+    }
+}
+"@
+        }
+        PostInstallScript = {
+            try {
+                $warpDir = Join-Path $env:LOCALAPPDATA 'Programs\Warp'
+                $warpExe = Join-Path $warpDir 'warp.exe'
+                $ozExe   = Join-Path $warpDir 'oz.exe'
+
+                if (-not (Test-Path $warpExe)) {
+                    Write-Warning "Warp PostInstallScript: warp.exe not found at $warpExe; skipping shims."
+                    return
+                }
+
+                # Idempotent: drop any prior shim before re-adding so this
+                # PostInstallScript stays safe across re-runs / Warp upgrades.
+                & scoop shim rm warp 2>&1 | Out-Null
+                & scoop shim rm oz   2>&1 | Out-Null
+
+                & scoop shim add warp $warpExe 2>&1 | ForEach-Object { Write-Host "  $_" }
+
+                # Warp uses argv[0] to brand its --help text ("warp.exe"
+                # vs. "oz.exe") AND its `completions powershell`
+                # Register-ArgumentCompleter command name. A scoop shim is
+                # a launcher that spawns the target process, so the
+                # target's argv[0] stays warp.exe regardless of the shim
+                # name. Copy warp.exe -> oz.exe in-place so `oz` users see
+                # the documented branding and the completer registers
+                # under the right command name. Re-copy if warp.exe has a
+                # newer mtime (handles Warp self-updates).
+                $needsCopy = (-not (Test-Path $ozExe)) -or `
+                    ((Get-Item $warpExe).LastWriteTimeUtc -gt (Get-Item $ozExe).LastWriteTimeUtc)
+                if ($needsCopy) {
+                    Copy-Item $warpExe $ozExe -Force
+                }
+
+                & scoop shim add oz $ozExe 2>&1 | ForEach-Object { Write-Host "  $_" }
+            } catch {
+                Write-Warning "Warp shim setup failed: $($_.Exception.Message)"
+            }
+        }
+    }
+    [Package]@{
         Name        = 'Claude Code CLI'
         Installer   = 'scoop'
         Id          = 'MarkMichaelis/ClaudeCode'
