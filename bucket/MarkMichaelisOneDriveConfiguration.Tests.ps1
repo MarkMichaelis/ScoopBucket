@@ -169,12 +169,21 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result.Action | Should -Be 'OwnerNotSignedIn'
     }
 
-    It 'returns an empty-accounts result as OwnerNotSignedIn' {
+    It 'returns Action=''None'' when KFM is inactive even if the owner is not signed in' {
+        $result = Resolve-KfmRebindAction `
+            -Accounts @($script:other, $script:personal) `
+            -KfmCurrentPath $null `
+            -KfmOwner 'Michaelis'
+        $result.Action | Should -Be 'None'
+        $result.OwnerAccount | Should -BeNullOrEmpty
+    }
+
+    It 'returns an empty-accounts result as None when KFM is inactive' {
         $result = Resolve-KfmRebindAction `
             -Accounts @() `
             -KfmCurrentPath $null `
             -KfmOwner 'Michaelis'
-        $result.Action | Should -Be 'OwnerNotSignedIn'
+        $result.Action | Should -Be 'None'
     }
 }
 
@@ -362,6 +371,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration pre-create behavior' -Tag 'L
         Mock -CommandName Update-OneDriveAccountRegistry
         Mock -CommandName Invoke-AppFixUps
         Mock -CommandName Start-OneDriveExe
+        Mock -CommandName Get-Process -MockWith { [pscustomobject]@{ Name = 'OneDrive' } }
 
         Invoke-MarkMichaelisOneDriveConfiguration -RootDir $rootDir -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
 
@@ -371,6 +381,53 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration pre-create behavior' -Tag 'L
         Should -Invoke Move-OneDriveFolder -Times 1 -ParameterFilter {
             $Source -eq $sourceDir -and $Destination -eq $targetDir
         }
+    }
+}
+
+Describe 'Invoke-MarkMichaelisOneDriveConfiguration running state' -Tag 'Light' {
+    BeforeEach {
+        $script:acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($script:acct) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $null }
+        Mock -CommandName Resolve-KfmRebindAction -MockWith {
+            [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+        }
+        Mock -CommandName Set-OneDrivePolicy
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Move-OneDriveFolder
+        Mock -CommandName Update-OneDriveAccountRegistry
+        Mock -CommandName Invoke-AppFixUps
+        Mock -CommandName Start-OneDriveExe
+        Mock -CommandName New-Item
+    }
+
+    It 'does not restart OneDrive when it was not running before the script started' {
+        Mock -CommandName Get-Process -MockWith { $null }
+
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+
+        Should -Invoke Start-OneDriveExe -Times 0
+    }
+
+    It 'restarts OneDrive when it was running before the script started' {
+        Mock -CommandName Get-Process -MockWith { [pscustomobject]@{ Name = 'OneDrive' } }
+
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+
+        Should -Invoke Start-OneDriveExe -Times 1
     }
 }
 

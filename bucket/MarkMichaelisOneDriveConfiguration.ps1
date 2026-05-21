@@ -170,6 +170,14 @@ function Resolve-KfmRebindAction {
         [switch]$NoKfmRebind
     )
 
+    if (-not $KfmCurrentPath) {
+        return [pscustomobject]@{
+            Action       = 'None'
+            OwnerAccount = $null
+            Reason       = "KFM is not currently active; nothing to track."
+        }
+    }
+
     $ownerAcct = $Accounts |
         Where-Object { $_.AccountType -ne 'Personal' -and $_.DisplayName -and ($_.DisplayName -match [regex]::Escape($KfmOwner)) } |
         Select-Object -First 1
@@ -179,14 +187,6 @@ function Resolve-KfmRebindAction {
             Action       = 'OwnerNotSignedIn'
             OwnerAccount = $null
             Reason       = "KfmOwner '$KfmOwner' is not signed in to OneDrive (no Business* slot has matching DisplayName)."
-        }
-    }
-
-    if (-not $KfmCurrentPath) {
-        return [pscustomobject]@{
-            Action       = 'None'
-            OwnerAccount = $ownerAcct
-            Reason       = "KFM is not currently active; nothing to track."
         }
     }
 
@@ -713,6 +713,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     }
 
     if ($migrations.Count -gt 0 -or $freshSyncAccounts.Count -gt 0) {
+        $wasRunning = [bool](Get-Process -Name 'OneDrive' -ErrorAction SilentlyContinue)
         Stop-OneDriveExe
         $stoppedOneDrive = $true
 
@@ -762,7 +763,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         }
     }
 
-    if ($stoppedOneDrive) {
+    if ($wasRunning -and $stoppedOneDrive) {
         Start-OneDriveExe
     }
 
