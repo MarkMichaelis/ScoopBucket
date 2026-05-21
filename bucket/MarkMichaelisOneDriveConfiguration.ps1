@@ -788,6 +788,64 @@ function Get-OneDriveRegistryStringValuesUnderPath {
     return $results.ToArray()
 }
 
+function New-OneDriveRegistryBackupPath {
+    [OutputType([string])]
+    [CmdletBinding()]
+    param()
+
+    $dir = Join-Path $env:LOCALAPPDATA 'MarkMichaelis\OneDriveMigration'
+    return (Join-Path $dir ("backup-{0}.reg" -f (Get-Date -Format 'yyyyMMdd-HHmmss')))
+}
+
+function Invoke-RegExportCommand {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SubKey,
+        [Parameter(Mandatory)][string]$OutputPath
+    )
+
+    & reg.exe export $SubKey $OutputPath /y | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "reg.exe export failed for '$SubKey' (exit $LASTEXITCODE)."
+    }
+}
+
+function Export-OneDriveRegistryBackup {
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$OutputPath
+    )
+
+    $subKeys = @(
+        'HKCU\Software\Microsoft\OneDrive\Accounts',
+        'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders',
+        'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders',
+        'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions',
+        'HKCU\SOFTWARE\Policies\Microsoft\OneDrive',
+        'HKLM\SOFTWARE\Policies\Microsoft\OneDrive'
+    )
+
+    $dir = Split-Path -Parent $OutputPath
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+
+    Set-Content -Path $OutputPath -Value "Windows Registry Editor Version 5.00`r`n" -Encoding ascii
+    $index = 0
+    foreach ($subKey in $subKeys) {
+        $index++
+        $scratch = Join-Path $dir ("backup-part-{0:00}.reg" -f $index)
+        Invoke-RegExportCommand -SubKey $subKey -OutputPath $scratch
+        $content = Get-Content -Path $scratch -Raw -ErrorAction Stop
+        $content = $content -replace '^Windows Registry Editor Version 5\.00\s*', ''
+        Add-Content -Path $OutputPath -Value "`r`n$content" -Encoding ascii
+        Remove-Item -LiteralPath $scratch -Force
+    }
+
+    return $OutputPath
+}
+
 function Get-OneDriveFileAttributes {
     [OutputType([System.IO.FileAttributes])]
     [CmdletBinding()]
@@ -1155,7 +1213,11 @@ function New-OneDriveMigrationPlan {
         $executionItems.Add((New-OneDriveMigrationPlanItem -Type 'RewriteKfm' -Target 'KFM' -CurrentValue $KfmCurrentPath -DesiredValue $null -SameVolume $null -Account $KfmDecision.OwnerAccount -Reason 'No KFM rewrite required.' -Skipped:$true -SkipReason $KfmDecision.Reason)) | Out-Null
     }
 
-    $needsStopStart = @($executionItems | Where-Object { -not $_.Skipped -and $_.Type -in @('MoveAccount','UpdateAccountRegistry','RewriteKfm','AppFixUp') }).Count -gt 0
+    $needsBackup = @($plan | Where-Object { -not $_.Skipped -and $_.Type -in @('CreateDir','WritePolicy') }).Count -gt 0 -or
+                   @($executionItems | Where-Object { -not $_.Skipped -and $_.Type -in @('MoveAccount','UpdateAccountRegistry','RewriteSPCache','RewriteKfm','AppFixUp') }).Count -gt 0
+    $plan.Insert(0, (New-OneDriveMigrationPlanItem -Type 'RegistryBackup' -Target (New-OneDriveRegistryBackupPath) -CurrentValue $null -DesiredValue $null -SameVolume $null -Account $null -Reason 'Export a registry backup before any mutations.' -Skipped:(-not $needsBackup) -SkipReason $(if (-not $needsBackup) { 'No registry-affecting mutations are required.' } else { $null })))
+
+    $needsStopStart = @($executionItems | Where-Object { -not $_.Skipped -and $_.Type -in @('MoveAccount','UpdateAccountRegistry','RewriteSPCache','RewriteKfm','AppFixUp') }).Count -gt 0
     $plan.Add((New-OneDriveMigrationPlanItem -Type 'StopOneDrive' -Target 'OneDrive.exe' -CurrentValue $(if ($WasRunning) { 'Running' } else { 'NotRunning' }) -DesiredValue 'Stopped' -SameVolume $null -Account $null -Reason 'Stop OneDrive before mutating sync roots or registry.' -Skipped:(-not $needsStopStart) -SkipReason $(if (-not $needsStopStart) { 'No file or registry mutations are required.' } else { $null }))) | Out-Null
     foreach ($item in $executionItems) {
         $plan.Add($item) | Out-Null
@@ -1222,6 +1284,9 @@ function Invoke-OneDriveMigrationPlan {
 
         try {
             switch ($item.Type) {
+                'RegistryBackup' {
+                    Export-OneDriveRegistryBackup -OutputPath $item.Target | Out-Null
+                }
                 'CreateDir' {
                     if (-not (Test-Path $item.Target)) {
                         New-Item -ItemType Directory -Path $item.Target -Force | Out-Null
@@ -1282,8 +1347,6 @@ function Invoke-OneDriveMigrationPlan {
                 }
                 'StartOneDrive' {
                     Start-OneDriveExe
-                }
-                'RegistryBackup' {
                 }
                 default {
                     throw "Unsupported plan item type '$($item.Type)'."
@@ -1361,6 +1424,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         return $plan
     }
 
+    $backupPath = ($plan | Where-Object Type -eq 'RegistryBackup' | Select-Object -First 1).Target
     $deferredCleanupPaths = @()
     try {
         $execution = Invoke-OneDriveMigrationPlan -Plan $plan -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -Confirm:$false
@@ -1368,7 +1432,9 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     } catch {
         $failedItem = $plan | Where-Object { $_.Status -eq 'Failed' } | Select-Object -First 1
         if ($failedItem -and $failedItem.Type -eq 'UpdateAccountRegistry' -and $failedItem.Account) {
-            Write-Error "Migration failed for $($failedItem.Account.DisplayName): $($failedItem.FailureReason) Best-effort rollback attempted. Inspect the old and new paths and verify OneDrive account registry under '$($failedItem.Account.RegistryPath)' before restarting OneDrive. OneDrive NOT restarted automatically."
+            Write-Error "Migration failed for $($failedItem.Account.DisplayName): $($failedItem.FailureReason) Best-effort rollback attempted. Inspect the old and new paths and verify OneDrive account registry under '$($failedItem.Account.RegistryPath)' before restarting OneDrive. Registry backup: $backupPath. OneDrive NOT restarted automatically."
+        } elseif ($failedItem) {
+            Write-Error "Migration failed during $($failedItem.Type): $($failedItem.FailureReason). Registry backup: $backupPath. OneDrive NOT restarted automatically."
         }
         throw
     }
@@ -1411,7 +1477,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     $fodGatedItems = @($plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.SkipReason -like 'Refusing cross-volume move of *cloud-only files*' })
     if ($fodGatedItems.Count -gt 0) {
         Write-Warning ("Files-On-Demand gate blocked {0} cross-volume move(s). Re-run with -ForceHydrate to proceed after accepting hydration." -f $fodGatedItems.Count)
-        throw "Files-On-Demand gate blocked $($fodGatedItems.Count) move(s)."
+        throw "Files-On-Demand gate blocked $($fodGatedItems.Count) move(s). Registry backup: $backupPath."
     }
 
     Write-Warning 'MRU staleness: Office recent docs / Snagit Recent File List / VS recent files may reference old OneDrive paths; reopen as needed.'

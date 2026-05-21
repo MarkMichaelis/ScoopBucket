@@ -299,6 +299,31 @@ Describe 'Get-OneDrivePlaceholderCount' -Tag 'Light' {
     }
 }
 
+Describe 'Export-OneDriveRegistryBackup' -Tag 'Light' {
+    It 'exports each required registry subtree into the combined backup file' {
+        Mock -CommandName Test-Path -MockWith { $false }
+        Mock -CommandName New-Item
+        Mock -CommandName Set-Content
+        Mock -CommandName Add-Content
+        Mock -CommandName Remove-Item
+        Mock -CommandName Get-Content -MockWith { "Windows Registry Editor Version 5.00`r`n[HKEY_CURRENT_USER\\Software]" }
+        Mock -CommandName Invoke-RegExportCommand
+
+        Export-OneDriveRegistryBackup -OutputPath 'C:\Users\Mark\AppData\Local\MarkMichaelis\OneDriveMigration\backup-20240102-030405.reg' | Out-Null
+
+        foreach ($subKey in @(
+            'HKCU\Software\Microsoft\OneDrive\Accounts',
+            'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders',
+            'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders',
+            'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions',
+            'HKCU\SOFTWARE\Policies\Microsoft\OneDrive',
+            'HKLM\SOFTWARE\Policies\Microsoft\OneDrive'
+        )) {
+            Should -Invoke Invoke-RegExportCommand -Times 1 -ParameterFilter { $SubKey -eq $subKey }
+        }
+    }
+}
+
 Describe 'Get-OneDriveAccountList (zombie slot filter)' -Tag 'Light' {
     # Regression for issue #192: a Business slot left over from a failed
     # sign-in has no DisplayName / UserFolder / UserEmail and must be
@@ -556,6 +581,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration pre-create behavior' -Tag 'L
         }
         Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
         Mock -CommandName Set-OneDriveUpdateRingPolicy
+        Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
         Mock -CommandName Stop-OneDriveExe
         Mock -CommandName Move-OneDriveFolder
         Mock -CommandName Update-OneDriveAccountRegistry
@@ -599,6 +625,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration running state' -Tag 'Light' 
         }
         Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
         Mock -CommandName Set-OneDriveUpdateRingPolicy
+        Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
         Mock -CommandName Stop-OneDriveExe
         Mock -CommandName Move-OneDriveFolder
         Mock -CommandName Update-OneDriveAccountRegistry
@@ -655,6 +682,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration rollback' -Tag 'Light' {
         }
         Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
         Mock -CommandName Set-OneDriveUpdateRingPolicy
+        Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
         Mock -CommandName Stop-OneDriveExe
         Mock -CommandName Move-OneDriveFolder -MockWith { $script:afterMove = $true }
         Mock -CommandName Get-OneDriveAccountRegistrySnapshot -MockWith { [pscustomobject]@{ UserFolder = $oldPath; CacheValues = @{} } }
@@ -712,6 +740,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration KFM rebind' -Tag 'Light' {
         Mock -CommandName Get-CurrentKfmPath -MockWith { $kfmCurrent }
         Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
         Mock -CommandName Set-OneDriveUpdateRingPolicy
+        Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
         Mock -CommandName Stop-OneDriveExe
         Mock -CommandName Move-OneDriveFolder
         Mock -CommandName Update-OneDriveAccountRegistry
@@ -745,6 +774,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration KFM rebind' -Tag 'Light' {
         Mock -CommandName Get-CurrentKfmPath -MockWith { 'D:\Elsewhere\Documents' }
         Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
         Mock -CommandName Set-OneDriveUpdateRingPolicy
+        Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
         Mock -CommandName Stop-OneDriveExe
         Mock -CommandName Move-OneDriveFolder
         Mock -CommandName Update-OneDriveAccountRegistry
@@ -1000,3 +1030,4 @@ Describe 'Resolve-FreshSyncAccounts' -Tag 'Light' {
         @($fileCopy | ForEach-Object Slot) | Should -Be @('Business1','Personal')
     }
 }
+
