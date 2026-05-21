@@ -62,6 +62,12 @@
     without bulk-downloading Files-On-Demand content. Personal
     accounts are not supported.
 
+.PARAMETER SkipElevationCheck
+    Skip the top-level elevation pre-flight. Use only when the HKLM
+    OneDrive policy has already been provisioned out-of-band and you
+    intentionally want to preview or run the remaining logic from a
+    non-elevated shell.
+
 .EXAMPLE
     .\MarkMichaelisOneDriveConfiguration.ps1 -WhatIf
 
@@ -97,7 +103,8 @@ param(
     [switch] $NoKfmRebind,
     [string[]] $FreshSync = @(),
     [switch] $DeleteSourceOnSuccess,
-    [switch] $ForceHydrate
+    [switch] $ForceHydrate,
+    [switch] $SkipElevationCheck
 )
 
 $ErrorActionPreference = 'Stop'
@@ -105,6 +112,45 @@ $ErrorActionPreference = 'Stop'
 # ---------------------------------------------------------------------------
 # Pure helpers (no side effects -- the unit tests target these directly).
 # ---------------------------------------------------------------------------
+
+function Test-IsElevated {
+    <#
+    .SYNOPSIS
+        Return $true when the current PowerShell session is running with
+        Administrator privileges, else $false.
+    .DESCRIPTION
+        The bundle writes HKLM:\SOFTWARE\Policies\Microsoft\OneDrive
+        (DefaultRootDir / KFMSilentOptIn etc.), which requires admin.
+        Centralizing the check in a function makes it overridable for
+        unit tests.
+    #>
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param()
+    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# ---------------------------------------------------------------------------
+# Elevation pre-flight: fail fast (even under -WhatIf) before the banner
+# or any state-changing side effect. Tests dot-source the script, so this
+# block must only fire when invoked as a script.
+#
+# The $global:__MMOD_ForceIsElevated escape hatch lets unit tests poke a
+# deterministic value into the pre-flight check without mocking
+# Test-IsElevated itself (the script-local function definition would
+# otherwise shadow any Pester Mock).
+# ---------------------------------------------------------------------------
+if ($MyInvocation.InvocationName -ne '.') {
+    $__mmodIsElevated = if ((Test-Path 'Variable:Global:__MMOD_ForceIsElevated') -and
+                            ($global:__MMOD_ForceIsElevated -is [bool])) {
+        $global:__MMOD_ForceIsElevated
+    } else {
+        Test-IsElevated
+    }
+    if (-not $SkipElevationCheck -and -not $__mmodIsElevated) {
+        throw "MarkMichaelisOneDriveConfiguration must be run from an elevated PowerShell session (HKLM policy write requires admin). Re-launch with Run as Administrator, or pass -SkipElevationCheck if you have pre-applied HKLM\SOFTWARE\Policies\Microsoft\OneDrive via Group Policy."
+    }
+}
 
 function Get-OneDriveTargetPath {
     <#
@@ -128,6 +174,40 @@ function Get-OneDriveTargetPath {
         throw "Account has no DisplayName; cannot compute target path."
     }
     return ([System.IO.Path]::Combine($RootDir, ("OneDrive - {0}" -f $name)))
+}
+
+function Set-RootDirAclFromHome {
+    <#
+    .SYNOPSIS
+        Copy the ACL from the user's home directory onto $Path.
+    .DESCRIPTION
+        When $RootDir is created on a volume other than the system
+        drive (e.g. D:\OneDrive), it inherits the volume-root ACL,
+        which on a default Windows install grants Read+Execute to
+        BUILTIN\Users. That makes the OneDrive sync root readable
+        by every local account on the box.
+
+        This helper copies the explicit ACL from the user's home
+        directory (which Windows provisions as user-only) onto the
+        target path so the sync root is hardened to match home-dir
+        permissions. Gated by $PSCmdlet.ShouldProcess so -WhatIf
+        previews the intended Set-Acl call.
+
+        Accepts an optional -ReferenceAcl so unit tests can supply
+        a synthetic ACL without touching the real filesystem.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string] $Path,
+        [string] $ReferencePath = $env:USERPROFILE,
+        [object] $ReferenceAcl
+    )
+    if (-not $ReferenceAcl) {
+        $ReferenceAcl = Get-Acl -LiteralPath $ReferencePath
+    }
+    if ($PSCmdlet.ShouldProcess($Path, "Apply ACL from '$ReferencePath'")) {
+        Set-Acl -LiteralPath $Path -AclObject $ReferenceAcl
+    }
 }
 
 function Test-IsSameVolume {
@@ -1084,6 +1164,7 @@ function New-OneDriveMigrationPlan {
 
     $rootExists = Test-Path $RootDir
     $plan.Add((New-OneDriveMigrationPlanItem -Type 'CreateDir' -Target $RootDir -CurrentValue $(if ($rootExists) { $RootDir } else { $null }) -DesiredValue $RootDir -SameVolume $null -Account $null -Reason 'Ensure the canonical OneDrive root exists.' -Skipped:$rootExists -SkipReason $(if ($rootExists) { 'Directory already exists.' } else { $null }))) | Out-Null
+        $plan.Add((New-OneDriveMigrationPlanItem -Type 'HardenRootDirAcl' -Target $RootDir -CurrentValue $(if ($rootExists) { $RootDir } else { $null }) -DesiredValue $RootDir -SameVolume $null -Account $null -Reason 'Copy the home-directory ACL onto the canonical OneDrive root immediately after creation.' -Skipped:$rootExists -SkipReason $(if ($rootExists) { 'RootDir already existed before this run; leaving ACL unchanged.' } else { $null }))) | Out-Null
 
     foreach ($a in $Accounts) {
         if ($freshSyncSlots -contains $a.Slot) { continue }
@@ -1325,6 +1406,9 @@ function Invoke-OneDriveMigrationPlan {
                     if (-not (Test-Path $item.Target)) {
                         New-Item -ItemType Directory -Path $item.Target -Force | Out-Null
                     }
+                }
+                'HardenRootDirAcl' {
+                    Set-RootDirAclFromHome -Path $item.Target
                 }
                 'WritePolicy' {
                     if ($item.PolicyKind -eq 'DefaultRootDir') {

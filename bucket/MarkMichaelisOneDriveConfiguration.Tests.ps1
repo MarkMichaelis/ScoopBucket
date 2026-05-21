@@ -515,6 +515,60 @@ Describe 'Set-OneDrivePolicy' -Tag 'Light' {
     }
 }
 
+Describe 'Set-RootDirAclFromHome' -Tag 'Light' {
+    It 'does not call Set-Acl when -WhatIf is supplied' {
+        Mock -CommandName Set-Acl -MockWith {}
+        Mock -CommandName Get-Acl -MockWith {
+            [pscustomobject]@{ Sddl = 'O:S-1-5-21-fake' }
+        }
+
+        Set-RootDirAclFromHome -Path 'TestDrive:\nope' -ReferencePath 'TestDrive:\home' -WhatIf
+
+        Should -Invoke -CommandName Set-Acl -Times 0 -Exactly
+    }
+
+    It 'calls Set-Acl with the reference ACL when not in WhatIf' {
+        $synthetic = [pscustomobject]@{ Sddl = 'O:S-1-5-21-synthetic' }
+        Mock -CommandName Set-Acl -MockWith {}
+
+        Set-RootDirAclFromHome -Path 'TestDrive:\target' -ReferenceAcl $synthetic
+
+        Should -Invoke -CommandName Set-Acl -Times 1 -Exactly -ParameterFilter {
+            $LiteralPath -eq 'TestDrive:\target' -and $AclObject -eq $synthetic
+        }
+    }
+
+    It 'reads the reference ACL via Get-Acl on $ReferencePath when -ReferenceAcl is not supplied' {
+        $synthetic = [pscustomobject]@{ Sddl = 'O:S-1-5-21-fromhome' }
+        Mock -CommandName Get-Acl -MockWith { $synthetic } -ParameterFilter {
+            $LiteralPath -eq 'TestDrive:\home'
+        }
+        Mock -CommandName Set-Acl -MockWith {}
+
+        Set-RootDirAclFromHome -Path 'TestDrive:\target' -ReferencePath 'TestDrive:\home'
+
+        Should -Invoke -CommandName Get-Acl -Times 1 -Exactly -ParameterFilter {
+            $LiteralPath -eq 'TestDrive:\home'
+        }
+        Should -Invoke -CommandName Set-Acl -Times 1 -Exactly -ParameterFilter {
+            $AclObject -eq $synthetic
+        }
+    }
+
+    It 'still calls Set-Acl on the target even when the target path does not exist (mock-only)' {
+        # The helper is a pure transform: it doesn't probe the target.
+        # The orchestrator is responsible for sequencing Create-then-ACL.
+        $synthetic = [pscustomobject]@{ Sddl = 'O:S-1-5-21-x' }
+        Mock -CommandName Set-Acl -MockWith {}
+
+        Set-RootDirAclFromHome -Path 'TestDrive:\does-not-exist' -ReferenceAcl $synthetic
+
+        Should -Invoke -CommandName Set-Acl -Times 1 -Exactly -ParameterFilter {
+            $LiteralPath -eq 'TestDrive:\does-not-exist'
+        }
+    }
+}
+
 Describe 'Move-OneDriveFolder' -Tag 'Light' {
     It 'moves successfully when only the destination parent exists' {
         Mock -CommandName Test-Path -MockWith {
@@ -656,6 +710,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration pre-create behavior' -Tag 'H
         Mock -CommandName Update-OneDriveAccountRegistry
         Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $true }
         Mock -CommandName Invoke-AppFixUps
+        Mock -CommandName Set-RootDirAclFromHome
         Mock -CommandName Start-OneDriveExe
         Mock -CommandName Get-Process -MockWith { [pscustomobject]@{ Name = 'OneDrive' } }
 
@@ -664,6 +719,9 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration pre-create behavior' -Tag 'H
         $createdPaths | Should -Contain $rootDir
         $createdPaths | Should -Contain $tenantDir
         $createdPaths | Should -Not -Contain $targetDir
+        Should -Invoke Set-RootDirAclFromHome -Times 1 -ParameterFilter {
+            $Path -eq $rootDir
+        }
         Should -Invoke Move-OneDriveFolder -Times 1 -ParameterFilter {
             $Source -eq $sourceDir -and $Destination -eq $targetDir
         }
@@ -1052,6 +1110,29 @@ Describe 'Plan-then-execute architecture' -Tag 'Heavy' {
         @($move.Warnings) | Should -Contain 'Will hydrate 3 cloud-only files (~size unknown).'
     }
 
+    It 'plans ACL hardening for a newly created RootDir' {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $decision = [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $false; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                'C:\OneDrive\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-ItemProperty -MockWith { [pscustomobject]@{} }
+
+        $plan = New-OneDriveMigrationPlan -RootDir 'C:\OneDrive' -Accounts @($acct) -FreshSyncAccounts @() -KfmCurrentPath $null -KfmDecision $decision -WasRunning:$false
+
+        ($plan | Where-Object { $_.Type -eq 'HardenRootDirAcl' -and -not $_.Skipped -and $_.Target -eq 'C:\OneDrive' }).Count | Should -Be 1
+    }
+
     It 'marks every plan item skipped on a second idempotent run' {
         $acct = [pscustomobject]@{
             Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
@@ -1189,3 +1270,44 @@ Describe 'Resolve-FreshSyncAccounts' -Tag 'Light' {
     }
 }
 
+Describe 'Elevation pre-flight' -Tag 'Light' {
+    BeforeAll {
+        $script:bundlePath = "$PSScriptRoot\MarkMichaelisOneDriveConfiguration.ps1"
+    }
+
+    AfterEach {
+        # Clear the test escape hatch so one test cannot leak state into
+        # another (or into a subsequent dot-source).
+        if (Test-Path 'Variable:Global:__MMOD_ForceIsElevated') {
+            Remove-Variable -Name '__MMOD_ForceIsElevated' -Scope Global -Force
+        }
+    }
+
+    It 'Test-IsElevated returns a [bool]' {
+        $result = Test-IsElevated
+        $result | Should -BeOfType [bool]
+    }
+
+    It 'throws with an "elevated PowerShell" message when not elevated and -SkipElevationCheck is absent' {
+        $global:__MMOD_ForceIsElevated = $false
+        {
+            & $script:bundlePath -RootDir 'TestDrive:\OD' -WhatIf
+        } | Should -Throw -ExpectedMessage '*elevated PowerShell*'
+    }
+
+    It 'does not throw the elevation message when -SkipElevationCheck is passed (even when not elevated)' {
+        $global:__MMOD_ForceIsElevated = $false
+        # The orchestrator may fail later for unrelated reasons (TestDrive,
+        # missing registry, etc.); we only assert that the *elevation*
+        # pre-flight does not fire.
+        $threw = $null
+        try {
+            & $script:bundlePath -RootDir 'TestDrive:\OD' -SkipElevationCheck -WhatIf
+        } catch {
+            $threw = $_
+        }
+        if ($threw) {
+            $threw.Exception.Message | Should -Not -Match 'elevated PowerShell'
+        }
+    }
+}
