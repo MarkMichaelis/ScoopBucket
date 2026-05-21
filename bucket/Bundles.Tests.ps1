@@ -253,14 +253,62 @@ Describe 'Specific cross-bundle placement contracts' -Tag 'Light','Bundle' {
         $script:byBundle.ClientBasePackages.Name | Should -Not -Contain 'Claude for Excel'
     }
 
-    It 'OneDrive CLI shim is owned by the MicrosoftOffice365 bundle' {
-        # OneDrive.exe is a Windows OS component already present on every box,
-        # so we colocate its curated shim + tab-completion with the rest of
-        # the Microsoft 365 surface (same file already owns the OneDrive
-        # tenant-redirection policy). See issue #183.
-        $script:byBundle.MicrosoftOffice365.Name | Should -Contain 'OneDrive CLI shim'
-        $script:byBundle.AIAgents.Name           | Should -Not -Contain 'OneDrive CLI shim'
-        $script:byBundle.OSBasePackages.Name     | Should -Not -Contain 'OneDrive CLI shim'
+    It 'Microsoft OneDrive (machine-wide) is owned by the MicrosoftOffice365 bundle' {
+        # Issue #188: supersedes the shim-only 'OneDrive CLI shim' (issue
+        # #183). The new package both installs OneDrive machine-wide via
+        # OneDriveSetup.exe /allusers /silent AND manages the onedrive
+        # scoop shim. The legacy shim-only package must NOT coexist with
+        # this one (they both register CliCommands=@('onedrive') and would
+        # collide on the shim file + completion registration).
+        $script:byBundle.MicrosoftOffice365.Name | Should -Contain 'Microsoft OneDrive (machine-wide)'
+        $script:byBundle.MicrosoftOffice365.Name | Should -Not -Contain 'OneDrive CLI shim'
+        $script:byBundle.AIAgents.Name           | Should -Not -Contain 'Microsoft OneDrive (machine-wide)'
+        $script:byBundle.OSBasePackages.Name     | Should -Not -Contain 'Microsoft OneDrive (machine-wide)'
+    }
+
+    It 'Microsoft OneDrive (machine-wide) advertises the install-time switches the user actually needs post-/allusers' {
+        # /addaccount, /signout, /configure_business: are the user-facing
+        # entry points after a fresh machine-wide install (linking the
+        # first AAD identity, signing out, pointing at a tenant). The
+        # legacy shim-only package omitted /addaccount and /signout
+        # because it presumed a per-user OneDrive that was already
+        # signed in. Asserting these here ensures the new package's
+        # completion table reflects the post-install workflow.
+        $od = $script:byBundle.MicrosoftOffice365 | Where-Object Name -eq 'Microsoft OneDrive (machine-wide)'
+        $od | Should -Not -BeNullOrEmpty
+        $od.ExpectedCompletions.ContainsKey('onedrive') | Should -BeTrue
+        $od.ExpectedCompletions['onedrive'] | Should -Contain '/addaccount'
+        $od.ExpectedCompletions['onedrive'] | Should -Contain '/signout'
+        $od.ExpectedCompletions['onedrive'] | Should -Contain '/configure_business:'
+    }
+
+    It 'no two packages within a bundle declare the same CliCommands entry' {
+        # Regression guard for the issue #188 conflict: the new
+        # machine-wide OneDrive package and the legacy 'OneDrive CLI
+        # shim' both declared CliCommands=@('onedrive'). Two packages
+        # in the same bundle owning the same CLI means the bundle
+        # loader writes one shim then immediately overwrites it, and
+        # the completion registration runs twice -- a silent ambiguity
+        # that no other test caught.
+        $collisions = foreach ($bundle in $script:byBundle.Keys) {
+            $byCli = @{}
+            foreach ($pkg in $script:byBundle[$bundle]) {
+                foreach ($cli in @($pkg.CliCommands)) {
+                    if (-not $byCli.ContainsKey($cli)) { $byCli[$cli] = @() }
+                    $byCli[$cli] += $pkg.Name
+                }
+            }
+            foreach ($cli in $byCli.Keys) {
+                if (@($byCli[$cli]).Count -gt 1) {
+                    [pscustomobject]@{
+                        Bundle   = $bundle
+                        Cli      = $cli
+                        Packages = $byCli[$cli]
+                    }
+                }
+            }
+        }
+        $collisions | Should -BeNullOrEmpty -Because "within-bundle CLI duplicates: $(($collisions | ForEach-Object { "$($_.Bundle):$($_.Cli) -> $($_.Packages -join '+')" }) -join '; ')"
     }
 
     It 'Claude Desktop is owned by the AIAgents bundle' {
