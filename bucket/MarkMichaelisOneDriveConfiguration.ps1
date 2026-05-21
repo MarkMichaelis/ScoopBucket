@@ -90,7 +90,8 @@ param(
     [string] $KfmOwner  = 'Michaelis',
     [switch] $NoKfmRebind,
     [string[]] $FreshSync = @(),
-    [switch] $DeleteSourceOnSuccess
+    [switch] $DeleteSourceOnSuccess,
+    [switch] $ForceHydrate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -787,6 +788,35 @@ function Get-OneDriveRegistryStringValuesUnderPath {
     return $results.ToArray()
 }
 
+function Get-OneDriveFileAttributes {
+    [OutputType([System.IO.FileAttributes])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    return [System.IO.File]::GetAttributes($Path)
+}
+
+function Get-OneDrivePlaceholderCount {
+    [OutputType([int])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    if (-not (Test-Path $Path)) { return 0 }
+
+    $count = 0
+    foreach ($file in @(Get-ChildItem -Path $Path -File -Recurse -ErrorAction SilentlyContinue)) {
+        $attrs = Get-OneDriveFileAttributes -Path $file.FullName
+        if (($attrs -band 0x00400000) -or ($attrs -band 0x00001000)) {
+            $count++
+        }
+    }
+    return $count
+}
+
 function Get-OneDriveSharePointSiteList {
     [OutputType([object[]])]
     [CmdletBinding()]
@@ -951,7 +981,8 @@ function New-OneDriveMigrationPlan {
         [AllowEmptyCollection()][object[]]$SharePointSites = @(),
         [AllowNull()][string]$KfmCurrentPath,
         [Parameter(Mandatory)][pscustomobject]$KfmDecision,
-        [bool]$WasRunning
+        [bool]$WasRunning,
+        [switch]$ForceHydrate
     )
 
     $plan = New-Object System.Collections.Generic.List[object]
@@ -1001,6 +1032,7 @@ function New-OneDriveMigrationPlan {
         $alreadyTarget = $a.UserFolder -and ($a.UserFolder.TrimEnd('\') -ieq $target.TrimEnd('\'))
         $sameVolume = if ($sourceExists) { Test-IsSameVolume -Source $a.UserFolder -Destination $target } else { $null }
         $moveSkipReason = $null
+        $moveWarnings = @()
         if (-not $a.UserFolder) {
             $moveSkipReason = 'Account has no UserFolder.'
         } elseif ($alreadyTarget) {
@@ -1008,8 +1040,18 @@ function New-OneDriveMigrationPlan {
         } elseif (-not $sourceExists) {
             $moveSkipReason = 'Source folder is missing; migration skipped for safety.'
         }
+        if (-not $moveSkipReason -and -not $sameVolume) {
+            $placeholderCount = Get-OneDrivePlaceholderCount -Path $a.UserFolder
+            if ($placeholderCount -gt 0) {
+                if ($ForceHydrate) {
+                    $moveWarnings += "Will hydrate $placeholderCount cloud-only files (~size unknown)."
+                } else {
+                    $moveSkipReason = "Refusing cross-volume move of $placeholderCount cloud-only files; re-run with -ForceHydrate to proceed."
+                }
+            }
+        }
 
-        $moveItem = New-OneDriveMigrationPlanItem -Type 'MoveAccount' -Target $target -CurrentValue $a.UserFolder -DesiredValue $target -SameVolume $sameVolume -Account $a -Reason 'Move the account sync root to the canonical target path.' -Skipped:([bool]$moveSkipReason) -SkipReason $moveSkipReason
+        $moveItem = New-OneDriveMigrationPlanItem -Type 'MoveAccount' -Target $target -CurrentValue $a.UserFolder -DesiredValue $target -SameVolume $sameVolume -Account $a -Reason 'Move the account sync root to the canonical target path.' -Skipped:([bool]$moveSkipReason) -SkipReason $moveSkipReason -Warnings $moveWarnings
         $moveItem | Add-Member -NotePropertyName FreshSync -NotePropertyValue $false
         $moveItem | Add-Member -NotePropertyName SharePointSite -NotePropertyValue $false
         $executionItems.Add($moveItem) | Out-Null
@@ -1043,6 +1085,7 @@ function New-OneDriveMigrationPlan {
         $alreadyTarget = $site.CurrentPath -and ($site.CurrentPath.TrimEnd('\') -ieq $site.DesiredPath.TrimEnd('\'))
         $sameVolume = if ($sourceExists) { Test-IsSameVolume -Source $site.CurrentPath -Destination $site.DesiredPath } else { $null }
         $moveSkipReason = $null
+        $moveWarnings = @()
         if (-not $site.CurrentPath) {
             $moveSkipReason = 'SharePoint site has no current mount path.'
         } elseif ($alreadyTarget) {
@@ -1050,8 +1093,18 @@ function New-OneDriveMigrationPlan {
         } elseif (-not $sourceExists) {
             $moveSkipReason = 'SharePoint site source folder is missing; migration skipped for safety.'
         }
+        if (-not $moveSkipReason -and -not $sameVolume) {
+            $placeholderCount = Get-OneDrivePlaceholderCount -Path $site.CurrentPath
+            if ($placeholderCount -gt 0) {
+                if ($ForceHydrate) {
+                    $moveWarnings += "Will hydrate $placeholderCount cloud-only files (~size unknown)."
+                } else {
+                    $moveSkipReason = "Refusing cross-volume move of $placeholderCount cloud-only files; re-run with -ForceHydrate to proceed."
+                }
+            }
+        }
 
-        $moveItem = New-OneDriveMigrationPlanItem -Type 'MoveAccount' -Target $site.DesiredPath -CurrentValue $site.CurrentPath -DesiredValue $site.DesiredPath -SameVolume $sameVolume -Account $site.OwnerAccount -Reason 'Move the SharePoint site/library mount to the canonical tenant sibling path.' -Skipped:([bool]$moveSkipReason) -SkipReason $moveSkipReason
+        $moveItem = New-OneDriveMigrationPlanItem -Type 'MoveAccount' -Target $site.DesiredPath -CurrentValue $site.CurrentPath -DesiredValue $site.DesiredPath -SameVolume $sameVolume -Account $site.OwnerAccount -Reason 'Move the SharePoint site/library mount to the canonical tenant sibling path.' -Skipped:([bool]$moveSkipReason) -SkipReason $moveSkipReason -Warnings $moveWarnings
         $moveItem | Add-Member -NotePropertyName FreshSync -NotePropertyValue $false
         $moveItem | Add-Member -NotePropertyName SharePointSite -NotePropertyValue $true
         $moveItem | Add-Member -NotePropertyName Site -NotePropertyValue $site
@@ -1270,12 +1323,16 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         [Parameter(Mandatory)][string]$KfmOwner,
         [switch]$NoKfmRebind,
         [AllowEmptyCollection()][AllowNull()][string[]]$FreshSync,
-        [switch]$DeleteSourceOnSuccess
+        [switch]$DeleteSourceOnSuccess,
+        [switch]$ForceHydrate
     )
 
     Write-Host "MarkMichaelisOneDriveConfiguration: RootDir=$RootDir, KfmOwner=$KfmOwner"
     if ($FreshSync -and $FreshSync.Count -gt 0) {
         Write-Host "  FreshSync requested: $($FreshSync -join ', ')"
+    }
+    if ($ForceHydrate) {
+        Write-Host '  ForceHydrate requested: cross-volume placeholder hydration is allowed'
     }
 
     $accounts = Get-OneDriveAccountList
@@ -1297,7 +1354,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     }
 
     $wasRunning = [bool](Get-Process -Name 'OneDrive' -ErrorAction SilentlyContinue)
-    $plan = New-OneDriveMigrationPlan -RootDir $RootDir -Accounts $accounts -FreshSyncAccounts @($freshSyncAccounts) -SharePointSites @($sharePointSites) -KfmCurrentPath $kfmCurrent -KfmDecision $kfmDecision -WasRunning:$wasRunning
+    $plan = New-OneDriveMigrationPlan -RootDir $RootDir -Accounts $accounts -FreshSyncAccounts @($freshSyncAccounts) -SharePointSites @($sharePointSites) -KfmCurrentPath $kfmCurrent -KfmDecision $kfmDecision -WasRunning:$wasRunning -ForceHydrate:$ForceHydrate
     Format-OneDriveMigrationPlan -Plan $plan
 
     if ($WhatIfPreference) {
@@ -1351,6 +1408,12 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         Write-Host '  Review the destination, confirm OneDrive is healthy, then delete the .migrated-* folder(s) manually or re-run with -DeleteSourceOnSuccess.'
     }
 
+    $fodGatedItems = @($plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.SkipReason -like 'Refusing cross-volume move of *cloud-only files*' })
+    if ($fodGatedItems.Count -gt 0) {
+        Write-Warning ("Files-On-Demand gate blocked {0} cross-volume move(s). Re-run with -ForceHydrate to proceed after accepting hydration." -f $fodGatedItems.Count)
+        throw "Files-On-Demand gate blocked $($fodGatedItems.Count) move(s)."
+    }
+
     Write-Warning 'MRU staleness: Office recent docs / Snagit Recent File List / VS recent files may reference old OneDrive paths; reopen as needed.'
     return $plan
 }
@@ -1359,5 +1422,5 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
 # `& "$dir\MarkMichaelisOneDriveConfiguration.ps1"`). When dot-sourced
 # (Pester tests), expose the helpers without running migration.
 if ($MyInvocation.InvocationName -ne '.') {
-    Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner -NoKfmRebind:$NoKfmRebind -FreshSync $FreshSync -DeleteSourceOnSuccess:$DeleteSourceOnSuccess
+    Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner -NoKfmRebind:$NoKfmRebind -FreshSync $FreshSync -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -ForceHydrate:$ForceHydrate
 }

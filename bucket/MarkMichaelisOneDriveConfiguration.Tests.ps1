@@ -276,6 +276,29 @@ Describe 'Update-OneDriveSharePointCache' -Tag 'Light' {
     }
 }
 
+Describe 'Get-OneDrivePlaceholderCount' -Tag 'Light' {
+    It 'counts Files-On-Demand placeholders via recall/offline file attributes' {
+        Mock -CommandName Test-Path -MockWith { $true }
+        Mock -CommandName Get-ChildItem -MockWith {
+            @(
+                [pscustomobject]@{ FullName = 'C:\Source\a.txt' },
+                [pscustomobject]@{ FullName = 'C:\Source\b.txt' },
+                [pscustomobject]@{ FullName = 'C:\Source\c.txt' }
+            )
+        }
+        Mock -CommandName Get-OneDriveFileAttributes -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\Source\a.txt' { return 0x00400000 }
+                'C:\Source\b.txt' { return 0x00001000 }
+                default { return 0 }
+            }
+        }
+
+        Get-OneDrivePlaceholderCount -Path 'C:\Source' | Should -Be 2
+    }
+}
+
 Describe 'Get-OneDriveAccountList (zombie slot filter)' -Tag 'Light' {
     # Regression for issue #192: a Business slot left over from a failed
     # sign-in has no DisplayName / UserFolder / UserEmail and must be
@@ -820,6 +843,58 @@ Describe 'Plan-then-execute architecture' -Tag 'Light' {
 
         ($plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.Target -eq 'C:\OneDrive\IntelliTect\IntelliTect - Engineering' }).Count | Should -Be 1
         ($plan | Where-Object { $_.Type -eq 'RewriteSPCache' -and $_.CurrentValue -eq 'C:\Users\Mark\IntelliTect - Engineering' -and $_.DesiredValue -eq 'C:\OneDrive\IntelliTect\IntelliTect - Engineering' }).Count | Should -Be 1
+    }
+
+    It 'gates cross-volume placeholder moves unless -ForceHydrate is supplied' {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $decision = [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'D:\OneDrive' { $true; break }
+                'D:\OneDrive\IntelliTect' { $true; break }
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Test-IsSameVolume -MockWith { $false }
+        Mock -CommandName Get-OneDrivePlaceholderCount -MockWith { 3 }
+        Mock -CommandName Get-ItemProperty -MockWith { [pscustomobject]@{} }
+
+        $plan = New-OneDriveMigrationPlan -RootDir 'D:\OneDrive' -Accounts @($acct) -FreshSyncAccounts @() -KfmCurrentPath $null -KfmDecision $decision -WasRunning:$false
+
+        ($plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.SkipReason -like 'Refusing cross-volume move of 3 cloud-only files*' }).Count | Should -Be 1
+    }
+
+    It 'allows cross-volume placeholder moves with a hydration warning when -ForceHydrate is supplied' {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $decision = [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'D:\OneDrive' { $true; break }
+                'D:\OneDrive\IntelliTect' { $true; break }
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Test-IsSameVolume -MockWith { $false }
+        Mock -CommandName Get-OneDrivePlaceholderCount -MockWith { 3 }
+        Mock -CommandName Get-ItemProperty -MockWith { [pscustomobject]@{} }
+
+        $plan = New-OneDriveMigrationPlan -RootDir 'D:\OneDrive' -Accounts @($acct) -FreshSyncAccounts @() -KfmCurrentPath $null -KfmDecision $decision -WasRunning:$false -ForceHydrate
+        $move = $plan | Where-Object { $_.Type -eq 'MoveAccount' } | Select-Object -First 1
+
+        $move.Skipped | Should -BeFalse
+        @($move.Warnings) | Should -Contain 'Will hydrate 3 cloud-only files (~size unknown).'
     }
 
     It 'marks every plan item skipped on a second idempotent run' {
