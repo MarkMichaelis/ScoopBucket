@@ -45,6 +45,18 @@
     Suppress the warning + automatic rebind that fires when KFM is
     currently bound to a different account than -KfmOwner.
 
+.PARAMETER FreshSync
+    Names (Slot or DisplayName) of Business* accounts that should
+    be unlinked instead of file-copy-migrated. For each match, the
+    bundle stops OneDrive, deletes the per-account registry key
+    (HKCU:\Software\Microsoft\OneDrive\Accounts\<Slot>) and the
+    local UserFolder, then restarts OneDrive. The user must
+    re-sign-in via the OneDrive UI; the DefaultRootDir policy
+    (still applied) directs the new sync root to the canonical
+    location, and OneDrive recreates cloud-only placeholders
+    without bulk-downloading Files-On-Demand content. Personal
+    accounts are not supported.
+
 .EXAMPLE
     .\MarkMichaelisOneDriveConfiguration.ps1 -WhatIf
 
@@ -61,7 +73,8 @@
 param(
     [string] $RootDir   = 'C:\OneDrive',
     [string] $KfmOwner  = 'Michaelis',
-    [switch] $NoKfmRebind
+    [switch] $NoKfmRebind,
+    [string[]] $FreshSync = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -184,6 +197,53 @@ function Resolve-KfmRebindAction {
         OwnerAccount = $ownerAcct
         Reason       = "KFM is bound to a non-owner path ('$KfmCurrentPath'); rebind to $($ownerAcct.DisplayName)."
     }
+}
+
+function Resolve-FreshSyncAccounts {
+    <#
+    .SYNOPSIS
+        Match -FreshSync entries against discovered accounts and return
+        the resolved account records.
+    .DESCRIPTION
+        Pure function. Each entry in $FreshSync is matched
+        case-insensitively against either the Slot name (e.g.
+        'Business2') or the DisplayName (e.g. 'IntelliTect') of a
+        Business* account. Personal accounts are out of scope and
+        cause a throw. Unmatched entries also cause a throw.
+
+        Returns an array of the matched account objects (possibly
+        empty when $FreshSync is empty).
+    #>
+    [OutputType([object[]])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Accounts,
+        [AllowEmptyCollection()][AllowNull()][string[]]$FreshSync
+    )
+
+    if (-not $FreshSync -or $FreshSync.Count -eq 0) {
+        return @()
+    }
+
+    $matched = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in $FreshSync) {
+        if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+        $hit = $Accounts | Where-Object {
+            ($_.Slot -and [string]::Equals($_.Slot, $entry, [System.StringComparison]::OrdinalIgnoreCase)) -or
+            ($_.DisplayName -and [string]::Equals($_.DisplayName, $entry, [System.StringComparison]::OrdinalIgnoreCase))
+        } | Select-Object -First 1
+
+        if (-not $hit) {
+            throw "FreshSync entry '$entry' does not match any discovered OneDrive account (by Slot or DisplayName)."
+        }
+        if ($hit.AccountType -ne 'Business') {
+            throw "FreshSync entry '$entry' matched a $($hit.AccountType) account (Slot=$($hit.Slot)); only Business accounts are supported."
+        }
+        if (-not ($matched | Where-Object { $_.Slot -eq $hit.Slot })) {
+            $matched.Add($hit) | Out-Null
+        }
+    }
+    return $matched.ToArray()
 }
 
 # ---------------------------------------------------------------------------
@@ -497,6 +557,34 @@ $AppFixUps = @{
     # }
 }
 
+function Remove-OneDriveAccountLink {
+    <#
+    .SYNOPSIS
+        Unlink a OneDrive Business account: delete its registry slot
+        and local UserFolder so the user can re-sign-in fresh.
+    .DESCRIPTION
+        Used by -FreshSync to avoid bulk-hydrating Files-On-Demand
+        placeholders during a cross-volume migration. Caller is
+        responsible for stopping OneDrive.exe first.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][pscustomobject]$Account
+    )
+    $regPath = $Account.RegistryPath
+    if ($regPath -and (Test-Path $regPath)) {
+        if ($PSCmdlet.ShouldProcess($regPath, "Remove OneDrive account registry key (fresh-sync)")) {
+            Remove-Item -LiteralPath $regPath -Recurse -Force
+        }
+    }
+    $folder = $Account.UserFolder
+    if ($folder -and (Test-Path $folder)) {
+        if ($PSCmdlet.ShouldProcess($folder, "Remove local OneDrive sync folder (fresh-sync)")) {
+            Remove-Item -LiteralPath $folder -Recurse -Force
+        }
+    }
+}
+
 function Invoke-AppFixUps {
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -524,10 +612,14 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     param(
         [Parameter(Mandatory)][string]$RootDir,
         [Parameter(Mandatory)][string]$KfmOwner,
-        [switch]$NoKfmRebind
+        [switch]$NoKfmRebind,
+        [AllowEmptyCollection()][AllowNull()][string[]]$FreshSync
     )
 
     Write-Host "MarkMichaelisOneDriveConfiguration: RootDir=$RootDir, KfmOwner=$KfmOwner"
+    if ($FreshSync -and $FreshSync.Count -gt 0) {
+        Write-Host "  FreshSync requested: $($FreshSync -join ', ')"
+    }
 
     # 1. Pre-create $RootDir.
     if (-not (Test-Path $RootDir)) {
@@ -538,13 +630,21 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
 
     # 2. Discover accounts.
     $accounts = Get-OneDriveAccountList
+
+    # 2a. Resolve -FreshSync entries against the discovered accounts.
+    $freshSyncAccounts = Resolve-FreshSyncAccounts -Accounts $accounts -FreshSync $FreshSync
+    $freshSyncSlots = @($freshSyncAccounts | ForEach-Object { $_.Slot })
+
     Write-Host "  Discovered $($accounts.Count) account(s):"
     foreach ($a in $accounts) {
-        Write-Host ("    [{0}] {1} <{2}> -> {3}" -f $a.AccountType, $a.DisplayName, $a.UserEmail, $a.UserFolder)
+        $tag = if ($freshSyncSlots -contains $a.Slot) { '  [FRESH-SYNC]' } else { '' }
+        Write-Host ("    [{0}] {1} <{2}> -> {3}{4}" -f $a.AccountType, $a.DisplayName, $a.UserEmail, $a.UserFolder, $tag)
     }
 
     # 3. Pre-create per-account target directories under $RootDir.
+    #    Skip FreshSync accounts: OneDrive will create the folder on re-sign-in.
     foreach ($a in $accounts) {
+        if ($freshSyncSlots -contains $a.Slot) { continue }
         $target = Get-OneDriveTargetPath -Account $a -RootDir $RootDir
         if (-not (Test-Path $target)) {
             if ($PSCmdlet.ShouldProcess($target, 'Create directory')) {
@@ -562,13 +662,25 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         throw "KFM owner '$KfmOwner' is not signed in. Sign in to the matching Work account in OneDrive and re-run."
     }
 
-    # 5. Apply policy.
+    # If the KFM owner itself is being fresh-synced, KFM bindings will
+    # break -- skip the rewrite/rebind work and warn the user.
+    $kfmOwnerInFreshSync = $false
+    if ($kfmDecision.OwnerAccount -and ($freshSyncSlots -contains $kfmDecision.OwnerAccount.Slot)) {
+        $kfmOwnerInFreshSync = $true
+        Write-Warning ("KFM owner account '{0}' ({1}) is in -FreshSync. KFM bindings will break when the account is unlinked. After re-sign-in, reconfigure KFM via OneDrive Settings -> Backup -> Manage backup." -f $kfmDecision.OwnerAccount.DisplayName, $kfmDecision.OwnerAccount.Slot)
+    }
+
+    # 5. Apply policy. Still applied for FreshSync accounts so the
+    #    new sync root lands at the policy-directed path on re-sign-in.
     Set-OneDrivePolicy -Accounts $accounts -RootDir $RootDir
 
-    # 6. Compute migration plan (account -> target) and execute.
+    # 6. Compute migration plan (file-copy) and execute. FreshSync
+    #    accounts are excluded from the file-copy list and handled
+    #    separately via Remove-OneDriveAccountLink.
     $stoppedOneDrive = $false
     $migrations = @()
     foreach ($a in $accounts) {
+        if ($freshSyncSlots -contains $a.Slot) { continue }
         $target = Get-OneDriveTargetPath -Account $a -RootDir $RootDir
         if ($a.UserFolder -and (Test-Path $a.UserFolder) -and
             ($a.UserFolder.TrimEnd('\') -ine $target.TrimEnd('\'))) {
@@ -576,9 +688,10 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         }
     }
 
-    if ($migrations.Count -gt 0) {
+    if ($migrations.Count -gt 0 -or $freshSyncAccounts.Count -gt 0) {
         Stop-OneDriveExe
         $stoppedOneDrive = $true
+
         foreach ($m in $migrations) {
             try {
                 Write-Host "  Migrating $($m.Account.DisplayName): $($m.OldPath) -> $($m.NewPath)"
@@ -586,7 +699,8 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
                 Update-OneDriveAccountRegistry -Account $m.Account -NewPath $m.NewPath
 
                 # Rewrite KFM if this account is the (tracked) owner.
-                if ($kfmDecision.Action -eq 'Track' -and
+                if (-not $kfmOwnerInFreshSync -and
+                    $kfmDecision.Action -eq 'Track' -and
                     $kfmDecision.OwnerAccount -and
                     $kfmDecision.OwnerAccount.Slot -eq $m.Account.Slot) {
                     Update-KfmBindings -OldRoot $m.OldPath -NewRoot $m.NewPath
@@ -597,18 +711,31 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
                 throw
             }
         }
+
+        foreach ($fa in $freshSyncAccounts) {
+            try {
+                Write-Verbose "Fresh-sync: unlinking account '$($fa.Slot)' ($($fa.DisplayName)) (registry + local folder)..."
+                Write-Host "  Fresh-sync unlink: $($fa.DisplayName) (Slot=$($fa.Slot))"
+                Remove-OneDriveAccountLink -Account $fa
+            } catch {
+                Write-Error "Fresh-sync unlink failed for $($fa.DisplayName): $($_.Exception.Message). OneDrive NOT restarted."
+                throw
+            }
+        }
     }
 
-    # 7. Handle Rebind / WarnOnly cases.
-    if ($kfmDecision.Action -eq 'Rebind' -and $kfmDecision.OwnerAccount) {
-        $ownerTarget = Get-OneDriveTargetPath -Account $kfmDecision.OwnerAccount -RootDir $RootDir
-        $kfmRoot = $kfmCurrent
-        # Trim to drive root if it doesn't match a known account folder.
-        if ($PSCmdlet.ShouldProcess("KFM root '$kfmRoot' -> '$ownerTarget'", "Rebind KFM")) {
-            Update-KfmBindings -OldRoot $kfmRoot -NewRoot $ownerTarget
+    # 7. Handle Rebind / WarnOnly cases (skip if owner is in FreshSync).
+    if (-not $kfmOwnerInFreshSync) {
+        if ($kfmDecision.Action -eq 'Rebind' -and $kfmDecision.OwnerAccount) {
+            $ownerTarget = Get-OneDriveTargetPath -Account $kfmDecision.OwnerAccount -RootDir $RootDir
+            $kfmRoot = $kfmCurrent
+            # Trim to drive root if it doesn't match a known account folder.
+            if ($PSCmdlet.ShouldProcess("KFM root '$kfmRoot' -> '$ownerTarget'", "Rebind KFM")) {
+                Update-KfmBindings -OldRoot $kfmRoot -NewRoot $ownerTarget
+            }
+        } elseif ($kfmDecision.Action -eq 'WarnOnly') {
+            Write-Warning $kfmDecision.Reason
         }
-    } elseif ($kfmDecision.Action -eq 'WarnOnly') {
-        Write-Warning $kfmDecision.Reason
     }
 
     if ($stoppedOneDrive) {
@@ -620,8 +747,32 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     Write-Host "MarkMichaelisOneDriveConfiguration complete:"
     Write-Host "  Accounts found:   $($accounts.Count)"
     Write-Host "  Migrations:       $($migrations.Count)"
-    Write-Host "  KFM action:       $($kfmDecision.Action)"
+    Write-Host "  Fresh-sync:       $($freshSyncAccounts.Count)"
+    if ($kfmOwnerInFreshSync) {
+        Write-Host "  KFM action:       Skipped (owner in -FreshSync)"
+    } else {
+        Write-Host "  KFM action:       $($kfmDecision.Action)"
+    }
     Write-Host ""
+
+    if ($freshSyncAccounts.Count -gt 0) {
+        Write-Host "FRESH-SYNC accounts unlinked:"
+        foreach ($fa in $freshSyncAccounts) {
+            Write-Host ("  - {0} ({1})" -f $fa.DisplayName, $fa.Slot)
+        }
+        Write-Host ""
+        Write-Host "To complete the migration:"
+        Write-Host "  1. Open OneDrive Settings (right-click cloud icon -> Settings -> Account)"
+        Write-Host "  2. Click 'Add an account'"
+        foreach ($fa in $freshSyncAccounts) {
+            $newTarget = Get-OneDriveTargetPath -Account $fa -RootDir $RootDir
+            Write-Host ("  3. Sign in to: {0}" -f $fa.UserEmail)
+            Write-Host ("     Policy will direct the new sync root to: {0}" -f $newTarget)
+        }
+        Write-Host "  4. OneDrive will create cloud-only placeholders (no bulk download)."
+        Write-Host ""
+    }
+
     Write-Warning "MRU staleness: Office recent docs / Snagit Recent File List / VS recent files may reference old OneDrive paths; reopen as needed."
 }
 
@@ -629,5 +780,5 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
 # `& "$dir\MarkMichaelisOneDriveConfiguration.ps1"`). When dot-sourced
 # (Pester tests), expose the helpers without running migration.
 if ($MyInvocation.InvocationName -ne '.') {
-    Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner -NoKfmRebind:$NoKfmRebind
+    Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner -NoKfmRebind:$NoKfmRebind -FreshSync $FreshSync
 }
