@@ -116,6 +116,11 @@ Register-ArgumentCompleter -Native -CommandName npx -ScriptBlock {
         # doesn't fall back to a machine-context selection that fails on
         # headless CI runners (mirrors the Claude Desktop note above).
         Scope       = 'user'
+        # Warp ships a Squirrel-based installer that pops a progress
+        # window during install. --silent suppresses that installer UI,
+        # and --disable-interactivity keeps winget itself non-interactive
+        # so headless / CI runs do not stall on prompts.
+        WingetExtraArgs = @('--silent', '--disable-interactivity')
         # Two surfaces from a single binary:
         #   * `warp` — launches the Warp terminal UI (GUI) when run bare,
         #              or the embedded Oz CLI when run with subcommands.
