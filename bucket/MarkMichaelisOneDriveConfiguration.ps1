@@ -54,13 +54,15 @@
     Names (Slot or DisplayName) of Business* accounts that should
     be unlinked instead of file-copy-migrated. For each match, the
     bundle stops OneDrive, deletes the per-account registry key
-    (HKCU:\Software\Microsoft\OneDrive\Accounts\<Slot>) and the
-    local UserFolder, then restarts OneDrive. The user must
-    re-sign-in via the OneDrive UI; the DefaultRootDir policy
-    (still applied) directs the new sync root to the canonical
-    location, and OneDrive recreates cloud-only placeholders
-    without bulk-downloading Files-On-Demand content. Personal
-    accounts are not supported.
+    (HKCU:\Software\Microsoft\OneDrive\Accounts\<Slot>) and renames
+    the local UserFolder to <UserFolder>.freshsync-<yyyyMMdd-HHmmss>
+    by default so a recovery copy is preserved. Pass
+    -DeleteSourceOnSuccess to remove that recovery folder after a
+    successful fresh-sync unlink. The user must re-sign-in via the
+    OneDrive UI; the DefaultRootDir policy (still applied) directs the
+    new sync root to the canonical location, and OneDrive recreates
+    cloud-only placeholders without bulk-downloading Files-On-Demand
+    content. Personal accounts are not supported.
 
 .PARAMETER SkipElevationCheck
     Skip the top-level elevation pre-flight. Use only when the HKLM
@@ -832,15 +834,21 @@ function Remove-OneDriveAccountLink {
     <#
     .SYNOPSIS
         Unlink a OneDrive Business account: delete its registry slot
-        and local UserFolder so the user can re-sign-in fresh.
+        and preserve the local UserFolder as a fresh-sync recovery copy
+        so the user can re-sign-in fresh.
     .DESCRIPTION
         Used by -FreshSync to avoid bulk-hydrating Files-On-Demand
         placeholders during a cross-volume migration. Caller is
-        responsible for stopping OneDrive.exe first.
+        responsible for stopping OneDrive.exe first. By default the
+        local UserFolder is renamed to <UserFolder>.freshsync-<timestamp>
+        so the user retains a recovery copy. Pass -DeleteRecoveryFolder
+        to remove that renamed recovery folder after the unlink.
     #>
+    [OutputType([string])]
     [CmdletBinding(SupportsShouldProcess)]
     param(
-        [Parameter(Mandatory)][pscustomobject]$Account
+        [Parameter(Mandatory)][pscustomobject]$Account,
+        [switch]$DeleteRecoveryFolder
     )
     $regPath = $Account.RegistryPath
     if ($regPath -and (Test-Path $regPath)) {
@@ -849,11 +857,21 @@ function Remove-OneDriveAccountLink {
         }
     }
     $folder = $Account.UserFolder
+    $recoveryPath = $null
     if ($folder -and (Test-Path $folder)) {
-        if ($PSCmdlet.ShouldProcess($folder, "Remove local OneDrive sync folder (fresh-sync)")) {
-            Remove-Item -LiteralPath $folder -Recurse -Force
+        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $recoveryPath = "$folder.freshsync-$timestamp"
+        if ($PSCmdlet.ShouldProcess($folder, "Rename local OneDrive sync folder -> $recoveryPath (fresh-sync recovery)")) {
+            Move-Item -LiteralPath $folder -Destination $recoveryPath
+        }
+        if ($DeleteRecoveryFolder) {
+            if ($PSCmdlet.ShouldProcess($recoveryPath, 'Remove-Item -Recurse (fresh-sync recovery cleanup)')) {
+                Remove-Item -LiteralPath $recoveryPath -Recurse -Force
+                $recoveryPath = $null
+            }
         }
     }
+    return $recoveryPath
 }
 
 function Invoke-AppFixUps {
@@ -1383,6 +1401,7 @@ function Invoke-OneDriveMigrationPlan {
     )
 
     $deferredCleanupPaths = New-Object System.Collections.Generic.List[string]
+    $freshSyncRecoveryPaths = New-Object System.Collections.Generic.List[string]
     foreach ($item in $Plan) {
         if ($item.Skipped) {
             $item.Status = 'Skipped'
@@ -1422,7 +1441,11 @@ function Invoke-OneDriveMigrationPlan {
                 }
                 'MoveAccount' {
                     if ($item.FreshSync) {
-                        Remove-OneDriveAccountLink -Account $item.Account
+                        $freshSyncRecoveryPath = Remove-OneDriveAccountLink -Account $item.Account -DeleteRecoveryFolder:$DeleteSourceOnSuccess
+                        if ($freshSyncRecoveryPath) {
+                            $freshSyncRecoveryPaths.Add($freshSyncRecoveryPath) | Out-Null
+                            $item.Warnings += "FreshSync recovery folder preserved at: $freshSyncRecoveryPath"
+                        }
                     } else {
                         $sameVolume = Test-IsSameVolume -Source $item.CurrentValue -Destination $item.DesiredValue
                         $registrySnapshot = $null
@@ -1492,8 +1515,9 @@ function Invoke-OneDriveMigrationPlan {
     }
 
     return [pscustomobject]@{
-        DeferredCleanupPaths = $deferredCleanupPaths
-        Plan                 = $Plan
+        DeferredCleanupPaths   = $deferredCleanupPaths
+        FreshSyncRecoveryPaths = $freshSyncRecoveryPaths
+        Plan                   = $Plan
     }
 }
 
@@ -1523,7 +1547,8 @@ function Get-OneDriveMigrationSummaryLines {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Accounts,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$SharePointSites,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
-        [AllowEmptyCollection()][string[]]$DeferredCleanupPaths = @()
+        [AllowEmptyCollection()][string[]]$DeferredCleanupPaths = @(),
+        [AllowEmptyCollection()][string[]]$FreshSyncRecoveryPaths = @()
     )
 
     $lines = New-Object System.Collections.Generic.List[string]
@@ -1589,6 +1614,15 @@ function Get-OneDriveMigrationSummaryLines {
         $lines.Add('  - none') | Out-Null
     } else {
         foreach ($path in @($DeferredCleanupPaths)) {
+            $lines.Add(("  - {0}" -f $path)) | Out-Null
+        }
+    }
+
+    $lines.Add('FreshSync recovery folders preserved at:') | Out-Null
+    if (@($FreshSyncRecoveryPaths).Count -eq 0) {
+        $lines.Add('  - none') | Out-Null
+    } else {
+        foreach ($path in @($FreshSyncRecoveryPaths)) {
             $lines.Add(("  - {0}" -f $path)) | Out-Null
         }
     }
@@ -1677,9 +1711,11 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
 
     $backupPath = ($plan | Where-Object Type -eq 'RegistryBackup' | Select-Object -First 1).Target
     $deferredCleanupPaths = @()
+    $freshSyncRecoveryPaths = @()
     try {
         $execution = Invoke-OneDriveMigrationPlan -Plan $plan -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -Confirm:$false
         $deferredCleanupPaths = @($execution.DeferredCleanupPaths)
+        $freshSyncRecoveryPaths = @($execution.FreshSyncRecoveryPaths)
     } catch {
         $failedItem = $plan | Where-Object { $_.Status -eq 'Failed' } | Select-Object -First 1
         if ($failedItem -and $failedItem.Type -eq 'UpdateAccountRegistry' -and $failedItem.Account) {
@@ -1690,7 +1726,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         throw
     }
 
-    $summaryLines = Get-OneDriveMigrationSummaryLines -Accounts $accounts -SharePointSites @($sharePointSites) -Plan $plan -DeferredCleanupPaths @($deferredCleanupPaths)
+    $summaryLines = Get-OneDriveMigrationSummaryLines -Accounts $accounts -SharePointSites @($sharePointSites) -Plan $plan -DeferredCleanupPaths @($deferredCleanupPaths) -FreshSyncRecoveryPaths @($freshSyncRecoveryPaths)
     Write-OneDriveMigrationSummary -Lines $summaryLines
 
     if ($freshSyncAccounts.Count -gt 0) {
