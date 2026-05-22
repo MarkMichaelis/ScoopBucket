@@ -1120,6 +1120,126 @@ function Update-OneDriveSharePointCache {
     }
 }
 
+function New-OneDriveVerificationCheck {
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][ValidateSet('Pass','Fail','Skip')][string]$Status,
+        [Parameter(Mandatory)][string]$Detail
+    )
+
+    return [pscustomobject]@{
+        Name   = $Name
+        Status = $Status
+        Detail = $Detail
+    }
+}
+
+function Invoke-OneDriveMigrationVerification {
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan
+    )
+
+    $checks = New-Object System.Collections.Generic.List[object]
+    $accounts = @(Get-OneDriveAccountList)
+    $freshSyncSlots = @($Plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.FreshSync } | ForEach-Object { $_.Account.Slot })
+    $rootDirItem = $Plan | Where-Object { $_.Type -eq 'CreateDir' -and -not $_.Account } | Select-Object -First 1
+    $rootDir = if ($rootDirItem) { $rootDirItem.DesiredValue } else { $null }
+
+    $accountFailures = New-Object System.Collections.Generic.List[string]
+    $verifiableAccounts = @($accounts | Where-Object { $_.AccountType -in @('Business','Personal') -and ($freshSyncSlots -notcontains $_.Slot) })
+    if (-not $rootDir) {
+        $checks.Add((New-OneDriveVerificationCheck -Name 'A. Account UserFolder registry targets' -Status 'Skip' -Detail 'RootDir could not be inferred from the plan.')) | Out-Null
+    } elseif ($verifiableAccounts.Count -eq 0) {
+        $checks.Add((New-OneDriveVerificationCheck -Name 'A. Account UserFolder registry targets' -Status 'Skip' -Detail 'No non-FreshSync accounts require verification.')) | Out-Null
+    } else {
+        foreach ($account in $verifiableAccounts) {
+            $desired = Get-OneDriveTargetPath -Account $account -RootDir $rootDir
+            $actual = (Get-ItemProperty -Path $account.RegistryPath -Name 'UserFolder' -ErrorAction SilentlyContinue).UserFolder
+            $actualTrimmed = if ($actual) { $actual.TrimEnd('\') } else { $actual }
+            $desiredTrimmed = if ($desired) { $desired.TrimEnd('\') } else { $desired }
+            if (-not [string]::Equals($actualTrimmed, $desiredTrimmed, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $accountFailures.Add("$($account.Slot): '$actual' != '$desired'") | Out-Null
+            }
+        }
+        $checks.Add((New-OneDriveVerificationCheck -Name 'A. Account UserFolder registry targets' -Status $(if ($accountFailures.Count -eq 0) { 'Pass' } else { 'Fail' }) -Detail $(if ($accountFailures.Count -eq 0) { "Verified $($verifiableAccounts.Count) account target(s)." } else { $accountFailures -join '; ' }))) | Out-Null
+    }
+
+    $tenantCreateItems = @($Plan | Where-Object { $_.Type -eq 'CreateDir' -and $_.Account -and $_.Account.AccountType -eq 'Business' })
+    if ($tenantCreateItems.Count -eq 0) {
+        $checks.Add((New-OneDriveVerificationCheck -Name 'B. Tenant directory existence' -Status 'Skip' -Detail 'No tenant-display-name folders were planned.')) | Out-Null
+    } else {
+        $missingTenantDirs = @($tenantCreateItems | Where-Object { -not (Test-Path $_.Target) } | ForEach-Object { $_.Target })
+        $checks.Add((New-OneDriveVerificationCheck -Name 'B. Tenant directory existence' -Status $(if ($missingTenantDirs.Count -eq 0) { 'Pass' } else { 'Fail' }) -Detail $(if ($missingTenantDirs.Count -eq 0) { "Verified $($tenantCreateItems.Count) tenant folder(s)." } else { 'Missing: ' + ($missingTenantDirs -join '; ') }))) | Out-Null
+    }
+
+    $rewriteKfmItem = $Plan | Where-Object { $_.Type -eq 'RewriteKfm' } | Select-Object -First 1
+    if (-not $rewriteKfmItem -or -not $rewriteKfmItem.DesiredValue) {
+        $checks.Add((New-OneDriveVerificationCheck -Name 'C. KFM owner binding' -Status 'Skip' -Detail 'KFM track/rebind verification was not applicable.')) | Out-Null
+    } else {
+        $documentsPath = (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders' -Name 'Personal' -ErrorAction SilentlyContinue).Personal
+        $kfmPass = $documentsPath -and $documentsPath.StartsWith($rewriteKfmItem.DesiredValue.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)
+        $checks.Add((New-OneDriveVerificationCheck -Name 'C. KFM owner binding' -Status $(if ($kfmPass) { 'Pass' } else { 'Fail' }) -Detail $(if ($kfmPass) { "Documents resolves under '$($rewriteKfmItem.DesiredValue)'." } else { "Documents path '$documentsPath' does not resolve under '$($rewriteKfmItem.DesiredValue)'." }))) | Out-Null
+    }
+
+    $policyItems = @($Plan | Where-Object { $_.Type -eq 'WritePolicy' -and $_.PolicyKind -eq 'DefaultRootDir' })
+    if ($policyItems.Count -eq 0) {
+        $checks.Add((New-OneDriveVerificationCheck -Name 'D. DefaultRootDir policy' -Status 'Skip' -Detail 'No tenant DefaultRootDir policy writes were planned.')) | Out-Null
+    } else {
+        $policyFailures = New-Object System.Collections.Generic.List[string]
+        foreach ($item in $policyItems) {
+            $actual = (Get-ItemProperty -Path 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir' -Name $item.Account.TenantId -ErrorAction SilentlyContinue).$($item.Account.TenantId)
+            if (-not [string]::Equals(($actual ?? '').TrimEnd('\'), ($item.DesiredValue ?? '').TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) {
+                $policyFailures.Add("$($item.Account.TenantId): '$actual' != '$($item.DesiredValue)'") | Out-Null
+            }
+        }
+        $checks.Add((New-OneDriveVerificationCheck -Name 'D. DefaultRootDir policy' -Status $(if ($policyFailures.Count -eq 0) { 'Pass' } else { 'Fail' }) -Detail $(if ($policyFailures.Count -eq 0) { "Verified $($policyItems.Count) policy value(s)." } else { $policyFailures -join '; ' }))) | Out-Null
+    }
+
+    $sharePointMoves = @($Plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.SharePointSite -and $_.Status -eq 'Done' -and $_.CurrentValue })
+    if ($sharePointMoves.Count -eq 0) {
+        $checks.Add((New-OneDriveVerificationCheck -Name 'E. SharePoint cache old-root purge' -Status 'Skip' -Detail 'No SharePoint site moves completed in this plan.')) | Out-Null
+    } else {
+        $cacheFailures = New-Object System.Collections.Generic.List[string]
+        foreach ($move in $sharePointMoves) {
+            foreach ($account in $accounts) {
+                foreach ($cacheLeaf in 'ScopeIdToMountPointPathCache','ScopeIdToMountPointPathCacheRoot') {
+                    $cacheKey = Join-Path $account.RegistryPath $cacheLeaf
+                    foreach ($entry in @(Get-OneDriveRegistryStringValuesUnderPath -Path $cacheKey)) {
+                        if ($entry.Value.StartsWith($move.CurrentValue, [System.StringComparison]::OrdinalIgnoreCase)) {
+                            $cacheFailures.Add("$($entry.KeyPath)\\$($entry.ValueName) still references '$($move.CurrentValue)' via '$($entry.Value)'") | Out-Null
+                        }
+                    }
+                }
+            }
+        }
+        $checks.Add((New-OneDriveVerificationCheck -Name 'E. SharePoint cache old-root purge' -Status $(if ($cacheFailures.Count -eq 0) { 'Pass' } else { 'Fail' }) -Detail $(if ($cacheFailures.Count -eq 0) { "Verified $($sharePointMoves.Count) SharePoint move(s)." } else { $cacheFailures -join '; ' }))) | Out-Null
+    }
+
+    $startItem = $Plan | Where-Object { $_.Type -eq 'StartOneDrive' } | Select-Object -First 1
+    $shouldBeRunning = [bool]($startItem -and -not $startItem.Skipped -and $startItem.Status -eq 'Done')
+    $isRunning = [bool](Get-Process -Name 'OneDrive' -ErrorAction SilentlyContinue)
+    $checks.Add((New-OneDriveVerificationCheck -Name 'F. OneDrive.exe running state' -Status $(if ($isRunning -eq $shouldBeRunning) { 'Pass' } else { 'Fail' }) -Detail $(if ($isRunning -eq $shouldBeRunning) { "OneDrive running state matched expectation ($shouldBeRunning)." } else { "Expected running=$shouldBeRunning but observed running=$isRunning." }))) | Out-Null
+
+    $failedChecks = @($checks | Where-Object Status -eq 'Fail')
+    $overallStatus = if ($failedChecks.Count -gt 0) {
+        'Fail'
+    } elseif (@($checks | Where-Object Status -eq 'Pass').Count -gt 0) {
+        'Pass'
+    } else {
+        'Skip'
+    }
+
+    return [pscustomobject]@{
+        Checks        = $checks.ToArray()
+        OverallStatus = $overallStatus
+        FailedChecks  = $failedChecks
+    }
+}
+
 # ---------------------------------------------------------------------------
 # Main orchestration. Skipped when the script is dot-sourced (so unit
 # tests can pull in just the helper functions above).
@@ -1304,11 +1424,6 @@ function New-OneDriveMigrationPlan {
         if ($AppFixUps.Count -gt 0) {
             $executionItems.Add((New-OneDriveMigrationPlanItem -Type 'AppFixUp' -Target $target -CurrentValue $a.UserFolder -DesiredValue $target -SameVolume $sameVolume -Account $a -Reason 'Run application-specific path fix-ups after the move.' -Skipped:$moveItem.Skipped -SkipReason $moveItem.SkipReason)) | Out-Null
         }
-
-        $verifyItem = New-OneDriveMigrationPlanItem -Type 'Verify' -Target $target -CurrentValue $a.UserFolder -DesiredValue $target -SameVolume $sameVolume -Account $a -Reason 'Verify the migrated sync root exists where expected.' -Skipped:$moveItem.Skipped -SkipReason $moveItem.SkipReason
-        $verifyItem | Add-Member -NotePropertyName DeferredDeletePath -NotePropertyValue $null
-        $moveItem | Add-Member -NotePropertyName VerifyItem -NotePropertyValue $verifyItem
-        $executionItems.Add($verifyItem) | Out-Null
     }
 
     foreach ($site in $SharePointSites) {
@@ -1347,11 +1462,6 @@ function New-OneDriveMigrationPlan {
         $rewriteItem | Add-Member -NotePropertyName Site -NotePropertyValue $site
         $rewriteItem | Add-Member -NotePropertyName MoveItem -NotePropertyValue $moveItem
         $executionItems.Add($rewriteItem) | Out-Null
-
-        $verifyItem = New-OneDriveMigrationPlanItem -Type 'Verify' -Target $site.DesiredPath -CurrentValue $site.CurrentPath -DesiredValue $site.DesiredPath -SameVolume $sameVolume -Account $site.OwnerAccount -Reason 'Verify the SharePoint site/library mount exists where expected.' -Skipped:$moveItem.Skipped -SkipReason $moveItem.SkipReason
-        $verifyItem | Add-Member -NotePropertyName DeferredDeletePath -NotePropertyValue $null
-        $moveItem | Add-Member -NotePropertyName VerifyItem -NotePropertyValue $verifyItem
-        $executionItems.Add($verifyItem) | Out-Null
     }
 
     $ownerInFreshSync = $KfmDecision.OwnerAccount -and ($freshSyncSlots -contains $KfmDecision.OwnerAccount.Slot)
@@ -1404,6 +1514,7 @@ function New-OneDriveMigrationPlan {
         $null
     }
     $plan.Add((New-OneDriveMigrationPlanItem -Type 'StartOneDrive' -Target 'OneDrive.exe' -CurrentValue 'Stopped' -DesiredValue $(if ($WasRunning) { 'Running' } else { 'NotRunning' }) -SameVolume $null -Account $null -Reason 'Restore OneDrive to its pre-run process state.' -Skipped:([bool]$startSkipReason) -SkipReason $startSkipReason)) | Out-Null
+    $plan.Add((New-OneDriveMigrationPlanItem -Type 'Verify' -Target 'PostMigration' -CurrentValue $null -DesiredValue $null -SameVolume $null -Account $null -Reason 'Run post-migration verification checks across account registry, tenant folders, KFM, policy, SharePoint cache, and OneDrive.exe state.' -Skipped:(-not $needsStopStart) -SkipReason $(if (-not $needsStopStart) { 'No file or registry mutations were required.' } else { $null }))) | Out-Null
 
     return $plan.ToArray()
 }
@@ -1498,9 +1609,6 @@ function Invoke-OneDriveMigrationPlan {
                         if ($moveResult -and $moveResult.DeferredDeletePath) {
                             $deferredCleanupPaths.Add($moveResult.DeferredDeletePath) | Out-Null
                             $item.Warnings += "Manual cleanup pending: $($moveResult.DeferredDeletePath)"
-                            if ($item.VerifyItem) {
-                                $item.VerifyItem.DeferredDeletePath = $moveResult.DeferredDeletePath
-                            }
                         }
                         $item | Add-Member -NotePropertyName SameVolume -NotePropertyValue $sameVolume -Force
                         $item | Add-Member -NotePropertyName RegistrySnapshot -NotePropertyValue $registrySnapshot -Force
@@ -1524,9 +1632,8 @@ function Invoke-OneDriveMigrationPlan {
                     Invoke-AppFixUps -OldRoot $item.CurrentValue -NewRoot $item.DesiredValue
                 }
                 'Verify' {
-                    if (-not (Test-OneDriveFolderMoveVerification -Destination $item.DesiredValue -DeferredSource $item.DeferredDeletePath)) {
-                        throw "Verification failed for '$($item.DesiredValue)'."
-                    }
+                    $verifyResult = Invoke-OneDriveMigrationVerification -Plan $Plan
+                    $item | Add-Member -NotePropertyName VerifyResult -NotePropertyValue $verifyResult -Force
                 }
                 'StartOneDrive' {
                     Start-OneDriveExe
@@ -1569,6 +1676,13 @@ function Get-OneDrivePlanItemStatusText {
     param(
         [Parameter(Mandatory)][pscustomobject]$Item
     )
+
+    if ($Item.Type -eq 'Verify' -and ($Item.PSObject.Properties.Name -contains 'VerifyResult')) {
+        switch ($Item.VerifyResult.OverallStatus) {
+            'Fail' { return "Failed: $($Item.VerifyResult.FailedChecks.Count) check(s)" }
+            'Skip' { return 'Skipped: Verification not required.' }
+        }
+    }
 
     switch ($Item.Status) {
         'Done' { return 'Done' }
@@ -1702,6 +1816,22 @@ function Write-OneDriveMigrationSummary {
     }
 }
 
+function Write-OneDriveMigrationVerificationSummary {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][pscustomobject]$VerifyResult
+    )
+
+    Write-Host ''
+    Write-Host 'Verification checks:'
+    $table = ($VerifyResult.Checks | Select-Object Status, Name, Detail | Format-Table -AutoSize | Out-String -Width 220).TrimEnd()
+    foreach ($line in ($table -split "`r?`n")) {
+        if (-not [string]::IsNullOrWhiteSpace($line)) {
+            Write-Host $line
+        }
+    }
+}
+
 function Invoke-MarkMichaelisOneDriveConfiguration {
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -1775,6 +1905,15 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
 
     $summaryLines = Get-OneDriveMigrationSummaryLines -Accounts $accounts -SharePointSites @($sharePointSites) -Plan $plan -DeferredCleanupPaths @($deferredCleanupPaths) -FreshSyncRecoveryPaths @($freshSyncRecoveryPaths)
     Write-OneDriveMigrationSummary -Lines $summaryLines
+
+    $verifyItem = $plan | Where-Object Type -eq 'Verify' | Select-Object -First 1
+    if ($verifyItem -and ($verifyItem.PSObject.Properties.Name -contains 'VerifyResult')) {
+        Write-OneDriveMigrationVerificationSummary -VerifyResult $verifyItem.VerifyResult
+        if ($verifyItem.VerifyResult.FailedChecks.Count -gt 0) {
+            $failedChecksSummary = ($verifyItem.VerifyResult.FailedChecks | ForEach-Object { "[$($_.Name)] $($_.Detail)" }) -join '; '
+            throw "Post-migration verification failed: $failedChecksSummary. Registry backup: $backupPath. Data was already migrated; investigate manually (no rollback performed)."
+        }
+    }
 
     if ($freshSyncAccounts.Count -gt 0) {
         Write-Host ''
