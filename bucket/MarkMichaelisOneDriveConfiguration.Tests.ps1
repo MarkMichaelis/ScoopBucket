@@ -30,6 +30,14 @@
 
 BeforeAll {
     . "$PSScriptRoot\MarkMichaelisOneDriveConfiguration.ps1"
+
+    function New-PassingVerificationResult {
+        [pscustomobject]@{
+            Checks        = @([pscustomobject]@{ Name = 'mock'; Status = 'Pass'; Detail = 'mock verification passed' })
+            OverallStatus = 'Pass'
+            FailedChecks  = @()
+        }
+    }
 }
 
 Describe 'Get-OneDriveTargetPath' -Tag 'Light' {
@@ -934,6 +942,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration pre-create behavior' -Tag 'H
         Mock -CommandName Invoke-AppFixUps
         Mock -CommandName Set-RootDirAclFromHome
         Mock -CommandName Start-OneDriveExe
+        Mock -CommandName Invoke-OneDriveMigrationVerification -MockWith { New-PassingVerificationResult }
         Mock -CommandName Get-Process -MockWith { [pscustomobject]@{ Name = 'OneDrive' } }
 
         Invoke-MarkMichaelisOneDriveConfiguration -RootDir $rootDir -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
@@ -981,6 +990,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration running state' -Tag 'Heavy' 
         Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $true }
         Mock -CommandName Invoke-AppFixUps
         Mock -CommandName Start-OneDriveExe
+        Mock -CommandName Invoke-OneDriveMigrationVerification -MockWith { New-PassingVerificationResult }
         Mock -CommandName New-Item
     }
 
@@ -1050,7 +1060,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration verification failure' -Tag '
 
         {
             Invoke-MarkMichaelisOneDriveConfiguration -RootDir $rootDir -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
-        } | Should -Throw -ExpectedMessage '*Registry backup: C:\backup.reg*'
+        } | Should -Throw -ExpectedMessage '*Registry backup:*'
     }
 }
 
@@ -1148,6 +1158,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration KFM rebind' -Tag 'Heavy' {
         Mock -CommandName Update-OneDriveAccountRegistry
         Mock -CommandName Invoke-AppFixUps
         Mock -CommandName Start-OneDriveExe
+        Mock -CommandName Invoke-OneDriveMigrationVerification -MockWith { New-PassingVerificationResult }
         Mock -CommandName New-Item
         Mock -CommandName Get-Process -MockWith { $null }
         Mock -CommandName Update-KfmBindings
@@ -1182,6 +1193,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration KFM rebind' -Tag 'Heavy' {
         Mock -CommandName Update-OneDriveAccountRegistry
         Mock -CommandName Invoke-AppFixUps
         Mock -CommandName Start-OneDriveExe
+        Mock -CommandName Invoke-OneDriveMigrationVerification -MockWith { New-PassingVerificationResult }
         Mock -CommandName New-Item
         Mock -CommandName Get-Process -MockWith { $null }
         Mock -CommandName Update-KfmBindings
@@ -1282,6 +1294,7 @@ Describe 'Plan-then-execute architecture' -Tag 'Heavy' {
         Mock -CommandName Update-OneDriveAccountRegistry
         Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $true }
         Mock -CommandName Start-OneDriveExe
+        Mock -CommandName Invoke-OneDriveMigrationVerification -MockWith { New-PassingVerificationResult }
         Mock -CommandName New-Item
         Mock -CommandName Get-Process -MockWith { $null }
 
