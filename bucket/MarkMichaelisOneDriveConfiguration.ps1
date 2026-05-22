@@ -74,6 +74,17 @@
     intentionally want to preview or run the remaining logic from a
     non-elevated shell.
 
+.NOTES
+    OneDrive's HKCU:\Software\Microsoft\OneDrive\Accounts\<slot>\UserFolder
+    and the various ScopeIdToMountPointPathCache* values are internal
+    OneDrive client state. Microsoft does not publish a supported
+    migration API for them. This script mutates them pragmatically
+    because (a) OneDrive otherwise treats a moved sync root as a new
+    location and re-syncs from scratch, and (b) cached SharePoint mount
+    paths must follow the move or the client will fall back to the old
+    location. If a future OneDrive client version changes this state
+    shape, this script will need updating.
+
 .EXAMPLE
     .\MarkMichaelisOneDriveConfiguration.ps1 -WhatIf
 
@@ -685,6 +696,10 @@ function Update-OneDriveAccountRegistry {
     .SYNOPSIS
         Update OneDrive's per-account registry so it knows where the
         UserFolder lives after a move.
+    .NOTES
+        Mutates OneDrive client internal registry state
+        (Accounts\<slot>\UserFolder and ScopeIdToMountPointPathCache*).
+        Microsoft does not document these as supported migration APIs.
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -1072,6 +1087,14 @@ function Get-OneDriveSharePointSiteList {
 }
 
 function Update-OneDriveSharePointCache {
+    <#
+    .SYNOPSIS
+        Rewrite cached SharePoint mount-point paths after a move.
+    .NOTES
+        Mutates OneDrive client internal ScopeIdToMountPointPathCache*
+        values. Microsoft does not document these as supported migration
+        APIs.
+    #>
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][pscustomobject]$Account,
@@ -1692,6 +1715,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         [switch]$ForceHydrate
     )
 
+    Write-Warning 'Mutates OneDrive client internal registry state (Accounts\<slot>\UserFolder, ScopeIdToMountPointPathCache*); these are not Microsoft-documented migration APIs.'
     Write-Host "MarkMichaelisOneDriveConfiguration: RootDir=$RootDir, KfmOwner=$KfmOwner"
     if ($KfmOwnerContains) {
         Write-Host '  KfmOwnerContains requested: using substring owner matching'
