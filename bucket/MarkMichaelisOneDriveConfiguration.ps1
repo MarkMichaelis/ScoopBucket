@@ -50,6 +50,10 @@
     Suppress the warning + automatic rebind that fires when KFM is
     currently bound to a different account than -KfmOwner.
 
+.PARAMETER NoFolderDescriptionsWrite
+    Skip the undocumented writes under Explorer\FolderDescriptions\<GUID>
+    and rely only on User Shell Folders updates when rebinding KFM.
+
 .PARAMETER FreshSync
     Names (Slot or DisplayName) of Business* accounts that should
     be unlinked instead of file-copy-migrated. For each match, the
@@ -103,6 +107,7 @@ param(
     [string] $KfmOwner  = 'Michaelis',
     [switch] $KfmOwnerContains,
     [switch] $NoKfmRebind,
+    [switch] $NoFolderDescriptionsWrite,
     [string[]] $FreshSync = @(),
     [switch] $DeleteSourceOnSuccess,
     [switch] $ForceHydrate,
@@ -772,7 +777,8 @@ function Update-KfmBindings {
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][string]$OldRoot,
-        [Parameter(Mandatory)][string]$NewRoot
+        [Parameter(Mandatory)][string]$NewRoot,
+        [switch]$NoFolderDescriptionsWrite
     )
 
     foreach ($leaf in 'User Shell Folders','Shell Folders') {
@@ -796,6 +802,18 @@ function Update-KfmBindings {
         }
     }
 
+    if ($NoFolderDescriptionsWrite) {
+        return
+    }
+
+    # WARNING: FolderDescriptions\<GUID>\RelativePath and ParsingName are
+    # Windows shell internals, not a Microsoft-documented KFM migration
+    # interface. The supported KFM mechanism is the KFMSilentOptIn policy +
+    # standard User Shell Folders updates. We write here empirically because
+    # some apps (notably Office) cache these for known-folder resolution and
+    # stale entries cause silent breakage. If a future Windows release removes
+    # or relocates these values, drop this block and rely solely on User Shell
+    # Folders.
     foreach ($guid in $KnownFolderGuids) {
         $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\$guid"
         if (-not (Test-Path $key)) { continue }
@@ -1397,7 +1415,8 @@ function Invoke-OneDriveMigrationPlan {
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
-        [switch]$DeleteSourceOnSuccess
+        [switch]$DeleteSourceOnSuccess,
+        [switch]$NoFolderDescriptionsWrite
     )
 
     $deferredCleanupPaths = New-Object System.Collections.Generic.List[string]
@@ -1472,7 +1491,7 @@ function Invoke-OneDriveMigrationPlan {
                 }
                 'RewriteKfm' {
                     if ($item.CurrentValue -and $item.DesiredValue) {
-                        Update-KfmBindings -OldRoot $item.CurrentValue -NewRoot $item.DesiredValue
+                        Update-KfmBindings -OldRoot $item.CurrentValue -NewRoot $item.DesiredValue -NoFolderDescriptionsWrite:$NoFolderDescriptionsWrite
                     }
                     foreach ($warning in @($item.Warnings)) {
                         Write-Warning $warning
@@ -1667,6 +1686,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         [Parameter(Mandatory)][string]$KfmOwner,
         [switch]$KfmOwnerContains,
         [switch]$NoKfmRebind,
+        [switch]$NoFolderDescriptionsWrite,
         [AllowEmptyCollection()][AllowNull()][string[]]$FreshSync,
         [switch]$DeleteSourceOnSuccess,
         [switch]$ForceHydrate
@@ -1681,6 +1701,9 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     }
     if ($ForceHydrate) {
         Write-Host '  ForceHydrate requested: cross-volume placeholder hydration is allowed'
+    }
+    if ($NoFolderDescriptionsWrite) {
+        Write-Host '  NoFolderDescriptionsWrite requested: skipping FolderDescriptions internal rewrites'
     }
 
     $accounts = Get-OneDriveAccountList
@@ -1713,7 +1736,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     $deferredCleanupPaths = @()
     $freshSyncRecoveryPaths = @()
     try {
-        $execution = Invoke-OneDriveMigrationPlan -Plan $plan -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -Confirm:$false
+        $execution = Invoke-OneDriveMigrationPlan -Plan $plan -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -NoFolderDescriptionsWrite:$NoFolderDescriptionsWrite -Confirm:$false
         $deferredCleanupPaths = @($execution.DeferredCleanupPaths)
         $freshSyncRecoveryPaths = @($execution.FreshSyncRecoveryPaths)
     } catch {
@@ -1756,5 +1779,5 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
 # `& "$dir\MarkMichaelisOneDriveConfiguration.ps1"`). When dot-sourced
 # (Pester tests), expose the helpers without running migration.
 if ($MyInvocation.InvocationName -ne '.') {
-    Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner -KfmOwnerContains:$KfmOwnerContains -NoKfmRebind:$NoKfmRebind -FreshSync $FreshSync -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -ForceHydrate:$ForceHydrate
+    Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner -KfmOwnerContains:$KfmOwnerContains -NoKfmRebind:$NoKfmRebind -NoFolderDescriptionsWrite:$NoFolderDescriptionsWrite -FreshSync $FreshSync -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -ForceHydrate:$ForceHydrate
 }
