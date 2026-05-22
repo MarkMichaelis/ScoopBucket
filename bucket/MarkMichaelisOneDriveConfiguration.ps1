@@ -24,8 +24,8 @@
        volumes.
     3. Applies tenant-redirection policy under
        HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir\<tid>
-       for each Work tenant, and keeps GPOSetUpdateRing on the stable
-       Deferred/Enterprise ring in HKLM.
+       for each Work tenant, and keeps GPOSetUpdateRing on the
+       Production ring in HKLM.
     4. For each discovered account, either migrates the existing
        UserFolder to the canonical path or unlinks it for fresh-sync.
     5. Rewrites Known Folder Move bindings (Documents / Pictures /
@@ -203,9 +203,9 @@ Confirmed policy shape baked into this script:
      data is the final tenant folder path, e.g. C:\OneDrive\OneDrive - Contoso.
   3. GPOSetUpdateRing lives at HKLM:\SOFTWARE\Policies\Microsoft\OneDrive
      and therefore requires elevation to write.
-  4. GPOSetUpdateRing must be 0 for the Deferred/Enterprise ring (stable
-     updates). 4 would opt the machine into Insider/Preview builds; 5 is
-     Production.
+  4. GPOSetUpdateRing values per Microsoft policy docs: 0 = Deferred/
+     Enterprise (older stable cadence), 4 = Insider/Preview, 5 = Production
+     (standard cadence). This script writes 5 (Production).
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -606,8 +606,8 @@ function Set-OneDrivePolicy {
         Policy shape verified against https://learn.microsoft.com/sharepoint/use-group-policy:
           - DefaultRootDir is a per-user HKCU policy whose value name is the
             tenant GUID and whose value data is the final tenant folder.
-          - GPOSetUpdateRing is a machine HKLM policy. Value 0 selects the
-            Deferred/Enterprise ring (stable updates).
+          - GPOSetUpdateRing is a machine HKLM policy. Value 5 selects the
+            Production ring (standard update cadence).
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -647,10 +647,10 @@ function Set-OneDrivePolicy {
         }
     }
     $existingRing = (Get-ItemProperty -Path $hklmPolicy -Name 'GPOSetUpdateRing' -ErrorAction SilentlyContinue).GPOSetUpdateRing
-    if ($existingRing -ne 0) {
-        if ($PSCmdlet.ShouldProcess("$hklmPolicy\GPOSetUpdateRing", 'Set DWord = 0 (Deferred/Enterprise ring; stable updates)')) {
+    if ($existingRing -ne 5) {
+        if ($PSCmdlet.ShouldProcess("$hklmPolicy\GPOSetUpdateRing", 'Set DWord = 5 (Production ring; standard update cadence)')) {
             try {
-                Set-ItemProperty -Path $hklmPolicy -Name 'GPOSetUpdateRing' -Value 0 -Type DWord
+                Set-ItemProperty -Path $hklmPolicy -Name 'GPOSetUpdateRing' -Value 5 -Type DWord
             } catch {
                 Write-Warning "Could not set GPOSetUpdateRing (requires elevation): $($_.Exception.Message)"
             }
@@ -1411,9 +1411,9 @@ function Set-OneDriveUpdateRingPolicy {
             }
         }
     }
-    if ($PSCmdlet.ShouldProcess("$hklmPolicy\GPOSetUpdateRing", 'Set DWord = 0 (Deferred/Enterprise ring; stable updates)')) {
+    if ($PSCmdlet.ShouldProcess("$hklmPolicy\GPOSetUpdateRing", 'Set DWord = 5 (Production ring; standard update cadence)')) {
         try {
-            Set-ItemProperty -Path $hklmPolicy -Name 'GPOSetUpdateRing' -Value 0 -Type DWord
+            Set-ItemProperty -Path $hklmPolicy -Name 'GPOSetUpdateRing' -Value 5 -Type DWord
         } catch {
             Write-Warning "Could not set GPOSetUpdateRing (requires elevation): $($_.Exception.Message)"
         }
@@ -1463,7 +1463,7 @@ function New-OneDriveMigrationPlan {
 
     $hklmPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive'
     $existingRing = (Get-ItemProperty -Path $hklmPolicy -Name 'GPOSetUpdateRing' -ErrorAction SilentlyContinue).GPOSetUpdateRing
-    $ringItem = New-OneDriveMigrationPlanItem -Type 'WritePolicy' -Target "$hklmPolicy\GPOSetUpdateRing" -CurrentValue $existingRing -DesiredValue 0 -SameVolume $null -Account $null -Reason 'Keep OneDrive on the Deferred/Enterprise update ring.' -Skipped:($existingRing -eq 0) -SkipReason $(if ($existingRing -eq 0) { 'Update ring already set to Deferred/Enterprise.' } else { $null })
+    $ringItem = New-OneDriveMigrationPlanItem -Type 'WritePolicy' -Target "$hklmPolicy\GPOSetUpdateRing" -CurrentValue $existingRing -DesiredValue 5 -SameVolume $null -Account $null -Reason 'Keep OneDrive on the Production update ring (standard cadence).' -Skipped:($existingRing -eq 5) -SkipReason $(if ($existingRing -eq 5) { 'Update ring already set to Production.' } else { $null })
     $ringItem | Add-Member -NotePropertyName PolicyKind -NotePropertyValue 'GPOSetUpdateRing'
     $plan.Add($ringItem) | Out-Null
 
@@ -1664,7 +1664,7 @@ function Format-OneDriveMigrationPlan {
             Write-Host 'KFM:           suppressed (-NoKfmRebind)'
         }
     }
-    Write-Host 'Update ring:   Deferred/Enterprise (HKLM)'
+    Write-Host 'Update ring:   Production (HKLM)'
 
     if ($Accounts.Count -gt 0) {
         Write-Host ("Accounts ({0}):" -f $Accounts.Count)

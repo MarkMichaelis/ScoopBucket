@@ -488,7 +488,7 @@ Describe 'Get-OneDriveAccountList (zombie slot filter)' -Tag 'Light' {
 }
 
 Describe 'Set-OneDrivePolicy' -Tag 'Light' {
-    It 'writes DefaultRootDir in HKCU per tenant and GPOSetUpdateRing=0 in HKLM' {
+    It 'writes DefaultRootDir in HKCU per tenant and GPOSetUpdateRing=5 in HKLM' {
         $accounts = @(
             [pscustomobject]@{
                 Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
@@ -532,7 +532,7 @@ Describe 'Set-OneDrivePolicy' -Tag 'Light' {
         Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter {
             $Path -eq 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive' -and
             $Name -eq 'GPOSetUpdateRing' -and
-            $Value -eq 0 -and
+            $Value -eq 5 -and
             $Type -eq 'DWord'
         }
     }
@@ -1332,7 +1332,7 @@ Describe 'Plan-then-execute architecture' -Tag 'Heavy' {
                 return [pscustomobject]@{ 'tid-1' = 'C:\OneDrive\OneDrive - IntelliTect' }
             }
             if ($Path -eq 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive' -and $Name -eq 'GPOSetUpdateRing') {
-                return [pscustomobject]@{ GPOSetUpdateRing = 0 }
+                return [pscustomobject]@{ GPOSetUpdateRing = 5 }
             }
             if ($Path -eq 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1' -and $Name -eq 'UserFolder') {
                 return [pscustomobject]@{ UserFolder = 'C:\OneDrive\OneDrive - IntelliTect' }
@@ -1443,7 +1443,7 @@ Describe 'Plan-then-execute architecture' -Tag 'Heavy' {
                 return [pscustomobject]@{ 'tid-1' = 'C:\OneDrive\OneDrive - IntelliTect' }
             }
             if ($Path -eq 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive' -and $Name -eq 'GPOSetUpdateRing') {
-                return [pscustomobject]@{ GPOSetUpdateRing = 0 }
+                return [pscustomobject]@{ GPOSetUpdateRing = 5 }
             }
             if ($Path -eq 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1' -and $Name -eq 'UserFolder') {
                 return [pscustomobject]@{ UserFolder = 'C:\OneDrive\OneDrive - IntelliTect' }
