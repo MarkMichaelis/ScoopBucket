@@ -30,6 +30,14 @@
 
 BeforeAll {
     . "$PSScriptRoot\MarkMichaelisOneDriveConfiguration.ps1"
+
+    function New-PassingVerificationResult {
+        [pscustomobject]@{
+            Checks        = @([pscustomobject]@{ Name = 'mock'; Status = 'Pass'; Detail = 'mock verification passed' })
+            OverallStatus = 'Pass'
+            FailedChecks  = @()
+        }
+    }
 }
 
 Describe 'Get-OneDriveTargetPath' -Tag 'Light' {
@@ -116,7 +124,7 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result = Resolve-KfmRebindAction `
             -Accounts @($script:owner, $script:other) `
             -KfmCurrentPath 'C:\OneDrive\OneDrive - Michaelis Consulting\Documents' `
-            -KfmOwner 'Michaelis'
+            -KfmOwner 'Michaelis Consulting'
         $result.Action | Should -Be 'Track'
         $result.OwnerAccount.Slot | Should -Be 'Business1'
     }
@@ -125,7 +133,7 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result = Resolve-KfmRebindAction `
             -Accounts @($script:owner, $script:other) `
             -KfmCurrentPath 'C:\OneDrive\OneDrive - IntelliTect\Documents' `
-            -KfmOwner 'Michaelis'
+            -KfmOwner 'Michaelis Consulting'
         $result.Action | Should -Be 'Rebind'
         $result.OwnerAccount.Slot | Should -Be 'Business1'
     }
@@ -134,7 +142,7 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result = Resolve-KfmRebindAction `
             -Accounts @($script:owner, $script:other) `
             -KfmCurrentPath 'C:\OneDrive\OneDrive - IntelliTect\Documents' `
-            -KfmOwner 'Michaelis' -NoKfmRebind
+            -KfmOwner 'Michaelis Consulting' -NoKfmRebind
         $result.Action | Should -Be 'WarnOnly'
     }
 
@@ -142,7 +150,7 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result = Resolve-KfmRebindAction `
             -Accounts @($script:owner) `
             -KfmCurrentPath $null `
-            -KfmOwner 'Michaelis'
+            -KfmOwner 'Michaelis Consulting'
         $result.Action | Should -Be 'None'
     }
 
@@ -150,7 +158,7 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result = Resolve-KfmRebindAction `
             -Accounts @($script:other, $script:personal) `
             -KfmCurrentPath 'C:\OneDrive\OneDrive - IntelliTect\Documents' `
-            -KfmOwner 'Michaelis'
+            -KfmOwner 'Michaelis Consulting'
         $result.Action | Should -Be 'OwnerNotSignedIn'
         $result.OwnerAccount | Should -BeNullOrEmpty
     }
@@ -165,16 +173,246 @@ Describe 'Resolve-KfmRebindAction' -Tag 'Light' {
         $result = Resolve-KfmRebindAction `
             -Accounts @($personalNamedMichaelis, $script:other) `
             -KfmCurrentPath 'C:\OneDrive\OneDrive - IntelliTect\Documents' `
-            -KfmOwner 'Michaelis'
+            -KfmOwner 'Mark Michaelis'
         $result.Action | Should -Be 'OwnerNotSignedIn'
     }
 
-    It 'returns an empty-accounts result as OwnerNotSignedIn' {
+    It 'returns Action=''None'' when KFM is inactive even if the owner is not signed in' {
+        $result = Resolve-KfmRebindAction `
+            -Accounts @($script:other, $script:personal) `
+            -KfmCurrentPath $null `
+            -KfmOwner 'Michaelis Consulting'
+        $result.Action | Should -Be 'None'
+        $result.OwnerAccount | Should -BeNullOrEmpty
+    }
+
+    It 'matches KfmOwner by case-insensitive equality by default' {
+        $result = Resolve-KfmRebindAction `
+            -Accounts @($script:owner, $script:other) `
+            -KfmCurrentPath 'C:\OneDrive\OneDrive - IntelliTect\Documents' `
+            -KfmOwner 'michaelis consulting'
+        $result.Action | Should -Be 'Rebind'
+        $result.OwnerAccount.Slot | Should -Be 'Business1'
+    }
+
+    It 'supports opt-in substring owner matching with -KfmOwnerContains' {
+        $result = Resolve-KfmRebindAction `
+            -Accounts @($script:owner, $script:other) `
+            -KfmCurrentPath 'C:\OneDrive\OneDrive - IntelliTect\Documents' `
+            -KfmOwner 'Michaelis' -KfmOwnerContains
+        $result.Action | Should -Be 'Rebind'
+        $result.OwnerAccount.Slot | Should -Be 'Business1'
+    }
+
+    It 'returns an empty-accounts result as None when KFM is inactive' {
         $result = Resolve-KfmRebindAction `
             -Accounts @() `
             -KfmCurrentPath $null `
-            -KfmOwner 'Michaelis'
-        $result.Action | Should -Be 'OwnerNotSignedIn'
+            -KfmOwner 'Michaelis Consulting'
+        $result.Action | Should -Be 'None'
+    }
+}
+
+Describe 'Resolve-KfmCurrentOwnerRoot' -Tag 'Light' {
+    BeforeAll {
+        $script:kfmOwner1 = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'Michaelis Consulting'
+            UserFolder = 'C:\OneDrive\OneDrive - Michaelis Consulting'
+        }
+        $script:kfmOwner2 = [pscustomobject]@{
+            Slot = 'Business2'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'
+        }
+    }
+
+    It 'returns the owning account for <Path>' -ForEach @(
+        @{ Path = 'C:\OneDrive\OneDrive - IntelliTect\Documents'; ExpectedSlot = 'Business2' }
+        @{ Path = 'C:\OneDrive\OneDrive - IntelliTect\Desktop'; ExpectedSlot = 'Business2' }
+        @{ Path = 'C:\OneDrive\OneDrive - IntelliTect\Pictures'; ExpectedSlot = 'Business2' }
+        @{ Path = 'C:\OneDrive\OneDrive - IntelliTect\Music'; ExpectedSlot = 'Business2' }
+        @{ Path = 'C:\OneDrive\OneDrive - IntelliTect\Videos'; ExpectedSlot = 'Business2' }
+    ) {
+        $result = Resolve-KfmCurrentOwnerRoot -Accounts @($script:kfmOwner1, $script:kfmOwner2) -KfmCurrentPath $Path
+        $result.Slot | Should -Be $ExpectedSlot
+    }
+
+    It 'returns $null for an orphaned KFM path outside discovered roots' {
+        Resolve-KfmCurrentOwnerRoot -Accounts @($script:kfmOwner1, $script:kfmOwner2) -KfmCurrentPath 'D:\Elsewhere\Documents' |
+            Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-OneDriveSharePointSiteList' -Tag 'Light' {
+    It 'discovers nested and sibling SharePoint mount points and computes canonical tenant-sibling targets' {
+        $account = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'; TenantId = 'tenant-1'
+            UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+
+        Mock -CommandName Get-OneDriveRegistryStringValuesUnderPath -MockWith {
+            param($Path)
+            switch ($Path) {
+                'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1\Tenants\tenant-1' {
+                    @(
+                        [pscustomobject]@{ KeyPath = $Path; ValueName = 'Nested'; Value = 'C:\OneDrive\OneDrive - IntelliTect\Projects' },
+                        [pscustomobject]@{ KeyPath = $Path; ValueName = 'Sibling'; Value = 'C:\Users\Mark\IntelliTect - Engineering' }
+                    )
+                    break
+                }
+                'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1\ScopeIdToMountPointPathCache' {
+                    @([pscustomobject]@{ KeyPath = $Path; ValueName = 'Cache'; Value = 'C:\Users\Mark\IntelliTect - Engineering' })
+                    break
+                }
+                default { @() }
+            }
+        }
+
+        $sites = Get-OneDriveSharePointSiteList -Accounts @($account) -RootDir 'C:\OneDrive'
+
+        @($sites).Count | Should -Be 2
+        ($sites | ForEach-Object CurrentPath) | Should -Contain 'C:\OneDrive\OneDrive - IntelliTect\Projects'
+        ($sites | ForEach-Object CurrentPath) | Should -Contain 'C:\Users\Mark\IntelliTect - Engineering'
+        ($sites | Where-Object CurrentPath -eq 'C:\OneDrive\OneDrive - IntelliTect\Projects').DesiredPath | Should -Be 'C:\OneDrive\IntelliTect\Projects'
+        ($sites | Where-Object CurrentPath -eq 'C:\Users\Mark\IntelliTect - Engineering').DesiredPath | Should -Be 'C:\OneDrive\IntelliTect\IntelliTect - Engineering'
+    }
+}
+
+Describe 'Update-OneDriveSharePointCache' -Tag 'Light' {
+    It 'prefix-rewrites nested and sibling SharePoint cache paths for <OldPath>' -ForEach @(
+        @{ OldPath = 'C:\OneDrive\OneDrive - IntelliTect\Projects'; NewPath = 'C:\OneDrive\IntelliTect\Projects'; Current = 'C:\OneDrive\OneDrive - IntelliTect\Projects\Docs'; Expected = 'C:\OneDrive\IntelliTect\Projects\Docs' }
+        @{ OldPath = 'C:\Users\Mark\IntelliTect - Engineering'; NewPath = 'C:\OneDrive\IntelliTect\IntelliTect - Engineering'; Current = 'C:\Users\Mark\IntelliTect - Engineering\Sub'; Expected = 'C:\OneDrive\IntelliTect\IntelliTect - Engineering\Sub' }
+    ) {
+        $account = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'; TenantId = 'tenant-1'
+            UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+
+        Mock -CommandName Get-OneDriveRegistryStringValuesUnderPath -MockWith {
+            @([pscustomobject]@{ KeyPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1\ScopeIdToMountPointPathCache'; ValueName = 'Site'; Value = $Current })
+        }
+        Mock -CommandName Set-ItemProperty
+
+        Update-OneDriveSharePointCache -Account $account -OldPath $OldPath -NewPath $NewPath -Confirm:$false
+
+        Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter {
+            $Path -eq 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1\ScopeIdToMountPointPathCache' -and
+            $Name -eq 'Site' -and
+            $Value -eq $Expected
+        }
+    }
+}
+
+Describe 'Invoke-RobocopyMirror' -Tag 'Light' {
+    It 'uses /E plus /ZB so cross-volume copies stay restartable without /MIR deletes' {
+        $script:capturedRobocopyArgs = $null
+        function global:robocopy {
+            param([Parameter(ValueFromRemainingArguments = $true)] $Args)
+            $script:capturedRobocopyArgs = @($Args)
+            $global:LASTEXITCODE = 3
+        }
+
+        try {
+            Invoke-RobocopyMirror -Source 'C:\Source' -Destination 'D:\Dest' | Should -Be 3
+            $script:capturedRobocopyArgs | Should -Contain '/E'
+            $script:capturedRobocopyArgs | Should -Contain '/ZB'
+            $script:capturedRobocopyArgs | Should -Not -Contain '/MIR'
+            $script:capturedRobocopyArgs | Should -Not -Contain '/B'
+        }
+        finally {
+            Remove-Item function:\global:robocopy -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe 'Update-KfmBindings' -Tag 'Light' {
+    It 'rewrites extended known-folder GUID entries including Downloads and Screenshots' {
+        $oldRoot = 'C:\Users\me\OneDrive - IntelliTect'
+        $newRoot = 'C:\OneDrive\OneDrive - IntelliTect'
+        $downloadsGuid = '{374DE290-123F-4565-9164-39C4925E467B}'
+        $screenshotsGuid = '{B7BEDE81-DF94-4682-A7D8-57A52620B86F}'
+        $folderKeys = @(
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\$downloadsGuid",
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\$screenshotsGuid"
+        )
+
+        Mock -CommandName Test-Path -MockWith { param($Path) $Path -in $folderKeys }
+        Mock -CommandName Get-ItemProperty -MockWith {
+            param($Path)
+            switch ($Path) {
+                $folderKeys[0] { [pscustomobject]@{ RelativePath = "$oldRoot\Downloads"; ParsingName = "$oldRoot\Downloads" } ; break }
+                $folderKeys[1] { [pscustomobject]@{ RelativePath = "$oldRoot\Pictures\Screenshots"; ParsingName = "$oldRoot\Pictures\Screenshots" } ; break }
+                default { [pscustomobject]@{} }
+            }
+        }
+        Mock -CommandName Set-ItemProperty
+
+        Update-KfmBindings -OldRoot $oldRoot -NewRoot $newRoot -Confirm:$false
+
+        Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter { $Path -eq $folderKeys[0] -and $Name -eq 'RelativePath' -and $Value -eq "$newRoot\Downloads" }
+        Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter { $Path -eq $folderKeys[0] -and $Name -eq 'ParsingName' -and $Value -eq "$newRoot\Downloads" }
+        Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter { $Path -eq $folderKeys[1] -and $Name -eq 'RelativePath' -and $Value -eq "$newRoot\Pictures\Screenshots" }
+        Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter { $Path -eq $folderKeys[1] -and $Name -eq 'ParsingName' -and $Value -eq "$newRoot\Pictures\Screenshots" }
+    }
+
+    It 'does not touch FolderDescriptions when -NoFolderDescriptionsWrite is supplied' {
+        $folderKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\{374DE290-123F-4565-9164-39C4925E467B}'
+
+        Mock -CommandName Test-Path -MockWith { param($Path) $Path -eq $folderKey }
+        Mock -CommandName Get-ItemProperty
+        Mock -CommandName Set-ItemProperty
+
+        Update-KfmBindings -OldRoot 'C:\Users\me\OneDrive - IntelliTect' -NewRoot 'C:\OneDrive\OneDrive - IntelliTect' -NoFolderDescriptionsWrite -Confirm:$false
+
+        Should -Invoke Get-ItemProperty -Times 0 -ParameterFilter { $Path -like '*FolderDescriptions*' }
+        Should -Invoke Set-ItemProperty -Times 0 -ParameterFilter { $Path -like '*FolderDescriptions*' }
+    }
+}
+
+Describe 'Get-OneDrivePlaceholderCount' -Tag 'Light' {
+    It 'counts Files-On-Demand placeholders via recall/offline file attributes' {
+        Mock -CommandName Test-Path -MockWith { $true }
+        Mock -CommandName Get-ChildItem -MockWith {
+            @(
+                [pscustomobject]@{ FullName = 'C:\Source\a.txt' },
+                [pscustomobject]@{ FullName = 'C:\Source\b.txt' },
+                [pscustomobject]@{ FullName = 'C:\Source\c.txt' }
+            )
+        }
+        Mock -CommandName Get-OneDriveFileAttributes -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\Source\a.txt' { return 0x00400000 }
+                'C:\Source\b.txt' { return 0x00001000 }
+                default { return 0 }
+            }
+        }
+
+        Get-OneDrivePlaceholderCount -Path 'C:\Source' | Should -Be 2
+    }
+}
+
+Describe 'Export-OneDriveRegistryBackup' -Tag 'Light' {
+    It 'exports each required registry subtree into the combined backup file' {
+        Mock -CommandName Test-Path -MockWith { $false }
+        Mock -CommandName New-Item
+        Mock -CommandName Set-Content
+        Mock -CommandName Add-Content
+        Mock -CommandName Remove-Item
+        Mock -CommandName Get-Content -MockWith { "Windows Registry Editor Version 5.00`r`n[HKEY_CURRENT_USER\\Software]" }
+        Mock -CommandName Invoke-RegExportCommand
+
+        Export-OneDriveRegistryBackup -OutputPath 'C:\Users\Mark\AppData\Local\MarkMichaelis\OneDriveMigration\backup-20240102-030405.reg' | Out-Null
+
+        foreach ($subKey in @(
+            'HKCU\Software\Microsoft\OneDrive\Accounts',
+            'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders',
+            'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders',
+            'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions',
+            'HKCU\SOFTWARE\Policies\Microsoft\OneDrive',
+            'HKLM\SOFTWARE\Policies\Microsoft\OneDrive'
+        )) {
+            Should -Invoke Invoke-RegExportCommand -Times 1 -ParameterFilter { $SubKey -eq $subKey }
+        }
     }
 }
 
@@ -249,6 +487,57 @@ Describe 'Get-OneDriveAccountList (zombie slot filter)' -Tag 'Light' {
     }
 }
 
+Describe 'Set-OneDrivePolicy' -Tag 'Light' {
+    It 'writes DefaultRootDir in HKCU per tenant and GPOSetUpdateRing=0 in HKLM' {
+        $accounts = @(
+            [pscustomobject]@{
+                Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+                TenantId = '11111111-1111-1111-1111-111111111111'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'
+            },
+            [pscustomobject]@{
+                Slot = 'Personal'; AccountType = 'Personal'; DisplayName = $null
+                TenantId = $null; UserFolder = 'C:\Users\me\OneDrive'
+            }
+        )
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            $Path -in @(
+                'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive',
+                'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir',
+                'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive'
+            )
+        }
+        Mock -CommandName Get-ItemProperty -MockWith {
+            param($Path, $Name)
+            if ($Path -eq 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir' -and $Name -eq '11111111-1111-1111-1111-111111111111') {
+                return [pscustomobject]@{ '11111111-1111-1111-1111-111111111111' = 'C:\SomewhereElse' }
+            }
+            if ($Path -eq 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive' -and $Name -eq 'GPOSetUpdateRing') {
+                return [pscustomobject]@{ GPOSetUpdateRing = 4 }
+            }
+            return [pscustomobject]@{}
+        }
+        Mock -CommandName Set-ItemProperty
+        Mock -CommandName New-Item
+
+        Set-OneDrivePolicy -Accounts $accounts -RootDir 'C:\OneDrive' -Confirm:$false
+
+        Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter {
+            $Path -eq 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir' -and
+            $Name -eq '11111111-1111-1111-1111-111111111111' -and
+            $Value -eq 'C:\OneDrive\OneDrive - IntelliTect' -and
+            $Type -eq 'String'
+        }
+        Should -Invoke Set-ItemProperty -Times 1 -ParameterFilter {
+            $Path -eq 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive' -and
+            $Name -eq 'GPOSetUpdateRing' -and
+            $Value -eq 0 -and
+            $Type -eq 'DWord'
+        }
+    }
+}
+
 Describe 'Set-RootDirAclFromHome' -Tag 'Light' {
     It 'does not call Set-Acl when -WhatIf is supplied' {
         Mock -CommandName Set-Acl -MockWith {}
@@ -300,6 +589,919 @@ Describe 'Set-RootDirAclFromHome' -Tag 'Light' {
         Should -Invoke -CommandName Set-Acl -Times 1 -Exactly -ParameterFilter {
             $LiteralPath -eq 'TestDrive:\does-not-exist'
         }
+    }
+}
+
+Describe 'Move-OneDriveFolder' -Tag 'Light' {
+    It 'moves successfully when only the destination parent exists' {
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                'C:\OneDrive\OneDrive - IntelliTect' { $false; break }
+                'C:\OneDrive' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Move-Item
+        Mock -CommandName New-Item
+
+        { Move-OneDriveFolder -Source 'C:\Users\me\OneDrive - IntelliTect' -Destination 'C:\OneDrive\OneDrive - IntelliTect' -Confirm:$false } |
+            Should -Not -Throw
+
+        Should -Invoke Move-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq 'C:\Users\me\OneDrive - IntelliTect' -and
+            $Destination -eq 'C:\OneDrive\OneDrive - IntelliTect'
+        }
+        Should -Invoke New-Item -Times 0
+    }
+
+    It 'renames the source to a .migrated-* folder after successful cross-volume copy by default' {
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                'D:\OneDrive\OneDrive - IntelliTect' { $false; break }
+                'D:\OneDrive' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Test-IsSameVolume -MockWith { $false }
+        Mock -CommandName Invoke-RobocopyMirror -MockWith { 1 }
+        Mock -CommandName Get-Date -MockWith { '20240102-030405' }
+        Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $true }
+        Mock -CommandName Move-Item
+        Mock -CommandName Remove-Item
+
+        $result = Move-OneDriveFolder -Source 'C:\Users\me\OneDrive - IntelliTect' -Destination 'D:\OneDrive\OneDrive - IntelliTect' -Confirm:$false
+
+        $result.DeferredDeletePath | Should -Be 'C:\Users\me\OneDrive - IntelliTect.migrated-20240102-030405'
+        Should -Invoke Move-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq 'C:\Users\me\OneDrive - IntelliTect' -and
+            $Destination -eq 'C:\Users\me\OneDrive - IntelliTect.migrated-20240102-030405'
+        }
+        Should -Invoke Remove-Item -Times 0
+    }
+
+    It 'only deletes the renamed source when -DeleteSourceOnSuccess is supplied and verification passed' {
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                'D:\OneDrive\OneDrive - IntelliTect' { $false; break }
+                'D:\OneDrive' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Test-IsSameVolume -MockWith { $false }
+        Mock -CommandName Invoke-RobocopyMirror -MockWith { 1 }
+        Mock -CommandName Get-Date -MockWith { '20240102-030405' }
+        Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $true }
+        Mock -CommandName Move-Item
+        Mock -CommandName Remove-Item
+
+        $result = Move-OneDriveFolder -Source 'C:\Users\me\OneDrive - IntelliTect' -Destination 'D:\OneDrive\OneDrive - IntelliTect' -DeleteSourceOnSuccess -Confirm:$false
+
+        $result.DeferredDeletePath | Should -BeNullOrEmpty
+        Should -Invoke Remove-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq 'C:\Users\me\OneDrive - IntelliTect.migrated-20240102-030405'
+        }
+    }
+
+    It 'refuses delete cleanup when cross-volume verification fails' {
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                'D:\OneDrive\OneDrive - IntelliTect' { $false; break }
+                'D:\OneDrive' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Test-IsSameVolume -MockWith { $false }
+        Mock -CommandName Invoke-RobocopyMirror -MockWith { 1 }
+        Mock -CommandName Get-Date -MockWith { '20240102-030405' }
+        Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $false }
+        Mock -CommandName Move-Item
+        Mock -CommandName Remove-Item
+
+        { Move-OneDriveFolder -Source 'C:\Users\me\OneDrive - IntelliTect' -Destination 'D:\OneDrive\OneDrive - IntelliTect' -DeleteSourceOnSuccess -Confirm:$false } |
+            Should -Throw -ExpectedMessage '*Original data was preserved*'
+
+        Should -Invoke Move-Item -Times 1
+        Should -Invoke Remove-Item -Times 0
+    }
+}
+
+Describe 'Remove-OneDriveAccountLink' -Tag 'Light' {
+    It 'renames the local folder to a .freshsync-* recovery directory and still removes the registry slot' {
+        $account = [pscustomobject]@{
+            RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business2'
+            UserFolder   = 'C:\Users\me\OneDrive - IntelliTect'
+        }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            $Path -in @(
+                'HKCU:\Software\Microsoft\OneDrive\Accounts\Business2',
+                'C:\Users\me\OneDrive - IntelliTect'
+            )
+        }
+        Mock -CommandName Get-Date -MockWith { '20240102-030405' }
+        Mock -CommandName Move-Item -Verifiable
+        Mock -CommandName Remove-Item -Verifiable
+
+        $result = Remove-OneDriveAccountLink -Account $account -Confirm:$false
+
+        $result | Should -Be 'C:\Users\me\OneDrive - IntelliTect.freshsync-20240102-030405'
+        Should -Invoke Move-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq 'C:\Users\me\OneDrive - IntelliTect' -and
+            $Destination -eq 'C:\Users\me\OneDrive - IntelliTect.freshsync-20240102-030405'
+        }
+        Should -Invoke Remove-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business2'
+        }
+        Should -Invoke Remove-Item -Times 0 -ParameterFilter {
+            $LiteralPath -eq 'C:\Users\me\OneDrive - IntelliTect.freshsync-20240102-030405'
+        }
+    }
+
+    It 'deletes the renamed recovery directory only when -DeleteRecoveryFolder is supplied' {
+        $account = [pscustomobject]@{
+            RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business2'
+            UserFolder   = 'C:\Users\me\OneDrive - IntelliTect'
+        }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            $Path -in @(
+                'HKCU:\Software\Microsoft\OneDrive\Accounts\Business2',
+                'C:\Users\me\OneDrive - IntelliTect'
+            )
+        }
+        Mock -CommandName Get-Date -MockWith { '20240102-030405' }
+        Mock -CommandName Move-Item -Verifiable
+        Mock -CommandName Remove-Item -Verifiable
+
+        $result = Remove-OneDriveAccountLink -Account $account -DeleteRecoveryFolder -Confirm:$false
+
+        $result | Should -BeNullOrEmpty
+        Should -Invoke Move-Item -Times 1
+        Should -Invoke Remove-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business2'
+        }
+        Should -Invoke Remove-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq 'C:\Users\me\OneDrive - IntelliTect.freshsync-20240102-030405'
+        }
+    }
+}
+
+Describe 'Invoke-OneDriveMigrationVerification' -Tag 'Light' {
+    BeforeAll {
+        function New-VerifyTestPlan {
+            param([switch]$StartSkipped)
+            @(
+                [pscustomobject]@{ Type = 'CreateDir'; Target = 'C:\OneDrive'; DesiredValue = 'C:\OneDrive'; Account = $null },
+                [pscustomobject]@{ Type = 'CreateDir'; Target = 'C:\OneDrive\IntelliTect'; DesiredValue = 'C:\OneDrive\IntelliTect'; Account = $script:verifyBusiness },
+                [pscustomobject]@{ Type = 'WritePolicy'; PolicyKind = 'DefaultRootDir'; Account = $script:verifyBusiness; DesiredValue = 'C:\OneDrive\OneDrive - IntelliTect' },
+                [pscustomobject]@{ Type = 'MoveAccount'; SharePointSite = $true; Status = 'Done'; CurrentValue = 'C:\Users\Mark\IntelliTect - Engineering'; DesiredValue = 'C:\OneDrive\IntelliTect\IntelliTect - Engineering'; Account = $script:verifyBusiness },
+                [pscustomobject]@{ Type = 'RewriteKfm'; CurrentValue = 'C:\Users\me\OneDrive - IntelliTect'; DesiredValue = 'C:\OneDrive\OneDrive - IntelliTect'; Account = $script:verifyBusiness },
+                [pscustomobject]@{ Type = 'StartOneDrive'; Skipped = [bool]$StartSkipped; Status = $(if ($StartSkipped) { 'Skipped' } else { 'Done' }) }
+            )
+        }
+
+        $script:verifyBusiness = [pscustomobject]@{
+            Slot         = 'Business1'
+            AccountType  = 'Business'
+            DisplayName  = 'IntelliTect'
+            TenantId     = 'tid-1'
+            UserFolder   = 'C:\OneDrive\OneDrive - IntelliTect'
+            RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $script:verifyPersonal = [pscustomobject]@{
+            Slot         = 'Personal'
+            AccountType  = 'Personal'
+            DisplayName  = $null
+            TenantId     = $null
+            UserFolder   = 'C:\OneDrive\OneDrive - Personal'
+            RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Personal'
+        }
+    }
+
+    BeforeEach {
+        $script:verifyFailure = $null
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($script:verifyBusiness, $script:verifyPersonal) }
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            if ($Path -eq 'C:\OneDrive\IntelliTect') {
+                return ($script:verifyFailure -ne 'B')
+            }
+            return $true
+        }
+        Mock -CommandName Get-ItemProperty -MockWith {
+            param($Path, $Name)
+            switch ("$Path|$Name") {
+                'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1|UserFolder' {
+                    [pscustomobject]@{ UserFolder = $(if ($script:verifyFailure -eq 'A') { 'C:\Wrong' } else { 'C:\OneDrive\OneDrive - IntelliTect' }) }
+                    break
+                }
+                'HKCU:\Software\Microsoft\OneDrive\Accounts\Personal|UserFolder' {
+                    [pscustomobject]@{ UserFolder = 'C:\OneDrive\OneDrive - Personal' }
+                    break
+                }
+                'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders|Personal' {
+                    [pscustomobject]@{ Personal = $(if ($script:verifyFailure -eq 'C') { 'C:\Elsewhere\Documents' } else { 'C:\OneDrive\OneDrive - IntelliTect\Documents' }) }
+                    break
+                }
+                'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir|tid-1' {
+                    [pscustomobject]@{ 'tid-1' = $(if ($script:verifyFailure -eq 'D') { 'C:\Elsewhere' } else { 'C:\OneDrive\OneDrive - IntelliTect' }) }
+                    break
+                }
+                default { [pscustomobject]@{} }
+            }
+        }
+        Mock -CommandName Get-OneDriveRegistryStringValuesUnderPath -MockWith {
+            param($Path)
+            if ($script:verifyFailure -eq 'E' -and $Path -like '*ScopeIdToMountPointPathCache*') {
+                return @([pscustomobject]@{
+                    KeyPath   = $Path
+                    ValueName = 'Site'
+                    Value     = 'C:\Users\Mark\IntelliTect - Engineering\Docs'
+                })
+            }
+            return @()
+        }
+        Mock -CommandName Get-Process -MockWith {
+            if ($script:verifyFailure -eq 'F') { return $null }
+            return [pscustomobject]@{ Name = 'OneDrive' }
+        }
+    }
+
+    It 'returns Pass when all verification checks succeed' {
+        $result = Invoke-OneDriveMigrationVerification -Plan (New-VerifyTestPlan)
+
+        $result.OverallStatus | Should -Be 'Pass'
+        $result.FailedChecks | Should -BeNullOrEmpty
+        @($result.Checks | Where-Object Status -eq 'Pass').Count | Should -Be 6
+    }
+
+    It 'fails check A when an account UserFolder registry value does not match its target path' {
+        $script:verifyFailure = 'A'
+
+        $result = Invoke-OneDriveMigrationVerification -Plan (New-VerifyTestPlan)
+
+        $result.OverallStatus | Should -Be 'Fail'
+        ($result.FailedChecks | Select-Object -ExpandProperty Name) | Should -Contain 'A. Account UserFolder registry targets'
+    }
+
+    It 'fails check B when a planned tenant directory is missing' {
+        $script:verifyFailure = 'B'
+
+        $result = Invoke-OneDriveMigrationVerification -Plan (New-VerifyTestPlan)
+
+        $result.OverallStatus | Should -Be 'Fail'
+        ($result.FailedChecks | Select-Object -ExpandProperty Name) | Should -Contain 'B. Tenant directory existence'
+    }
+
+    It 'fails check C when Documents no longer resolves under the KFM owner target path' {
+        $script:verifyFailure = 'C'
+
+        $result = Invoke-OneDriveMigrationVerification -Plan (New-VerifyTestPlan)
+
+        $result.OverallStatus | Should -Be 'Fail'
+        ($result.FailedChecks | Select-Object -ExpandProperty Name) | Should -Contain 'C. KFM owner binding'
+    }
+
+    It 'fails check D when DefaultRootDir policy does not match the planned target path' {
+        $script:verifyFailure = 'D'
+
+        $result = Invoke-OneDriveMigrationVerification -Plan (New-VerifyTestPlan)
+
+        $result.OverallStatus | Should -Be 'Fail'
+        ($result.FailedChecks | Select-Object -ExpandProperty Name) | Should -Contain 'D. DefaultRootDir policy'
+    }
+
+    It 'fails check E when a SharePoint cache value still references the old root' {
+        $script:verifyFailure = 'E'
+
+        $result = Invoke-OneDriveMigrationVerification -Plan (New-VerifyTestPlan)
+
+        $result.OverallStatus | Should -Be 'Fail'
+        ($result.FailedChecks | Select-Object -ExpandProperty Name) | Should -Contain 'E. SharePoint cache old-root purge'
+    }
+
+    It 'fails check F when OneDrive.exe running state does not match the completed StartOneDrive plan item' {
+        $script:verifyFailure = 'F'
+
+        $result = Invoke-OneDriveMigrationVerification -Plan (New-VerifyTestPlan)
+
+        $result.OverallStatus | Should -Be 'Fail'
+        ($result.FailedChecks | Select-Object -ExpandProperty Name) | Should -Contain 'F. OneDrive.exe running state'
+    }
+}
+
+Describe 'Invoke-MarkMichaelisOneDriveConfiguration pre-create behavior' -Tag 'Heavy' {
+    It 'creates RootDir and bare tenant directories but not the per-account destination' {
+        $rootDir = 'C:\OneDrive'
+        $tenantDir = 'C:\OneDrive\IntelliTect'
+        $targetDir = 'C:\OneDrive\OneDrive - IntelliTect'
+        $sourceDir = 'C:\Users\me\OneDrive - IntelliTect'
+        $createdPaths = New-Object System.Collections.Generic.List[string]
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = $sourceDir; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                $rootDir { $false; break }
+                $tenantDir { $false; break }
+                $sourceDir { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName New-Item -MockWith {
+            param($ItemType, $Path)
+            $createdPaths.Add($Path) | Out-Null
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($acct) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-OneDriveSharePointSiteList -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $null }
+        Mock -CommandName Resolve-KfmRebindAction -MockWith {
+            [pscustomobject]@{ Action = 'None'; OwnerAccount = $acct; Reason = 'KFM inactive' }
+        }
+        Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
+        Mock -CommandName Set-OneDriveUpdateRingPolicy
+        Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Move-OneDriveFolder
+        Mock -CommandName Update-OneDriveAccountRegistry
+        Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $true }
+        Mock -CommandName Invoke-AppFixUps
+        Mock -CommandName Set-RootDirAclFromHome
+        Mock -CommandName Start-OneDriveExe
+        Mock -CommandName Invoke-OneDriveMigrationVerification -MockWith { New-PassingVerificationResult }
+        Mock -CommandName Get-Process -MockWith { [pscustomobject]@{ Name = 'OneDrive' } }
+
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir $rootDir -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+
+        $createdPaths | Should -Contain $rootDir
+        $createdPaths | Should -Contain $tenantDir
+        $createdPaths | Should -Not -Contain $targetDir
+        Should -Invoke Set-RootDirAclFromHome -Times 1 -ParameterFilter {
+            $Path -eq $rootDir
+        }
+        Should -Invoke Move-OneDriveFolder -Times 1 -ParameterFilter {
+            $Source -eq $sourceDir -and $Destination -eq $targetDir
+        }
+    }
+}
+
+Describe 'Invoke-MarkMichaelisOneDriveConfiguration running state' -Tag 'Heavy' {
+    BeforeEach {
+        $script:acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($script:acct) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-OneDriveSharePointSiteList -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $null }
+        Mock -CommandName Resolve-KfmRebindAction -MockWith {
+            [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+        }
+        Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
+        Mock -CommandName Set-OneDriveUpdateRingPolicy
+        Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Move-OneDriveFolder
+        Mock -CommandName Update-OneDriveAccountRegistry
+        Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $true }
+        Mock -CommandName Invoke-AppFixUps
+        Mock -CommandName Start-OneDriveExe
+        Mock -CommandName Invoke-OneDriveMigrationVerification -MockWith { New-PassingVerificationResult }
+        Mock -CommandName New-Item
+    }
+
+    It 'does not restart OneDrive when it was not running before the script started' {
+        Mock -CommandName Get-Process -MockWith { $null }
+
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+
+        Should -Invoke Start-OneDriveExe -Times 0
+    }
+
+    It 'restarts OneDrive when it was running before the script started' {
+        Mock -CommandName Get-Process -MockWith { [pscustomobject]@{ Name = 'OneDrive' } }
+
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+
+        Should -Invoke Start-OneDriveExe -Times 1
+    }
+}
+
+Describe 'Invoke-MarkMichaelisOneDriveConfiguration verification failure' -Tag 'Heavy' {
+    It 'throws with the registry backup path when post-migration verification fails' {
+        $rootDir = 'C:\OneDrive'
+        $oldPath = 'C:\Users\me\OneDrive - IntelliTect'
+        $newPath = 'C:\OneDrive\OneDrive - IntelliTect'
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = $oldPath; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $failedCheck = [pscustomobject]@{ Name = 'A. Account UserFolder registry targets'; Status = 'Fail'; Detail = 'mocked verification failure' }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                $rootDir { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                $oldPath { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($acct) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-OneDriveSharePointSiteList -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $null }
+        Mock -CommandName Resolve-KfmRebindAction -MockWith {
+            [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+        }
+        Mock -CommandName Get-ItemProperty -MockWith { [pscustomobject]@{} }
+        Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
+        Mock -CommandName Set-OneDriveUpdateRingPolicy
+        Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\backup.reg' }
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Move-OneDriveFolder -MockWith { [pscustomobject]@{ SameVolume = $true; DeferredDeletePath = $null } }
+        Mock -CommandName Get-OneDriveAccountRegistrySnapshot -MockWith { [pscustomobject]@{ UserFolder = $oldPath; CacheValues = @{} } }
+        Mock -CommandName Update-OneDriveAccountRegistry
+        Mock -CommandName Invoke-OneDriveMigrationVerification -MockWith {
+            [pscustomobject]@{
+                Checks        = @($failedCheck)
+                OverallStatus = 'Fail'
+                FailedChecks  = @($failedCheck)
+            }
+        }
+        Mock -CommandName Start-OneDriveExe
+        Mock -CommandName New-Item
+        Mock -CommandName Write-OneDriveMigrationVerificationSummary
+        Mock -CommandName Get-Process -MockWith { [pscustomobject]@{ Name = 'OneDrive' } }
+
+        {
+            Invoke-MarkMichaelisOneDriveConfiguration -RootDir $rootDir -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+        } | Should -Throw -ExpectedMessage '*Registry backup:*'
+    }
+}
+
+Describe 'Invoke-MarkMichaelisOneDriveConfiguration rollback' -Tag 'Heavy' {
+    It 'moves the source back when a same-volume registry update fails' {
+        $rootDir = 'C:\OneDrive'
+        $oldPath = 'C:\Users\me\OneDrive - IntelliTect'
+        $newPath = 'C:\OneDrive\OneDrive - IntelliTect'
+        $script:afterMove = $false
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = $oldPath; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                $rootDir { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                $oldPath { if ($script:afterMove) { $false } else { $true }; break }
+                $newPath { if ($script:afterMove) { $true } else { $false }; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($acct) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-OneDriveSharePointSiteList -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $null }
+        Mock -CommandName Resolve-KfmRebindAction -MockWith {
+            [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+        }
+        Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
+        Mock -CommandName Set-OneDriveUpdateRingPolicy
+        Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Move-OneDriveFolder -MockWith { $script:afterMove = $true }
+        Mock -CommandName Get-OneDriveAccountRegistrySnapshot -MockWith { [pscustomobject]@{ UserFolder = $oldPath; CacheValues = @{} } }
+        Mock -CommandName Update-OneDriveAccountRegistry -MockWith { throw 'registry write failed' }
+        Mock -CommandName Restore-OneDriveAccountRegistrySnapshot
+        Mock -CommandName Move-Item -MockWith { $script:afterMove = $false }
+        Mock -CommandName Invoke-AppFixUps
+        Mock -CommandName Start-OneDriveExe
+        Mock -CommandName New-Item
+        Mock -CommandName Get-Process -MockWith { [pscustomobject]@{ Name = 'OneDrive' } }
+        Mock -CommandName Write-Error
+
+        { Invoke-MarkMichaelisOneDriveConfiguration -RootDir $rootDir -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false } |
+            Should -Throw -ExpectedMessage '*registry write failed*'
+
+        Should -Invoke Move-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq $newPath -and $Destination -eq $oldPath
+        }
+        Should -Invoke Restore-OneDriveAccountRegistrySnapshot -Times 1
+        Should -Invoke Start-OneDriveExe -Times 0
+    }
+}
+
+Describe 'Invoke-MarkMichaelisOneDriveConfiguration KFM rebind' -Tag 'Heavy' {
+    It 'preserves the known-folder suffix by rebinding from the owning account root for <Suffix>' -ForEach @(
+        @{ Suffix = 'Documents' }
+        @{ Suffix = 'Desktop' }
+        @{ Suffix = 'Pictures' }
+        @{ Suffix = 'Music' }
+        @{ Suffix = 'Videos' }
+    ) {
+        $rootDir = 'C:\OneDrive'
+        $owner = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'Michaelis Consulting'
+            UserEmail = 'owner@example.com'; UserFolder = 'C:\OneDrive\OneDrive - Michaelis Consulting'; TenantId = 'tid-owner'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $other = [pscustomobject]@{
+            Slot = 'Business2'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'other@example.com'; UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'; TenantId = 'tid-other'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business2'
+        }
+        $kfmCurrent = "C:\OneDrive\OneDrive - IntelliTect\$Suffix"
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $true; break }
+                'C:\OneDrive\Michaelis Consulting' { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($owner, $other) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-OneDriveSharePointSiteList -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $kfmCurrent }
+        Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
+        Mock -CommandName Set-OneDriveUpdateRingPolicy
+        Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Move-OneDriveFolder
+        Mock -CommandName Update-OneDriveAccountRegistry
+        Mock -CommandName Invoke-AppFixUps
+        Mock -CommandName Start-OneDriveExe
+        Mock -CommandName Invoke-OneDriveMigrationVerification -MockWith { New-PassingVerificationResult }
+        Mock -CommandName New-Item
+        Mock -CommandName Get-Process -MockWith { $null }
+        Mock -CommandName Update-KfmBindings
+
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir $rootDir -KfmOwner 'Michaelis Consulting' -FreshSync @() -Confirm:$false
+
+        Should -Invoke Update-KfmBindings -Times 1 -ParameterFilter {
+            $OldRoot -eq 'C:\OneDrive\OneDrive - IntelliTect' -and
+            $NewRoot -eq 'C:\OneDrive\OneDrive - Michaelis Consulting'
+        }
+    }
+
+    It 'warns and skips rebind when the current KFM path is orphaned' {
+        $owner = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'Michaelis Consulting'
+            UserEmail = 'owner@example.com'; UserFolder = 'C:\OneDrive\OneDrive - Michaelis Consulting'; TenantId = 'tid-owner'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            $Path -eq 'C:\OneDrive'
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($owner) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-OneDriveSharePointSiteList -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { 'D:\Elsewhere\Documents' }
+        Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
+        Mock -CommandName Set-OneDriveUpdateRingPolicy
+        Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Move-OneDriveFolder
+        Mock -CommandName Update-OneDriveAccountRegistry
+        Mock -CommandName Invoke-AppFixUps
+        Mock -CommandName Start-OneDriveExe
+        Mock -CommandName Invoke-OneDriveMigrationVerification -MockWith { New-PassingVerificationResult }
+        Mock -CommandName New-Item
+        Mock -CommandName Get-Process -MockWith { $null }
+        Mock -CommandName Update-KfmBindings
+        Mock -CommandName Write-Warning
+
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis Consulting' -FreshSync @() -Confirm:$false
+
+        Should -Invoke Update-KfmBindings -Times 0
+        Should -Invoke Write-Warning -Times 1 -ParameterFilter { $Message -like '*not under any discovered OneDrive account UserFolder*' }
+    }
+}
+
+Describe 'Plan-then-execute architecture' -Tag 'Heavy' {
+    It '-WhatIf renders the plan without invoking state-changing helpers' {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($acct) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-OneDriveSharePointSiteList -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $null }
+        Mock -CommandName Resolve-KfmRebindAction -MockWith {
+            [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+        }
+        Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy -MockWith { throw 'state change not allowed under WhatIf' }
+        Mock -CommandName Set-OneDriveUpdateRingPolicy -MockWith { throw 'state change not allowed under WhatIf' }
+        Mock -CommandName Move-OneDriveFolder -MockWith { throw 'state change not allowed under WhatIf' }
+        Mock -CommandName Update-OneDriveAccountRegistry -MockWith { throw 'state change not allowed under WhatIf' }
+        Mock -CommandName Stop-OneDriveExe -MockWith { throw 'state change not allowed under WhatIf' }
+        Mock -CommandName Start-OneDriveExe -MockWith { throw 'state change not allowed under WhatIf' }
+        Mock -CommandName Update-KfmBindings -MockWith { throw 'state change not allowed under WhatIf' }
+        Mock -CommandName Invoke-AppFixUps -MockWith { throw 'state change not allowed under WhatIf' }
+        Mock -CommandName Remove-OneDriveAccountLink -MockWith { throw 'state change not allowed under WhatIf' }
+        Mock -CommandName Get-Process -MockWith { [pscustomobject]@{ Name = 'OneDrive' } }
+
+        { Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -WhatIf } |
+            Should -Not -Throw
+
+        Should -Invoke Move-OneDriveFolder -Times 0
+        Should -Invoke Update-OneDriveAccountRegistry -Times 0
+        Should -Invoke Stop-OneDriveExe -Times 0
+        Should -Invoke Start-OneDriveExe -Times 0
+    }
+
+    It 'performs a same-volume move on the first run and is a no-op on the second run' {
+        $script:firstRunComplete = $false
+        $decision = [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+
+        Mock -CommandName Get-OneDriveAccountList -MockWith {
+            if (-not $script:firstRunComplete) {
+                return @([pscustomobject]@{
+                    Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+                    UserEmail = 'user@example.com'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+                })
+            }
+            return @([pscustomobject]@{
+                Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+                UserEmail = 'user@example.com'; UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+            })
+        }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-OneDriveSharePointSiteList -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $null }
+        Mock -CommandName Resolve-KfmRebindAction -MockWith { $decision }
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                'C:\Users\me\OneDrive - IntelliTect' { -not $script:firstRunComplete; break }
+                'C:\OneDrive\OneDrive - IntelliTect' { $script:firstRunComplete; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-ItemProperty -MockWith {
+            param($Path, $Name)
+            if ($Path -eq 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1' -and $Name -eq 'UserFolder') {
+                return [pscustomobject]@{ UserFolder = $(if ($script:firstRunComplete) { 'C:\OneDrive\OneDrive - IntelliTect' } else { 'C:\Users\me\OneDrive - IntelliTect' }) }
+            }
+            return [pscustomobject]@{}
+        }
+        Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\backup.reg' }
+        Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
+        Mock -CommandName Set-OneDriveUpdateRingPolicy
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Move-OneDriveFolder -MockWith { $script:firstRunComplete = $true }
+        Mock -CommandName Update-OneDriveAccountRegistry
+        Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $true }
+        Mock -CommandName Start-OneDriveExe
+        Mock -CommandName Invoke-OneDriveMigrationVerification -MockWith { New-PassingVerificationResult }
+        Mock -CommandName New-Item
+        Mock -CommandName Get-Process -MockWith { $null }
+
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false | Out-Null
+        $secondPlan = Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+
+        Should -Invoke Move-OneDriveFolder -Times 1
+        @($secondPlan | Where-Object { $_.Type -eq 'MoveAccount' -and -not $_.Skipped }).Count | Should -Be 0
+        @($secondPlan | Where-Object { $_.Type -eq 'UpdateAccountRegistry' -and -not $_.Skipped }).Count | Should -Be 0
+    }
+
+    It 'emits SharePoint move and cache-rewrite plan items for sibling and nested mounts' {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $site = [pscustomobject]@{
+            OwnerAccount = $acct; CurrentPath = 'C:\Users\Mark\IntelliTect - Engineering'; LeafName = 'IntelliTect - Engineering'; DesiredPath = 'C:\OneDrive\IntelliTect\IntelliTect - Engineering'
+        }
+        $decision = [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                'C:\OneDrive\OneDrive - IntelliTect' { $true; break }
+                'C:\Users\Mark\IntelliTect - Engineering' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-ItemProperty -MockWith {
+            param($Path, $Name)
+            if ($Path -eq 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir' -and $Name -eq 'tid-1') {
+                return [pscustomobject]@{ 'tid-1' = 'C:\OneDrive\OneDrive - IntelliTect' }
+            }
+            if ($Path -eq 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive' -and $Name -eq 'GPOSetUpdateRing') {
+                return [pscustomobject]@{ GPOSetUpdateRing = 0 }
+            }
+            if ($Path -eq 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1' -and $Name -eq 'UserFolder') {
+                return [pscustomobject]@{ UserFolder = 'C:\OneDrive\OneDrive - IntelliTect' }
+            }
+            return [pscustomobject]@{}
+        }
+
+        $plan = New-OneDriveMigrationPlan -RootDir 'C:\OneDrive' -Accounts @($acct) -FreshSyncAccounts @() -SharePointSites @($site) -KfmCurrentPath $null -KfmDecision $decision -WasRunning:$false
+
+        ($plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.Target -eq 'C:\OneDrive\IntelliTect\IntelliTect - Engineering' }).Count | Should -Be 1
+        ($plan | Where-Object { $_.Type -eq 'RewriteSPCache' -and $_.CurrentValue -eq 'C:\Users\Mark\IntelliTect - Engineering' -and $_.DesiredValue -eq 'C:\OneDrive\IntelliTect\IntelliTect - Engineering' }).Count | Should -Be 1
+    }
+
+    It 'gates cross-volume placeholder moves unless -ForceHydrate is supplied' {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $decision = [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'D:\OneDrive' { $true; break }
+                'D:\OneDrive\IntelliTect' { $true; break }
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Test-IsSameVolume -MockWith { $false }
+        Mock -CommandName Get-OneDrivePlaceholderCount -MockWith { 3 }
+        Mock -CommandName Get-ItemProperty -MockWith { [pscustomobject]@{} }
+
+        $plan = New-OneDriveMigrationPlan -RootDir 'D:\OneDrive' -Accounts @($acct) -FreshSyncAccounts @() -KfmCurrentPath $null -KfmDecision $decision -WasRunning:$false
+
+        ($plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.SkipReason -like 'Refusing cross-volume move of 3 cloud-only files*' }).Count | Should -Be 1
+    }
+
+    It 'allows cross-volume placeholder moves with a hydration warning when -ForceHydrate is supplied' {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $decision = [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'D:\OneDrive' { $true; break }
+                'D:\OneDrive\IntelliTect' { $true; break }
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Test-IsSameVolume -MockWith { $false }
+        Mock -CommandName Get-OneDrivePlaceholderCount -MockWith { 3 }
+        Mock -CommandName Get-ItemProperty -MockWith { [pscustomobject]@{} }
+
+        $plan = New-OneDriveMigrationPlan -RootDir 'D:\OneDrive' -Accounts @($acct) -FreshSyncAccounts @() -KfmCurrentPath $null -KfmDecision $decision -WasRunning:$false -ForceHydrate
+        $move = $plan | Where-Object { $_.Type -eq 'MoveAccount' } | Select-Object -First 1
+
+        $move.Skipped | Should -BeFalse
+        @($move.Warnings) | Should -Contain 'Will hydrate 3 cloud-only files (~size unknown).'
+    }
+
+    It 'plans ACL hardening for a newly created RootDir' {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $decision = [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $false; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                'C:\OneDrive\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-ItemProperty -MockWith { [pscustomobject]@{} }
+
+        $plan = New-OneDriveMigrationPlan -RootDir 'C:\OneDrive' -Accounts @($acct) -FreshSyncAccounts @() -KfmCurrentPath $null -KfmDecision $decision -WasRunning:$false
+
+        ($plan | Where-Object { $_.Type -eq 'HardenRootDirAcl' -and -not $_.Skipped -and $_.Target -eq 'C:\OneDrive' }).Count | Should -Be 1
+    }
+
+    It 'marks every plan item skipped on a second idempotent run' {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $decision = [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                'C:\OneDrive\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-ItemProperty -MockWith {
+            param($Path, $Name)
+            if ($Path -eq 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir' -and $Name -eq 'tid-1') {
+                return [pscustomobject]@{ 'tid-1' = 'C:\OneDrive\OneDrive - IntelliTect' }
+            }
+            if ($Path -eq 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive' -and $Name -eq 'GPOSetUpdateRing') {
+                return [pscustomobject]@{ GPOSetUpdateRing = 0 }
+            }
+            if ($Path -eq 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1' -and $Name -eq 'UserFolder') {
+                return [pscustomobject]@{ UserFolder = 'C:\OneDrive\OneDrive - IntelliTect' }
+            }
+            return [pscustomobject]@{}
+        }
+
+        $plan = New-OneDriveMigrationPlan -RootDir 'C:\OneDrive' -Accounts @($acct) -FreshSyncAccounts @() -KfmCurrentPath $null -KfmDecision $decision -WasRunning:$false
+
+        @($plan).Count | Should -BeGreaterThan 0
+        @($plan | Where-Object { -not $_.Skipped }).Count | Should -Be 0
+    }
+}
+
+Describe 'Get-OneDriveMigrationSummaryLines' -Tag 'Light' {
+    It 'renders the detailed summary sections in a stable grouped structure' {
+        $accounts = @(
+            [pscustomobject]@{ AccountType = 'Business'; DisplayName = 'IntelliTect'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect' }
+        )
+        $sharePointSites = @(
+            [pscustomobject]@{ CurrentPath = 'C:\Users\Mark\IntelliTect - Engineering'; DesiredPath = 'C:\OneDrive\IntelliTect\IntelliTect - Engineering' }
+        )
+        $plan = @(
+            [pscustomobject]@{ Type='RegistryBackup'; Target='C:\Backup.reg'; CurrentValue=$null; DesiredValue=$null; Status='Done'; SkipReason=$null; FailureReason=$null },
+            [pscustomobject]@{ Type='WritePolicy'; Target='HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir\tid-1'; CurrentValue='old'; DesiredValue='new'; Status='Done'; SkipReason=$null; FailureReason=$null },
+            [pscustomobject]@{ Type='MoveAccount'; Target='C:\OneDrive\OneDrive - IntelliTect'; CurrentValue='C:\Users\me\OneDrive - IntelliTect'; DesiredValue='C:\OneDrive\OneDrive - IntelliTect'; Status='Skipped'; SkipReason='Current path already matches the canonical target.'; FailureReason=$null },
+            [pscustomobject]@{ Type='RewriteSPCache'; Target='C:\OneDrive\IntelliTect\IntelliTect - Engineering'; CurrentValue='C:\Users\Mark\IntelliTect - Engineering'; DesiredValue='C:\OneDrive\IntelliTect\IntelliTect - Engineering'; Status='Done'; SkipReason=$null; FailureReason=$null },
+            [pscustomobject]@{ Type='RewriteKfm'; Target='KFM'; CurrentValue='C:\Old\Documents'; DesiredValue='C:\New\Documents'; Status='Failed'; SkipReason=$null; FailureReason='boom' },
+            [pscustomobject]@{ Type='Verify'; Target='C:\OneDrive\OneDrive - IntelliTect'; CurrentValue='old'; DesiredValue='new'; Status='Done'; SkipReason=$null; FailureReason=$null }
+        )
+
+        $summary = (Get-OneDriveMigrationSummaryLines -Accounts $accounts -SharePointSites $sharePointSites -Plan $plan -DeferredCleanupPaths @('C:\Old.migrated-123')) -join "`n"
+
+        $summary | Should -Match 'Discovered Accounts:'
+        $summary | Should -Match 'Discovered SharePoint Sites:'
+        $summary | Should -Match 'Policy Writes:'
+        $summary | Should -Match 'Moves:'
+        $summary | Should -Match 'KFM Rewrites:'
+        $summary | Should -Match 'SharePoint Cache Rewrites:'
+        $summary | Should -Match 'Verification Results:'
+        $summary | Should -Match 'Backup Location:'
+        $summary | Should -Match 'MRU Warning:'
+        $summary | Should -Match '\.migrated-\* directories awaiting cleanup:'
+        $summary | Should -Match 'Failed: boom \| KFM'
+    }
+
+    It "calls out 'ACTION REQUIRED' for fresh-synced accounts" {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'Michaelis'; UserFolder = 'C:\Users\Mark\OneDrive - Michaelis'
+        }
+        $plan = @(
+            [pscustomobject]@{ Type='MoveAccount'; Target='C:\Users\Mark\OneDrive - Michaelis'; CurrentValue='C:\Users\Mark\OneDrive - Michaelis'; DesiredValue=$null; Status='Done'; SkipReason=$null; FailureReason=$null; FreshSync=$true; Account=$acct }
+        )
+
+        $summary = (Get-OneDriveMigrationSummaryLines -Accounts @($acct) -SharePointSites @() -Plan $plan) -join "`n"
+
+        $summary | Should -Match 'ACTION REQUIRED'
+        $summary | Should -Match 'Michaelis'
     }
 }
 
@@ -371,7 +1573,7 @@ Describe 'Resolve-FreshSyncAccounts' -Tag 'Light' {
 }
 
 
-Describe 'Format-OneDrivePlanBanner' -Tag 'Light' {
+Describe 'Format-OneDriveMigrationPlan' -Tag 'Light' {
     BeforeAll {
         $script:b1 = [pscustomobject]@{
             Slot = 'Business1'; AccountType = 'Business'
@@ -391,101 +1593,73 @@ Describe 'Format-OneDrivePlanBanner' -Tag 'Light' {
         $script:allAccounts = @($script:b1, $script:b2, $script:personal)
     }
 
-    It "header reads '[PLAN | -WhatIf]' under -WhatIf and '[APPLY]' otherwise" {
-        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+    BeforeEach {
+        $script:capturedPlanLines = New-Object System.Collections.Generic.List[string]
+        Mock -CommandName Write-Host -MockWith {
+            param($Object)
+            $script:capturedPlanLines.Add([string]$Object) | Out-Null
+        }
+    }
+
+    It "writes '[PLAN | -WhatIf]' under -WhatIf and '[APPLY]' otherwise" {
+        Format-OneDriveMigrationPlan -Plan @() -Accounts $script:allAccounts `
             -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
             -FreshSyncAccounts @() -WhatIfMode -HomeDir 'C:\Users\Mark'
-        $plan[0] | Should -Match '\[PLAN \| -WhatIf\]'
+        ($script:capturedPlanLines -join "`n") | Should -Match '\[PLAN \| -WhatIf\]'
 
-        $apply = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+        $script:capturedPlanLines.Clear()
+        Format-OneDriveMigrationPlan -Plan @() -Accounts $script:allAccounts `
             -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
             -FreshSyncAccounts @() -HomeDir 'C:\Users\Mark'
-        $apply[0] | Should -Match '\[APPLY\]'
+        ($script:capturedPlanLines -join "`n") | Should -Match '\[APPLY\]'
     }
 
     It 'mentions cross-volume warning when RootDir is on a different drive than HomeDir' {
-        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+        Format-OneDriveMigrationPlan -Plan @() -Accounts $script:allAccounts `
             -RootDir 'D:\OneDrive' -KfmOwner 'Michaelis' `
             -FreshSyncAccounts @() -HomeDir 'C:\Users\Mark'
-        ($plan -join "`n") | Should -Match 'cross-volume'
-        ($plan -join "`n") | Should -Match 'hydrate'
+        ($script:capturedPlanLines -join "`n") | Should -Match 'cross-volume'
+        ($script:capturedPlanLines -join "`n") | Should -Match 'hydrate'
     }
 
     It 'does NOT mention cross-volume when RootDir is on the same drive as HomeDir' {
-        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+        Format-OneDriveMigrationPlan -Plan @() -Accounts $script:allAccounts `
             -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
             -FreshSyncAccounts @() -HomeDir 'C:\Users\Mark'
-        ($plan -join "`n") | Should -Not -Match 'cross-volume'
+        ($script:capturedPlanLines -join "`n") | Should -Not -Match 'cross-volume'
     }
 
     It "marks FreshSync accounts with 'FRESH-SYNC' in the account list" {
-        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+        Format-OneDriveMigrationPlan -Plan @() -Accounts $script:allAccounts `
             -RootDir 'D:\OneDrive' -KfmOwner 'Michaelis' `
             -FreshSyncAccounts @($script:b2) -HomeDir 'C:\Users\Mark'
-        $b2Line = $plan | Where-Object { $_ -match 'IntelliTect' }
+        $b2Line = $script:capturedPlanLines | Where-Object { $_ -match 'IntelliTect' }
         $b2Line | Should -Match 'FRESH-SYNC'
-        # And Business1 (Michaelis) should NOT be marked fresh-sync.
-        $b1Line = $plan | Where-Object { $_ -match 'Michaelis' -and $_ -notmatch 'KFM owner' }
+        $b1Line = $script:capturedPlanLines | Where-Object { $_ -match 'Michaelis' -and $_ -notmatch 'KFM owner' }
         $b1Line | Should -Not -Match 'FRESH-SYNC'
     }
 
     It "produces 'KFM:  suppressed' line when -NoKfmRebind is supplied" {
-        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+        Format-OneDriveMigrationPlan -Plan @() -Accounts $script:allAccounts `
             -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
             -FreshSyncAccounts @() -NoKfmRebind -HomeDir 'C:\Users\Mark'
-        ($plan -join "`n") | Should -Match 'KFM:\s+suppressed \(-NoKfmRebind\)'
+        ($script:capturedPlanLines -join "`n") | Should -Match 'KFM:\s+suppressed \(-NoKfmRebind\)'
     }
 
     It 'emits a WARNING line when -SkipElevationCheck is used without actual elevation' {
-        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+        Format-OneDriveMigrationPlan -Plan @() -Accounts $script:allAccounts `
             -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
             -FreshSyncAccounts @() -SkipElevationCheck -IsElevated $false `
             -HomeDir 'C:\Users\Mark'
-        ($plan -join "`n") | Should -Match 'NOT ELEVATED'
-        ($plan -join "`n") | Should -Match 'WARNING'
+        ($script:capturedPlanLines -join "`n") | Should -Match 'NOT ELEVATED'
+        ($script:capturedPlanLines -join "`n") | Should -Match 'WARNING'
     }
 
     It 'reports elevation OK when running elevated' {
-        $plan = Format-OneDrivePlanBanner -Accounts $script:allAccounts `
+        Format-OneDriveMigrationPlan -Plan @() -Accounts $script:allAccounts `
             -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
             -FreshSyncAccounts @() -IsElevated $true -HomeDir 'C:\Users\Mark'
-        ($plan -join "`n") | Should -Match 'Elevation:\s+OK \(Administrator\)'
-    }
-}
-
-Describe 'Format-OneDriveSummaryReport' -Tag 'Light' {
-    BeforeAll {
-        $script:b1 = [pscustomobject]@{
-            Slot = 'Business1'; AccountType = 'Business'
-            DisplayName = 'Michaelis'; UserEmail = 'mark@example.com'
-            UserFolder = 'C:\Users\Mark\OneDrive - Michaelis'
-        }
-        $script:noneDecision = [pscustomobject]@{
-            Action = 'None'; OwnerAccount = $null; Reason = 'n/a'
-        }
-        $script:trackDecision = [pscustomobject]@{
-            Action = 'Track'; OwnerAccount = $script:b1; Reason = 'tracking'
-        }
-    }
-
-    It "uses 'Migrated:' phrasing in apply mode and 'Would migrate:' under -WhatIf" {
-        $apply = Format-OneDriveSummaryReport -Migrations @() -FreshSyncAccounts @() `
-            -KfmDecision $script:noneDecision -RootDir 'C:\OneDrive' `
-            -RestartedOneDrive $false -KfmOwnerInFreshSync $false
-        ($apply -join "`n") | Should -Match 'Migrated:'
-
-        $whatif = Format-OneDriveSummaryReport -Migrations @() -FreshSyncAccounts @() `
-            -KfmDecision $script:noneDecision -RootDir 'C:\OneDrive' `
-            -RestartedOneDrive $false -KfmOwnerInFreshSync $false -WhatIfMode
-        ($whatif -join "`n") | Should -Match 'Would migrate:'
-    }
-
-    It "calls out 'ACTION REQUIRED' for fresh-synced accounts" {
-        $report = Format-OneDriveSummaryReport -Migrations @() `
-            -FreshSyncAccounts @($script:b1) `
-            -KfmDecision $script:trackDecision -RootDir 'D:\OneDrive' `
-            -RestartedOneDrive $true -KfmOwnerInFreshSync $false
-        ($report -join "`n") | Should -Match 'ACTION REQUIRED'
+        ($script:capturedPlanLines -join "`n") | Should -Match 'Elevation:\s+OK \(Administrator\)'
     }
 }
 
