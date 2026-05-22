@@ -24,7 +24,7 @@
       - Auto-migrates any account whose UserFolder doesn't match the
         target convention. Same-volume migrations use Move-Item (NTFS
         rename, preserves Cloud Files reparse + ACLs). Cross-volume
-        migrations use robocopy /MIR /COPYALL /DCOPY:DAT /ZB and warn
+        migrations use robocopy /E /COPYALL /DCOPY:DAT /ZB and warn
         about Files-On-Demand placeholders.
       - Rewrites KFM bindings (User Shell Folders / Shell Folders /
         KNOWNFOLDERID GUIDs) when the owning account moves.
@@ -595,7 +595,7 @@ function Invoke-RobocopyMirror {
         [Parameter(Mandatory)][string]$Destination
     )
 
-    $args = @($Source, $Destination, '/MIR','/COPYALL','/DCOPY:DAT','/ZB','/R:1','/W:1','/XJ','/NFL','/NDL')
+    $args = @($Source, $Destination, '/E','/COPYALL','/DCOPY:DAT','/ZB','/R:1','/W:1','/XJ','/NFL','/NDL')
     & robocopy @args | Out-Null
     return $LASTEXITCODE
 }
@@ -619,7 +619,7 @@ function Move-OneDriveFolder {
     <#
     .SYNOPSIS
         Move an account's UserFolder from $Source to $Destination,
-        using NTFS rename when possible and robocopy /MIR /COPYALL
+        using NTFS rename when possible and robocopy /E /COPYALL
         otherwise. Cross-volume moves rename the original source to a
         .migrated-* recovery folder and only delete it when explicitly
         requested via -DeleteSourceOnSuccess.
@@ -663,8 +663,8 @@ function Move-OneDriveFolder {
         return $result
     }
 
-    Write-Warning "Cross-volume migration copies data first, then renames the original source to a .migrated-* recovery folder. Use -DeleteSourceOnSuccess only after you are comfortable auto-removing that recovery folder."
-    if ($PSCmdlet.ShouldProcess($Source, "robocopy /MIR /COPYALL -> $Destination (cross volume)")) {
+    Write-Warning "Cross-volume migration uses robocopy /E /COPYALL first, then renames the original source to a .migrated-* recovery folder. Use -DeleteSourceOnSuccess only after you are comfortable auto-removing that recovery folder."
+    if ($PSCmdlet.ShouldProcess($Source, "robocopy /E /COPYALL -> $Destination (cross volume)")) {
         $rc = Invoke-RobocopyMirror -Source $Source -Destination $Destination
         # robocopy success: 0-7. >=8 is failure.
         if ($rc -ge 8) {
