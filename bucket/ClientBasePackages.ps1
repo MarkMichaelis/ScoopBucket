@@ -94,7 +94,8 @@ Register-ArgumentCompleter -Native -CommandName espeak-ng -ScriptBlock {
     [Package]@{ Name = 'Zoom';             Installer = 'scoop';  Id = 'extras/zoom' }
 
     [Package]@{ Name = 'Amazon Kindle';    Installer = 'winget'; Id = 'Amazon.Kindle' }
-    [Package]@{ Name = 'Bitwarden';        Installer = 'winget'; Id = 'Bitwarden.Bitwarden' }
+    [Package]@{ Name = 'Bitwarden';        Installer = 'winget'; Id = 'Bitwarden.Bitwarden'
+                Companions = @('Bitwarden CLI') }
     [Package]@{
         Name        = 'Bitwarden CLI'
         Installer   = 'winget'
@@ -163,6 +164,7 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
     [Package]@{ Name = 'Snagit';           Installer = 'winget'; Id = 'XPDNSF6TXN2R6Z'; Source = 'msstore'
                 Notes = 'winget default source ships user-scope MSIX only; ms-store is the automated path (#9).' }
     [Package]@{ Name = 'Todoist';          Installer = 'winget'; Id = '9MWF2DWS5Z9N'; Source = 'msstore'
+                Companions = @('Todoist CLI')
                 Notes = 'winget default source ships user-scope MSIX only; ms-store is the automated path (#11).' }
     [Package]@{
         Name        = 'Todoist CLI'

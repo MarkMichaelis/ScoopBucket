@@ -54,4 +54,14 @@ Describe 'ClientBasePackages: Todoist CLI co-located with Todoist desktop' -Tag 
         $cli = @($script:pkgs | Where-Object Name -EQ 'Todoist CLI')[0]
         @($cli.DependsOn)       | Should -Be @('Todoist')
     }
+
+    It 'Bitwarden desktop declares Companions=@(Bitwarden CLI) (auto-install CLI with app)' {
+        $desktop = @($script:pkgs | Where-Object Name -EQ 'Bitwarden')[0]
+        @($desktop.Companions) | Should -Contain 'Bitwarden CLI'
+    }
+
+    It 'Todoist desktop declares Companions=@(Todoist CLI) (auto-install CLI with app)' {
+        $desktop = @($script:pkgs | Where-Object Name -EQ 'Todoist')[0]
+        @($desktop.Companions) | Should -Contain 'Todoist CLI'
+    }
 }

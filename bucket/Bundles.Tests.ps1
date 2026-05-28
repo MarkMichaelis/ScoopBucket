@@ -98,6 +98,28 @@ Describe 'Declarative bundles (data-driven)' -Tag 'Light','Bundle' {
         $missing | Should -BeNullOrEmpty -Because "unresolved DependsOn: $($missing -join ', ')"
     }
 
+    It 'every Companions reference resolves to a package in the same bundle' {
+        # Companions is same-bundle-only for v1 -- mirrors the DependsOn
+        # constraint in Resolve-PackageOrder. A cross-bundle Companions
+        # reference is a bug because Resolve-PackageOrder runs per bundle.
+        $byBundleName = @{}
+        foreach ($p in $script:allPkgs) {
+            if (-not $byBundleName.ContainsKey($p.Bundle)) {
+                $byBundleName[$p.Bundle] = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            }
+            [void]$byBundleName[$p.Bundle].Add($p.Name)
+        }
+        $missing = New-Object System.Collections.Generic.List[string]
+        foreach ($p in $script:allPkgs) {
+            foreach ($comp in @($p.Companions)) {
+                if (-not [string]::IsNullOrWhiteSpace($comp) -and -not $byBundleName[$p.Bundle].Contains($comp)) {
+                    $missing.Add("$($p.Bundle)/$($p.Name) -> $comp")
+                }
+            }
+        }
+        $missing | Should -BeNullOrEmpty -Because "unresolved Companions (must be same-bundle): $($missing -join ', ')"
+    }
+
     It '<Pkg.Name> (<Bundle>) declares a known Installer' -ForEach $script:pkgCases {
         $Pkg.Installer | Should -BeIn @('winget','scoop','choco','npmGlobal','dotnetTool','custom')
     }
