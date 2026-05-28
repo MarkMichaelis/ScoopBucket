@@ -405,3 +405,72 @@ Invoke-PackageInstall -Packages `$Packages -Bundle 'UninstTestBundle'
             Should -Throw -ExpectedMessage "*no bundle declares a package named 'NoSuchPkg'*"
     }
 }
+
+Describe 'Uninstall-Package -- Companions cascade' -Tag 'Light','Module' {
+
+    BeforeAll {
+        $script:repoRoot2 = Split-Path -Parent $PSScriptRoot
+        $script:psd1b     = Join-Path $script:repoRoot2 'module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+
+        $script:tmpBucket2 = Join-Path ([System.IO.Path]::GetTempPath()) ("ScoopBucket-uninstall-comp-$([guid]::NewGuid().ToString('N'))")
+        New-Item -ItemType Directory -Path $script:tmpBucket2 | Out-Null
+
+        $bundleText = @"
+`$scoopBucketPsd1 = '$($script:psd1b -replace "'","''")'
+if (Test-Path `$scoopBucketPsd1) { Import-Module `$scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
+
+`$Packages = [Package[]]@(
+    [Package]@{ Name = 'Owner'; Installer = 'winget'; Id = 'Test.Owner'; Companions = @('OwnerCli') }
+    [Package]@{
+        Name        = 'OwnerCli'
+        Installer   = 'winget'
+        Id          = 'Test.OwnerCli'
+        CliCommands = @('ownercli')
+        Completion  = 'native'
+        DependsOn   = @('Owner')
+        NativeCommandScript = { 'noop' }
+        ExpectedCompletions = @{ ownercli = @('--help') }
+    }
+    [Package]@{ Name = 'Unrelated'; Installer = 'winget'; Id = 'Test.Unrelated' }
+)
+
+Invoke-PackageInstall -Packages `$Packages -Bundle 'CompTestBundle'
+"@
+        Set-Content -Path (Join-Path $script:tmpBucket2 'CompTestBundle.ps1') -Value $bundleText -Encoding UTF8
+
+        $bundleManifest = @{
+            '$schema'  = 'https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json'
+            version   = '1.00.000'
+            url       = @('https://example.invalid/test-bundle')
+            installer = @{ script = @('& "$dir\\CompTestBundle.ps1"') }
+        }
+        Set-Content -LiteralPath (Join-Path $script:tmpBucket2 'CompTestBundle.json') `
+            -Value ($bundleManifest | ConvertTo-Json -Depth 4) -Encoding UTF8
+    }
+
+    AfterAll {
+        if ($script:tmpBucket2 -and (Test-Path $script:tmpBucket2)) {
+            Remove-Item -LiteralPath $script:tmpBucket2 -Recurse -Force -ErrorAction Ignore
+        }
+    }
+
+    It 'uninstalling the owner cascades to its Companions (CLI removed before owner)' {
+        $output = Uninstall-Package -Name 'Owner' -DryRun -SkipCompletion -BucketPath $script:tmpBucket2 *>&1 | Out-String
+        # Both must appear in the plan
+        $output | Should -Match '\[uninstall\] \[winget\] Owner \(Test\.Owner\)'
+        $output | Should -Match '\[uninstall\] \[winget\] OwnerCli \(Test\.OwnerCli\)'
+        # And the CLI must precede the desktop owner (reverse of install order)
+        $cliIdx   = $output.IndexOf('[uninstall] [winget] OwnerCli (Test.OwnerCli)')
+        $ownerIdx = $output.IndexOf('[uninstall] [winget] Owner (Test.Owner)')
+        $cliIdx | Should -BeGreaterThan -1
+        $cliIdx | Should -BeLessThan $ownerIdx
+        # And we should not pull in unrelated packages
+        $output | Should -Not -Match '\[uninstall\] \[winget\] Unrelated'
+    }
+
+    It 'uninstalling the CLI directly does NOT pull in the owner (cascade is owner -> companion only)' {
+        $output = Uninstall-Package -Name 'OwnerCli' -DryRun -SkipCompletion -BucketPath $script:tmpBucket2 *>&1 | Out-String
+        $output | Should -Match '\[uninstall\] \[winget\] OwnerCli \(Test\.OwnerCli\)'
+        $output | Should -Not -Match '\[uninstall\] \[winget\] Owner \(Test\.Owner\)'
+    }
+}

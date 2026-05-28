@@ -87,7 +87,30 @@ function Uninstall-Package {
                             Names      = [System.Collections.Generic.List[string]]::new()
                         }
                     }
-                    $byBundle[$b.BundlePath].Names.Add($p.Name)
+                    # Cascade: include the requested package AND every
+                    # package transitively reachable via Companions in
+                    # the same bundle. Cascade is restricted to
+                    # Companions only -- we deliberately do NOT walk
+                    # reverse-DependsOn (so uninstalling '.NET SDK'
+                    # does not auto-yank every dotnet tool).
+                    $byNameInBundle = @{}
+                    foreach ($q in $b.Packages) { $byNameInBundle[$q.Name] = $q }
+                    $seen  = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+                    $queue = [System.Collections.Generic.Queue[string]]::new()
+                    [void]$queue.Enqueue($p.Name)
+                    while ($queue.Count -gt 0) {
+                        $cur = $queue.Dequeue()
+                        if (-not $seen.Add($cur)) { continue }
+                        $byBundle[$b.BundlePath].Names.Add($cur)
+                        $owner = $byNameInBundle[$cur]
+                        if ($owner -and $owner.Companions) {
+                            foreach ($comp in $owner.Companions) {
+                                if ($byNameInBundle.ContainsKey($comp)) {
+                                    [void]$queue.Enqueue($comp)
+                                }
+                            }
+                        }
+                    }
                     $found = $true
                     break
                 }

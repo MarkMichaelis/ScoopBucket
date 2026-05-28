@@ -135,3 +135,67 @@ Describe 'Install-Package <BareManifest> fallback' -Tag 'Light', 'Module' {
             Should -Throw -ExpectedMessage "*no bundle declares a package named 'NoSuchThing'*"
     }
 }
+
+Describe 'Install-Package -- Companions cascade' -Tag 'Light', 'Module' {
+
+    BeforeAll {
+        $script:repoRoot3 = Split-Path -Parent $PSScriptRoot
+        $script:psd1c     = Join-Path $script:repoRoot3 'module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+
+        $script:tmpBucket3 = Join-Path ([System.IO.Path]::GetTempPath()) ("ScoopBucket-install-comp-$([guid]::NewGuid().ToString('N'))")
+        New-Item -ItemType Directory -Path $script:tmpBucket3 | Out-Null
+
+        $bundleText = @"
+`$scoopBucketPsd1 = '$($script:psd1c -replace "'","''")'
+if (Test-Path `$scoopBucketPsd1) { Import-Module `$scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
+
+`$Packages = [Package[]]@(
+    [Package]@{ Name = 'Owner'; Installer = 'winget'; Id = 'Test.Owner'; Companions = @('OwnerCli') }
+    [Package]@{
+        Name        = 'OwnerCli'
+        Installer   = 'winget'
+        Id          = 'Test.OwnerCli'
+        CliCommands = @('ownercli')
+        Completion  = 'native'
+        DependsOn   = @('Owner')
+        NativeCommandScript = { 'noop' }
+        ExpectedCompletions = @{ ownercli = @('--help') }
+    }
+    [Package]@{ Name = 'Unrelated'; Installer = 'winget'; Id = 'Test.Unrelated' }
+)
+
+Invoke-PackageInstall -Packages `$Packages -Bundle 'CompInstallBundle'
+"@
+        Set-Content -Path (Join-Path $script:tmpBucket3 'CompInstallBundle.ps1') -Value $bundleText -Encoding UTF8
+
+        $bundleManifest = @{
+            '$schema'  = 'https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json'
+            version   = '1.00.000'
+            url       = @('https://example.invalid/comp-install-bundle')
+            installer = @{ script = @('& "$dir\\CompInstallBundle.ps1"') }
+        }
+        Set-Content -LiteralPath (Join-Path $script:tmpBucket3 'CompInstallBundle.json') `
+            -Value ($bundleManifest | ConvertTo-Json -Depth 4) -Encoding UTF8
+    }
+
+    AfterAll {
+        if ($script:tmpBucket3 -and (Test-Path $script:tmpBucket3)) {
+            Remove-Item -LiteralPath $script:tmpBucket3 -Recurse -Force -ErrorAction Ignore
+        }
+    }
+
+    It 'pulls the companion CLI into the plan when the desktop owner is requested, owner first' {
+        $output = Install-Package -Name 'Owner' -DryRun -SkipCompletion -BucketPath $script:tmpBucket3 *>&1 |
+            Out-String
+
+        $output | Should -Match '=== Invoke-PackageInstall: CompInstallBundle \(2 packages\) ==='
+        $output | Should -Match '\[install\] \[winget\] Owner'
+        $output | Should -Match '\[install\] \[winget\] OwnerCli'
+        # Owner must come BEFORE companion (install order: owner first).
+        $ownerIdx = $output.IndexOf('[install] [winget] Owner')
+        $cliIdx   = $output.IndexOf('[install] [winget] OwnerCli')
+        $ownerIdx | Should -BeGreaterThan -1
+        $ownerIdx | Should -BeLessThan $cliIdx
+        $output | Should -Not -Match '\[install\] \[winget\] Unrelated'
+    }
+}
