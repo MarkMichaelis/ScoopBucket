@@ -24,7 +24,8 @@ $Packages = [Package[]]@(
         Completion  = 'pscompletions'
         ExpectedCompletions = @{ '7z' = @('a','x','l') }
     }
-    [Package]@{ Name = 'Everything';                    Installer = 'winget'; Id = 'voidtools.Everything' }
+    [Package]@{ Name = 'Everything';                    Installer = 'winget'; Id = 'voidtools.Everything'
+                Companions = @('Everything CLI') }
     [Package]@{
         Name        = 'Everything CLI'
         Installer   = 'winget'

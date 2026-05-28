@@ -100,6 +100,7 @@ Register-ArgumentCompleter -Native -CommandName npx -ScriptBlock {
         Name      = 'Gemini'
         Installer = 'scoop'
         Id        = 'MarkMichaelis/Gemini'
+        Companions = @('Gemini CLI')
         CISkip    = 'Browser-watch installer requires interactive Download click; see #25/#26.'
     }
     [Package]@{
