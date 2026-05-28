@@ -164,6 +164,18 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
                 Notes = 'winget default source ships user-scope MSIX only; ms-store is the automated path (#9).' }
     [Package]@{ Name = 'Todoist';          Installer = 'winget'; Id = '9MWF2DWS5Z9N'; Source = 'msstore'
                 Notes = 'winget default source ships user-scope MSIX only; ms-store is the automated path (#11).' }
+    [Package]@{
+        Name        = 'Todoist CLI'
+        Installer   = 'winget'
+        Id          = 'Sachaos.Todoist'
+        CliCommands = @('todoist')
+        Completion  = 'native'
+        NativeCommandScript = { todoist completion powershell }
+        WingetExtraArgs = @('--silent', '--disable-interactivity')
+        DependsOn   = @('Todoist')
+        Notes       = 'sachaos/todoist Go CLI for Todoist. Co-located with the Todoist desktop entry above so the ClientBasePackages bundle installs both; DependsOn ensures the desktop app is provisioned first when the CLI is installed directly. Mirrors the Bitwarden / Bitwarden CLI pattern (#208).'
+        ExpectedCompletions = @{ todoist = @('add','list','show','completion','--help') }
+    }
 
     [Package]@{
         Name        = 'Readwise Reader'
