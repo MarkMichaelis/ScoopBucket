@@ -146,7 +146,7 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
         # Get-Command guard.
         $profileContent = Get-Content -Raw -Encoding UTF8 $script:profilePath
         $profileContent | Should -Match 'auto-native-completion-source'
-        $profileContent | Should -Match "ScoopBucket:CliCompletion:$($script:onPathCli)-native:BEGIN v1"
+        $profileContent | Should -Match "ScoopBucket:CliCompletion:$($script:onPathCli)-native:BEGIN v2"
     }
 
     It "registers Completion='native' packages whose CLI is on PATH" {

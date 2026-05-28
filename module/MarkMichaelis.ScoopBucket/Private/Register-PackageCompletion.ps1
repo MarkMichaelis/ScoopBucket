@@ -13,7 +13,32 @@
 #   - Requires elevation to write to AllUsersAllHosts; honours
 #     SupportsShouldProcess.
 
-$script:CompletionSentinelVersion = 'v1'
+$script:CompletionSentinelVersion = 'v2'
+
+function Format-DeferredCompletionBlock {
+    <#
+    .SYNOPSIS
+        Wrap a completer-registration scriptblock string in a
+        PowerShell.OnIdle one-shot deferred handler so the cost of
+        Register-ArgumentCompleter (and any cached subprocess work
+        baked into the inner code) is paid AFTER the prompt is drawn,
+        not before. Profile-block only -- in-runspace activation via
+        Import-PackageCompletion stays synchronous because the user
+        explicitly asked to register NOW (#212).
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$InnerCode)
+    # `| Out-Null` keeps the returned PSEventJob off the success stream
+    # so dot-sourcing the profile doesn't print a stray "Id Name ..."
+    # banner. MaxTriggerCount=1 ensures we register the completer
+    # exactly once -- after that the subscriber unregisters itself.
+    return @"
+`$null = Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -MaxTriggerCount 1 -Action {
+$InnerCode
+} | Out-Null
+"@
+}
 
 function Get-PackageCompletionProfilePath {
     [OutputType([string])]
@@ -244,7 +269,16 @@ function Register-PackageCompletion {
         [Parameter(Mandatory)][string]$Cli,
         [scriptblock]$NativeCommand,
         [ValidateSet('native','pscompletions','auto')][string]$Mode = 'auto',
-        [string]$ProfilePath
+        [string]$ProfilePath,
+        # Pre-captured native completer text (the body of a
+        # `Register-ArgumentCompleter -Native` block) as already
+        # produced once by Get-BundlePackages in its child runspace.
+        # When supplied AND -Mode is not 'pscompletions' AND the text
+        # is non-empty, we skip Resolve-PackageCompletionSource's
+        # native invocation entirely -- this is the fast path that
+        # avoids re-spawning the CLI's `<cli> completions powershell`
+        # at every install/update (#212).
+        [string]$PreCapturedNative
     )
 
     $target = Get-PackageCompletionProfilePath -OverridePath $ProfilePath
@@ -258,15 +292,21 @@ function Register-PackageCompletion {
     $content  = Read-PackageCompletionProfileContent -Path $target
     $existed  = [regex]::IsMatch($content, "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:BEGIN \w+")
 
-    $resolveSplat = @{ Cli = $Cli }
-    if ($NativeCommand -and $Mode -ne 'pscompletions') {
-        $resolveSplat['NativeCommand'] = $NativeCommand
+    # Fast path: cached native text bypasses Resolve-PackageCompletionSource.
+    $resolved = $null
+    if ($PreCapturedNative -and $PreCapturedNative.Trim() -and $Mode -ne 'pscompletions') {
+        $guarded = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n$PreCapturedNative}"
+        $resolved = @{ Source = 'Native'; Code = $guarded; PSCompletionsName = $null }
+    } else {
+        $resolveSplat = @{ Cli = $Cli }
+        if ($NativeCommand -and $Mode -ne 'pscompletions') {
+            $resolveSplat['NativeCommand'] = $NativeCommand
+        }
+        if ($Mode -eq 'pscompletions') {
+            $resolveSplat['PreferPSCompletions'] = $true
+        }
+        $resolved = Resolve-PackageCompletionSource @resolveSplat
     }
-    if ($Mode -eq 'pscompletions') {
-        $resolveSplat['PreferPSCompletions'] = $true
-    }
-
-    $resolved = Resolve-PackageCompletionSource @resolveSplat
 
     # When Mode='native' (no fallback allowed) and resolution went to
     # PSCompletions, downgrade to Skipped.
@@ -309,7 +349,14 @@ function Register-PackageCompletion {
         }
     }
 
-    $newContent = Set-PackageCompletionProfileBlock -Content $content -Cli $Cli -Block $resolved.Code
+    # Wrap the resolved code in a PowerShell.OnIdle one-shot deferred
+    # handler so the cost of Register-ArgumentCompleter is paid AFTER
+    # the prompt is drawn (#212). In-runspace activation via
+    # Import-PackageCompletion deliberately bypasses this -- the user
+    # there is asking to register NOW, not on next idle.
+    $deferred = Format-DeferredCompletionBlock -InnerCode $resolved.Code
+
+    $newContent = Set-PackageCompletionProfileBlock -Content $content -Cli $Cli -Block $deferred
     $tmp = "$target.tmp"
     [System.IO.File]::WriteAllText($tmp, $newContent, [System.Text.UTF8Encoding]::new($false))
     Move-Item -Path $tmp -Destination $target -Force
@@ -375,6 +422,17 @@ function Test-PackageCompletionWorks {
     $probe = @"
 `$ErrorActionPreference='SilentlyContinue'
 . '$ProfilePath' 2>`$null
+# The profile blocks written by Register-PackageCompletion defer their
+# Register-ArgumentCompleter calls to PowerShell.OnIdle (#212). The
+# OnIdle event does not auto-fire in non-interactive `pwsh -File`
+# runs, so manually invoke any pending subscribers' actions before
+# probing the completion engine.
+foreach (`$sub in @(Get-EventSubscriber -SourceIdentifier 'PowerShell.OnIdle' -ErrorAction SilentlyContinue)) {
+    try {
+        `$cmd = `$sub.Action.Command
+        if (`$cmd) { & ([scriptblock]::Create(`$cmd)) 2>`$null | Out-Null }
+    } catch { }
+}
 `$line = '$Cli '
 `$cc = [System.Management.Automation.CommandCompletion]::CompleteInput(`$line, `$line.Length, `$null)
 `$results = @(`$cc.CompletionMatches | Select-Object -First 25 -ExpandProperty CompletionText)

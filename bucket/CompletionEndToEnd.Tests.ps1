@@ -66,6 +66,15 @@ Describe 'Completion end-to-end (real Tab, no mocks)' -Tag 'Heavy','Completion' 
         $script = @"
 `$ErrorActionPreference = 'Stop'
 . '$($script:profilePath -replace "'","''")'
+# Profile blocks defer Register-ArgumentCompleter to PowerShell.OnIdle (#212).
+# Drain any pending subscribers in this non-interactive child runspace before
+# asking the completion engine for matches.
+foreach (`$sub in @(Get-EventSubscriber -SourceIdentifier 'PowerShell.OnIdle' -ErrorAction SilentlyContinue)) {
+    try {
+        `$cmd = `$sub.Action.Command
+        if (`$cmd) { & ([scriptblock]::Create(`$cmd)) 2>`$null | Out-Null }
+    } catch { }
+}
 `$line = '$Cli '
 `$result = [System.Management.Automation.CommandCompletion]::CompleteInput(`$line, `$line.Length, `$null)
 `$result.CompletionMatches | ForEach-Object { `$_.CompletionText }
