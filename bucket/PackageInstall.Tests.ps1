@@ -109,6 +109,32 @@ Describe 'Engine dispatchers' -Tag 'Light','Module' {
             $script:installArgs | Should -Contain '--force'
         }
 
+        It 'passes --scope user (not --scope machine) when Package.Scope=user (#213)' {
+            # Regression guard for Todoist CLI (Sachaos.Todoist): the upstream
+            # winget manifest only publishes a user-scope portable .exe. When
+            # Package.Scope='user' the wrapper must opt into --scope user and
+            # MUST NOT pass --scope machine (which causes winget to fail with
+            # -1978335212 APPINSTALLER_CLI_ERROR_NO_APPLICABLE_INSTALLER).
+            $script:installArgs = $null
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget {
+                if ($args[0] -eq 'list') { $global:LASTEXITCODE = 1; return '' }
+                $script:installArgs = $args
+                $global:LASTEXITCODE = 0
+                return 'Installed.'
+            }
+
+            $pkg = [Package]@{ Name='Test'; Installer='winget'; Id='Test.Id'; Scope='user' }
+            $r = & $script:Engine -Package $pkg
+            $r.State | Should -Be 'Installed'
+
+            # Find the --scope flag and assert its value.
+            $scopeIdx = [Array]::IndexOf([object[]]$script:installArgs, '--scope')
+            $scopeIdx | Should -BeGreaterThan -1
+            $script:installArgs[$scopeIdx + 1] | Should -Be 'user'
+            # Belt and suspenders: 'machine' must not appear anywhere in argv.
+            $script:installArgs | Should -Not -Contain 'machine'
+        }
+
         It 'does not stop retries as permanent for exit -1978334972 (missing dependency)' {
             # -1978334972 = APPINSTALLER_CLI_ERROR_INSTALL_MISSING_DEPENDENCY.
             # Retrying won't recover, so we treat it as permanent (no retry loop).
