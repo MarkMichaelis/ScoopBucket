@@ -55,6 +55,15 @@ Describe 'ClientBasePackages: Todoist CLI co-located with Todoist desktop' -Tag 
         @($cli.DependsOn)       | Should -Be @('Todoist')
     }
 
+    It 'declares Scope=user (Sachaos.Todoist winget manifest has no machine-scope installer) (#213)' {
+        # Regression guard: without Scope=user, Install-WingetPackage defaults to
+        # --scope machine and winget hard-fails with exit -1978335212
+        # (APPINSTALLER_CLI_ERROR_NO_APPLICABLE_INSTALLER) because the
+        # sachaos/todoist manifest only publishes a user-scope portable .exe.
+        $cli = @($script:pkgs | Where-Object Name -EQ 'Todoist CLI')[0]
+        $cli.Scope | Should -Be 'user'
+    }
+
     It 'Bitwarden desktop declares Companions=@(Bitwarden CLI) (auto-install CLI with app)' {
         $desktop = @($script:pkgs | Where-Object Name -EQ 'Bitwarden')[0]
         @($desktop.Companions) | Should -Contain 'Bitwarden CLI'
