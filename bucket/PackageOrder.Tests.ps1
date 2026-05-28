@@ -17,12 +17,13 @@ BeforeAll {
     . $script:resolvePath
 
     function New-Pkg {
-        param([string]$Name, [string[]]$DependsOn = @())
+        param([string]$Name, [string[]]$DependsOn = @(), [string[]]$Companions = @())
         [Package]@{
             Name = $Name
             Installer = 'scoop'
             Id = "main/$Name"
             DependsOn = $DependsOn
+            Companions = $Companions
         }
     }
 }
@@ -123,6 +124,55 @@ Describe 'Resolve-PackageOrder — error cases' -Tag 'Light', 'Module' {
             (New-Pkg 'b' -DependsOn 'a')
         )
         { Resolve-PackageOrder -Packages $pkgs } |
+            Should -Throw -ExpectedMessage "*cycle or unresolved*"
+    }
+}
+
+Describe 'Resolve-PackageOrder -- Companions' -Tag 'Light', 'Module' {
+    It 'pulls in a companion when the owner is requested by name and schedules owner first' {
+        $pkgs = @(
+            (New-Pkg 'A' -Companions @('B')),
+            (New-Pkg 'B')
+        )
+        $result = Resolve-PackageOrder -Packages $pkgs -Name 'A'
+        ($result | ForEach-Object Name) -join ',' | Should -Be 'A,B'
+    }
+
+    It 'pulls in a companion transitively' {
+        $pkgs = @(
+            (New-Pkg 'A' -Companions @('B')),
+            (New-Pkg 'B' -Companions @('C')),
+            (New-Pkg 'C'),
+            (New-Pkg 'unrelated')
+        )
+        $result = Resolve-PackageOrder -Packages $pkgs -Name 'A'
+        ($result | ForEach-Object Name) -join ',' | Should -Be 'A,B,C'
+    }
+
+    It 'still includes the companion when the requested name is the owner of a DependsOn chain' {
+        # bitwarden has Companions=@(bw); bw DependsOn bitwarden. Request bitwarden.
+        $pkgs = @(
+            (New-Pkg 'bitwarden' -Companions @('bw')),
+            (New-Pkg 'bw' -DependsOn @('bitwarden'))
+        )
+        $result = Resolve-PackageOrder -Packages $pkgs -Name 'bitwarden'
+        ($result | ForEach-Object Name) -join ',' | Should -Be 'bitwarden,bw'
+    }
+
+    It 'rejects Companions references to undefined packages' {
+        $pkgs = @(
+            (New-Pkg 'A' -Companions @('ghost'))
+        )
+        { Resolve-PackageOrder -Packages $pkgs } |
+            Should -Throw -ExpectedMessage "*Companions 'ghost'*not defined*"
+    }
+
+    It 'detects Companions-only cycles' {
+        $pkgs = @(
+            (New-Pkg 'A' -Companions @('B')),
+            (New-Pkg 'B' -Companions @('A'))
+        )
+        { Resolve-PackageOrder -Packages $pkgs -Name 'A' } |
             Should -Throw -ExpectedMessage "*cycle or unresolved*"
     }
 }

@@ -266,6 +266,30 @@ Describe 'Package.Validate() — invariants' -Tag 'Light', 'Module' {
         }
         { $p.Validate() } | Should -Throw -ExpectedMessage '*cannot reference itself*'
     }
+
+    It 'rejects self-referential Companions' {
+        $p = [Package]@{
+            Name       = 'x'
+            Installer  = 'scoop'
+            Id         = 'main/x'
+            Companions = @('x')
+        }
+        { $p.Validate() } | Should -Throw -ExpectedMessage '*Companions cannot reference itself*'
+    }
+}
+
+Describe 'Package.Companions field' -Tag 'Light', 'Module' {
+    It 'defaults to an empty array' {
+        $p = [Package]@{ Name = 'demo'; Installer = 'scoop'; Id = 'main/demo' }
+        ,$p.Companions | Should -BeOfType ([string[]])
+        $p.Companions.Count | Should -Be 0
+    }
+
+    It 'accepts a non-empty Companions list at cast time' {
+        $p = [Package]@{ Name = 'A'; Installer = 'winget'; Id = 'X.A'; Companions = @('B') }
+        $p.Companions | Should -Be @('B')
+        { $p.Validate() } | Should -Not -Throw
+    }
 }
 
 Describe 'Package.ToString()' -Tag 'Light', 'Module' {
