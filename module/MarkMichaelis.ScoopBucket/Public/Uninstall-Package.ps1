@@ -186,6 +186,7 @@ function ConvertTo-PackageFromMetadata {
         CliCommands = @($Metadata.CliCommands)
         Completion  = if ($Metadata.PSObject.Properties['Completion']) { [string]$Metadata.Completion } else { 'none' }
         DependsOn   = @($Metadata.DependsOn)
+        Companions  = if ($Metadata.PSObject.Properties['Companions']) { @($Metadata.Companions) } else { @() }
         CISkip      = if ($Metadata.PSObject.Properties['CISkip']) { [string]$Metadata.CISkip } else { '' }
         Notes       = if ($Metadata.PSObject.Properties['Notes']) { [string]$Metadata.Notes } else { '' }
     }

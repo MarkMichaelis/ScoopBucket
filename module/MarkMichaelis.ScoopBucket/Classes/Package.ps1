@@ -54,6 +54,20 @@ class Package {
 
     [string[]] $DependsOn = @()
 
+    # Forward-link to "always install together" companion packages in the
+    # same bundle. Symmetric with DependsOn but the *other* direction:
+    #
+    #   A.Companions = @('B')   means
+    #     install A  -> also install B (B scheduled AFTER A; implicit
+    #                                   ordering edge in Resolve-PackageOrder)
+    #     uninstall A -> also uninstall B (B removed BEFORE A)
+    #
+    # Cascade is restricted to the explicit Companions list so that
+    # uninstalling a foundational package (e.g. '.NET SDK') does NOT
+    # auto-yank every reverse-DependsOn (which would be too aggressive).
+    # Same-bundle only for v1 (mirrors the DependsOn constraint).
+    [string[]] $Companions = @()
+
     [string]   $CISkip = ''
 
     [string]   $Notes = ''
@@ -129,6 +143,10 @@ class Package {
 
         if ($this.DependsOn -contains $this.Name) {
             throw "Package '$($this.Name)': DependsOn cannot reference itself."
+        }
+
+        if ($this.Companions -contains $this.Name) {
+            throw "Package '$($this.Name)': Companions cannot reference itself."
         }
     }
 

@@ -42,9 +42,35 @@ function Resolve-PackageOrder {
                 throw "Resolve-PackageOrder: Package '$($p.Name)' DependsOn '$dep' which is not defined in this bundle."
             }
         }
+        foreach ($comp in $p.Companions) {
+            if (-not $byName.ContainsKey($comp)) {
+                throw "Resolve-PackageOrder: Package '$($p.Name)' Companions '$comp' which is not defined in this bundle."
+            }
+        }
     }
 
-    # Selective install: compute transitive DependsOn closure of -Name.
+    # Build an effective-DependsOn map combining declared DependsOn with
+    # implicit ordering edges from Companions (companion DependsOn owner).
+    # These edges live ONLY in the resolver's working graph; the [Package]
+    # instances themselves are never mutated.
+    $effectiveDeps = @{}
+    foreach ($p in $Packages) {
+        $set = [System.Collections.Generic.HashSet[string]]::new(
+            [string[]]@($p.DependsOn),
+            [System.StringComparer]::OrdinalIgnoreCase
+        )
+        $effectiveDeps[$p.Name] = $set
+    }
+    foreach ($p in $Packages) {
+        foreach ($comp in $p.Companions) {
+            # Companion gets an implicit DependsOn -> owner so Kahn
+            # schedules the owner first and the companion after.
+            [void]$effectiveDeps[$comp].Add($p.Name)
+        }
+    }
+
+    # Selective install: compute transitive closure of -Name across BOTH
+    # DependsOn (needed prerequisites) and Companions (always-with).
     if ($Name) {
         $wanted = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         $queue = [System.Collections.Generic.Queue[string]]::new()
@@ -59,6 +85,9 @@ function Resolve-PackageOrder {
             if (-not $wanted.Add($cur)) { continue }
             foreach ($dep in $byName[$cur].DependsOn) {
                 [void]$queue.Enqueue($dep)
+            }
+            foreach ($comp in $byName[$cur].Companions) {
+                [void]$queue.Enqueue($comp)
             }
         }
         $filtered = @($Packages | Where-Object { $wanted.Contains($_.Name) })
@@ -76,6 +105,7 @@ function Resolve-PackageOrder {
     }
 
     # Kahn's algorithm with deterministic tie-break by original index.
+    # Uses $effectiveDeps so Companions ordering edges participate.
     $remaining = [System.Collections.Generic.HashSet[string]]::new(
         [string[]]@($filtered | ForEach-Object { $_.Name }),
         [System.StringComparer]::OrdinalIgnoreCase
@@ -85,8 +115,9 @@ function Resolve-PackageOrder {
     while ($remaining.Count -gt 0) {
         $ready = @($filtered |
             Where-Object {
-                $remaining.Contains($_.Name) -and
-                -not ($_.DependsOn | Where-Object { $remaining.Contains($_) })
+                $name = $_.Name
+                $remaining.Contains($name) -and
+                -not ($effectiveDeps[$name] | Where-Object { $remaining.Contains($_) })
             } |
             Sort-Object { $index[$_.Name] })
 

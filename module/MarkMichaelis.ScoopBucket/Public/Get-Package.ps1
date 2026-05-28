@@ -37,7 +37,7 @@ function Get-Package {
 
     .OUTPUTS
         PSCustomObject[] with Bundle, Name, Installer, Id, Source, Scope,
-        CliCommands, Completion, DependsOn, CISkip, Notes, WingetExtraArgs.
+        CliCommands, Completion, DependsOn, Companions, CISkip, Notes, WingetExtraArgs.
 
     .EXAMPLE
         Get-Package -Installer scoop
@@ -101,6 +101,7 @@ function Get-Package {
                 ExpectedCompletions = $expected
                 NativeCommandOutputs = $nativeOutputs
                 DependsOn   = @($p.DependsOn)
+                Companions  = @($p.Companions)
                 CISkip      = $p.CISkip
                 Notes       = $p.Notes
                 WingetExtraArgs = @($p.WingetExtraArgs)

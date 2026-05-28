@@ -103,6 +103,7 @@ function global:Invoke-PackageInstall {
             ExpectedCompletions = `$p.ExpectedCompletions
             NativeCommandOutputs = `$nativeOutputs
             DependsOn   = @(`$p.DependsOn)
+            Companions  = @(`$p.Companions)
             CISkip      = `$p.CISkip
             Notes       = `$p.Notes
             WingetExtraArgs = @(`$p.WingetExtraArgs)
