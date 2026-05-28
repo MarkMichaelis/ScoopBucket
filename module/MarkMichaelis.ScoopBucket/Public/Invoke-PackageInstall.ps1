@@ -238,6 +238,22 @@ function Invoke-PackageInstall {
             foreach ($cli in $pkg.CliCommands) {
                 $registerArgs = @{ Cli = $cli; Mode = $pkg.Completion }
                 if ($pkg.NativeCommandScript) { $registerArgs['NativeCommand'] = $pkg.NativeCommandScript }
+                # Prefer the loader's pre-captured native completer text
+                # (NativeCommandOutputs[$cli]) when present -- avoids
+                # re-running the CLI's `<cli> completions powershell`
+                # subprocess inside Register-PackageCompletion (#212).
+                if ($pkg.PSObject.Properties.Name -contains 'NativeCommandOutputs' -and $pkg.NativeCommandOutputs) {
+                    $no = $pkg.NativeCommandOutputs
+                    $preCaptured = $null
+                    if ($no -is [hashtable] -and $no.ContainsKey($cli)) {
+                        $preCaptured = [string]$no[$cli]
+                    } elseif ($no.PSObject -and ($no.PSObject.Properties.Name -contains $cli)) {
+                        $preCaptured = [string]$no.$cli
+                    }
+                    if ($preCaptured -and $preCaptured.Trim()) {
+                        $registerArgs['PreCapturedNative'] = $preCaptured
+                    }
+                }
                 try {
                     $null = Register-PackageCompletion @registerArgs
                 } catch {
