@@ -74,6 +74,29 @@ function Invoke-PackageUninstall {
     } else { $Packages }
     $filtered = @($filtered)
 
+    # Order matters: companions and DependsOn-dependents must be
+    # uninstalled BEFORE their owners/prerequisites so DependsOn
+    # invariants are respected during teardown. Compute the install
+    # order over the full bundle (so cross-cutting Companions / DependsOn
+    # ordering edges are respected) and reverse the subset we're
+    # actually going to uninstall.
+    try {
+        $installOrder = Resolve-PackageOrder -Packages $Packages
+        $filteredSet  = [System.Collections.Generic.HashSet[string]]::new(
+            [string[]]@($filtered | ForEach-Object { $_.Name }),
+            [System.StringComparer]::OrdinalIgnoreCase
+        )
+        $orderedSubset = @($installOrder | Where-Object { $filteredSet.Contains($_.Name) })
+        [array]::Reverse($orderedSubset)
+        $filtered = $orderedSubset
+    } catch {
+        # Cycle or unresolved reference -- fall back to declaration
+        # order; Resolve-PackageOrder's full-collection sort is best-
+        # effort here. The driver-level Validate() above will have
+        # rejected truly broken inputs.
+        Write-Verbose "Invoke-PackageUninstall: Resolve-PackageOrder failed ($($_.Exception.Message)); falling back to declaration order."
+    }
+
     Write-Host ""
     Write-Host "=== Invoke-PackageUninstall: $Bundle ($($filtered.Count) packages) ==="
 
