@@ -58,12 +58,15 @@ Describe 'CliCompletion pinned contract -- per-bundle native registration' -Tag 
         @($pkg.ExpectedCompletions[$Cli]).Count | Should -BeGreaterThan 0 -Because "ExpectedCompletions['$Cli'] must list at least one expected subcommand"
     }
 
-    It 'uses sentinel version v1' {
+    It 'uses sentinel version v2' {
         # $script:CompletionSentinelVersion lives inside the module and is not
         # visible from this test runspace; assert against the source instead so
         # any bump of the sentinel format requires updating this guard too.
+        # v2 (#212) wraps the cached completer payload in
+        # Register-EngineEvent PowerShell.OnIdle -MaxTriggerCount 1 -Action
+        # so startup defers registration until the first idle tick.
         $src = Get-Content -Raw -Path (Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\Private\Register-PackageCompletion.ps1')
-        $src | Should -Match "(?m)^\s*\`$script:CompletionSentinelVersion\s*=\s*'v1'\s*$" -Because 'Register-PackageCompletion.ps1 must pin sentinel version v1'
+        $src | Should -Match "(?m)^\s*\`$script:CompletionSentinelVersion\s*=\s*'v2'\s*$" -Because 'Register-PackageCompletion.ps1 must pin sentinel version v2'
     }
 
     It 'Register-CliCompletion exposes the -NativeCommand parameter' {

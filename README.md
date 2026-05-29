@@ -428,9 +428,13 @@ Behavior:
   scriptblock (owned by the install script) → `PSCompletions`
   (`abgox/PSCompletions`) fallback → skipped with a reason.
 - All registrations are written as sentinel-delimited blocks
-  (`# ScoopBucket:CliCompletion:<cli>:BEGIN v1 … :END`) inside
-  `$PROFILE.AllUsersAllHosts`. Two runs with `-Force` produce a
-  byte-identical profile.
+  (`# ScoopBucket:CliCompletion:<cli>:BEGIN v2 … :END`) inside
+  `$PROFILE.AllUsersAllHosts`. The v2 block wraps the cached
+  completer payload in
+  `Register-EngineEvent PowerShell.OnIdle -MaxTriggerCount 1 -Action {...}`
+  so shell startup pays no subprocess cost — registration runs on
+  the first idle tick after the prompt is drawn (#212). Two runs
+  with `-Force` produce a byte-identical profile.
 - `-Force` is opt-in for ad-hoc invocations (defaults to gap-fill
   only); the bundle installers pass `-Force` explicitly so reinstalls
   always refresh blocks.
