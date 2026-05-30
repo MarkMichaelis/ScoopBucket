@@ -206,11 +206,12 @@ function Resolve-PackageCompletionSource {
 
     if ($NativeCommand -and -not $PreferPSCompletions) {
         $native = $null
+        $nativeError = $null
         # Pass $Cli so multi-CLI packages (e.g. Sysinternals Suite) can emit
         # a per-CLI Register-ArgumentCompleter from a single shared
         # NativeCommandScript. Existing paramless scriptblocks (gh, rg, bw,
         # gcloud) simply ignore the extra argument.
-        try { $native = & $NativeCommand $Cli 2>$null | Out-String } catch { }
+        try { $native = & $NativeCommand $Cli 2>$null | Out-String } catch { $nativeError = $_.Exception.Message }
         if ($native -and $native.Trim()) {
             $guarded = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n$native}"
             # NativePayload is the RAW completer text (may start with
@@ -220,13 +221,32 @@ function Resolve-PackageCompletionSource {
             # Import-PackageCompletion's synchronous execution path.
             return @{ Source = 'Native'; Code = $guarded; PSCompletionsName = $null; NativePayload = $native }
         }
+        # Native path was attempted but produced no usable completer.
+        # Surface the actual failure mode (empty output vs. thrown
+        # exception) instead of blaming PSCompletions removal -- now
+        # that the PSCompletions fallback is gone, this IS the failure.
+        $reason = if ($nativeError) {
+            "NativeCommandScript for '$Cli' threw: $nativeError. No PSCompletions fallback (#241); fix the script or set Completion='none'."
+        } else {
+            "NativeCommandScript for '$Cli' produced no output. No PSCompletions fallback (#241); fix the script or set Completion='none'."
+        }
+        return @{
+            Source = 'Skipped'
+            Code = $null
+            PSCompletionsName = $null
+            Reason = $reason
+        }
     }
 
     return @{
         Source = 'Skipped'
         Code = $null
         PSCompletionsName = $null
-        Reason = 'PSCompletions integration removed (#241); use Completion=auto with a NativeCommandScript instead.'
+        Reason = if ($PreferPSCompletions) {
+            "PSCompletions integration removed (#241); '$Cli' was declared Completion='pscompletions' but the resolver no longer has a PSCompletions branch. Migrate to Completion='auto' with a NativeCommandScript."
+        } else {
+            "No NativeCommandScript supplied for '$Cli' and PSCompletions fallback was removed (#241). Migrate to Completion='auto' with a NativeCommandScript or set Completion='none'."
+        }
     }
 }
 
