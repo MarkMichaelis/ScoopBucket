@@ -195,6 +195,16 @@ function Resolve-PackageCompletionSource {
         [switch]$PreferPSCompletions
     )
 
+    # The PSCompletions branch below emits Write-Warning on `psc add`
+    # failures. Callers that pass -WarningAction Stop or set
+    # $WarningPreference='Stop' would otherwise turn those warnings
+    # into terminating exceptions, short-circuiting the try/catch and
+    # dropping us into the bottom Skipped return WITHOUT a Reason
+    # (which regresses the new diagnostic). Force non-terminating
+    # warnings for the duration of this function -- same pattern as
+    # Invoke-PscCatalogUpdate.
+    $WarningPreference = 'Continue'
+
     if ($NativeCommand -and -not $PreferPSCompletions) {
         $native = $null
         # Pass $Cli so multi-CLI packages (e.g. Sysinternals Suite) can emit
@@ -260,8 +270,14 @@ function Resolve-PackageCompletionSource {
                         # plain `2>&1 | Out-Null` would still leak it.
                         & psc add $Cli *>&1 | Out-Null
                     } catch {
+                        # Capture the failure but defer the Write-Warning
+                        # until AFTER the re-check, so success-after-throw
+                        # (rare but possible if `psc add` partially
+                        # populated the catalog before throwing) does not
+                        # surface a misleading warning, and conversely a
+                        # genuine failure produces exactly one warning
+                        # rather than two.
                         $addFailureReason = $_.Exception.Message
-                        Write-Warning "psc add ${Cli} threw: $addFailureReason"
                     }
                     $listOutput = & psc list 2>$null | Out-String
                     $hasEntry   = $listOutput -match $pattern

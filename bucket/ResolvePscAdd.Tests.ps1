@@ -95,20 +95,21 @@ Describe 'Resolve-PackageCompletionSource auto psc add (issue #226)' -Tag 'Light
         $script:fakePscModule.SessionState.PSVariable.Set('PscAddSucceeds', $false)
         $script:fakePscModule.SessionState.PSVariable.Set('PscAddThrows',   $true)
 
-        $warnings = $null
-        $result = InModuleScope MarkMichaelis.ScoopBucket {
-            Resolve-PackageCompletionSource -Cli 'unobtainium' -PreferPSCompletions -WarningVariable w -WarningAction SilentlyContinue
-            $script:CapturedW = $w
+        # Single invocation: capture both result and warnings together
+        # so PscAddCalls reflects exactly one resolver call (no doubled
+        # side effects) and so the result/warnings asserted are the
+        # same ones produced by that call (no risk of masking a
+        # regression on the first invocation).
+        $captured = InModuleScope MarkMichaelis.ScoopBucket {
+            $r = Resolve-PackageCompletionSource -Cli 'unobtainium' -PreferPSCompletions -WarningVariable w -WarningAction SilentlyContinue
+            [pscustomobject]@{ Result = $r; Warnings = $w }
         }
-        $warnings = InModuleScope MarkMichaelis.ScoopBucket { $script:CapturedW }
-        $result   = InModuleScope MarkMichaelis.ScoopBucket {
-            Resolve-PackageCompletionSource -Cli 'unobtainium' -PreferPSCompletions -WarningAction SilentlyContinue
-        }
+        $result   = $captured.Result
+        $warnings = @($captured.Warnings)
 
         $result.Source | Should -Be 'Skipped'
         $result.Reason | Should -Match 'psc add'
-        $script:fakePscModule.SessionState.PSVariable.GetValue('PscAddCalls') | Should -BeGreaterOrEqual 1
-        $warnings = @($warnings)
+        $script:fakePscModule.SessionState.PSVariable.GetValue('PscAddCalls') | Should -Be 1
         $warnings.Count | Should -BeGreaterOrEqual 1
         ($warnings | ForEach-Object { [string]$_ }) -join "`n" | Should -Match 'psc add'
     }
@@ -129,5 +130,39 @@ Describe 'Resolve-PackageCompletionSource auto psc add (issue #226)' -Tag 'Light
         } 6>&1 | Out-String
 
         $captured | Should -Not -Match ([regex]::Escape($banner))
+    }
+
+    It 'T5: emits exactly one Write-Warning when psc add fails (no duplicate noise)' {
+        $script:fakePscModule.SessionState.PSVariable.Set('PscAddSucceeds', $false)
+        $script:fakePscModule.SessionState.PSVariable.Set('PscAddThrows',   $true)
+
+        $warnings = InModuleScope MarkMichaelis.ScoopBucket {
+            $null = Resolve-PackageCompletionSource -Cli 'unobtainium-once' -PreferPSCompletions -WarningVariable w -WarningAction SilentlyContinue
+            $w
+        }
+        @($warnings).Count | Should -Be 1
+    }
+
+    It 'T6: does not propagate when caller sets -WarningAction Stop ($WarningPreference=Stop)' {
+        # If the resolver did not pin its own $WarningPreference to
+        # 'Continue', a caller passing -WarningAction Stop would turn
+        # the inner Write-Warning into a terminating exception that
+        # short-circuits the function and drops to the bottom Skipped
+        # return WITHOUT a Reason -- regressing the new diagnostic.
+        $script:fakePscModule.SessionState.PSVariable.Set('PscAddSucceeds', $false)
+        $script:fakePscModule.SessionState.PSVariable.Set('PscAddThrows',   $true)
+
+        $threw = $false
+        $result = $null
+        try {
+            $result = InModuleScope MarkMichaelis.ScoopBucket {
+                Resolve-PackageCompletionSource -Cli 'unobtainium-stop' -PreferPSCompletions -WarningAction Stop
+            }
+        } catch {
+            $threw = $true
+        }
+        $threw          | Should -BeFalse
+        $result.Source  | Should -Be 'Skipped'
+        $result.Reason  | Should -Match 'psc add'
     }
 }
