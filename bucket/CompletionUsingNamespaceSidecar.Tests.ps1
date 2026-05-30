@@ -155,6 +155,43 @@ Describe 'Remove-PackageCompletionBlock: deletes the sidecar .ps1 alongside the 
         if (Test-Path $script:sandbox2) { Remove-Item -Recurse -Force $script:sandbox2 -ErrorAction SilentlyContinue }
     }
 
+    It 'public Register-CliCompletion also routes Native payloads through the sidecar (#218 Copilot review)' {
+        # Regression: the legacy public path `Register-CliCompletion`
+        # (called e.g. from bucket/GitConfigure.ps1) was still using the
+        # v1 inline writer, so a manual call with a `using namespace`
+        # payload would re-introduce the parse error. The fix routes
+        # Native sources through the same sidecar logic as
+        # Register-PackageCompletion.
+        $cliProfile = Join-Path $script:sandbox2 'ProfileCli.ps1'
+        $cliSidecar = Join-Path $script:sandbox2 'completions-cli'
+        $payload = @'
+using namespace System.Management.Automation
+Register-ArgumentCompleter -Native -CommandName demoCliUns -ScriptBlock {
+    param($w,$c,$p)
+    @([CompletionResult]::new('x','x',[CompletionResultType]::ParameterValue,'x'))
+}
+'@
+        $nc = [scriptblock]::Create("Write-Output @'`r`n$payload`r`n'@")
+        Register-CliCompletion -Cli demoCliUns -NativeCommand $nc -Force `
+            -ProfilePath $cliProfile -SidecarDirectory $cliSidecar -Confirm:$false | Out-Null
+
+        $sidecar = Join-Path $cliSidecar 'demoCliUns.ps1'
+        Test-Path $sidecar | Should -BeTrue -Because 'Register-CliCompletion must persist Native payload to a sidecar (#218)'
+        $sideRaw = Get-Content -Raw -Path $sidecar
+        $firstNonEmpty = ($sideRaw -split "`r?`n") | Where-Object { $_.Trim() } | Select-Object -First 1
+        $firstNonEmpty | Should -Match '^\s*using\s+namespace\s+System\.Management\.Automation\s*$'
+
+        $raw = Get-Content -Raw -Path $cliProfile
+        $raw | Should -Not -Match '(?m)^\s*using\s+namespace\b' -Because 'inline `using namespace` would be a fatal parse error in the profile'
+        $escSidecar = [regex]::Escape($sidecar)
+        $raw | Should -Match "(?m)\.\s+'$escSidecar'" -Because 'profile block must dot-source the sidecar'
+
+        # Parse the generated profile -- must succeed with no errors.
+        $errs = $null
+        $null = [System.Management.Automation.Language.Parser]::ParseFile($cliProfile, [ref]$null, [ref]$errs)
+        $errs | Should -BeNullOrEmpty -Because "Register-CliCompletion output must parse cleanly; got: $($errs -join '; ')"
+    }
+
     It 'deletes <cli>.ps1 when Remove-PackageCompletionBlock strips the block' {
         $profilePath = $script:profilePath2
         $sidecarDir  = $script:sidecarDir2
