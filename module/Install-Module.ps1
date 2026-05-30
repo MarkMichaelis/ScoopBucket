@@ -1,13 +1,11 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [switch]$Force,
-    # By default the installer also adds a sentinel-bracketed
-    # `Import-Module MarkMichaelis.ScoopBucket` block to
-    # $PROFILE.CurrentUserAllHosts so argument-completer registration
-    # runs before the FIRST Tab keypress of a fresh session (PowerShell
-    # registers completers only when a module is fully loaded, which
-    # the first tab itself can't accomplish if it's also the trigger
-    # for auto-load). Pass -SkipProfile to suppress this.
+    # By default the installer also adds a sentinel-bracketed lazy-import
+    # stub block (v2) to $PROFILE.CurrentUserAllHosts so the
+    # `Install-Package -Name <Tab>` argument completer fires on the
+    # first keystroke without paying the ~1 s `Import-Module` cost on
+    # every shell start. Pass -SkipProfile to suppress this.
     [switch]$SkipProfile
 )
 
@@ -17,8 +15,9 @@ param(
     PSModulePath so `Import-Module MarkMichaelis.ScoopBucket` (and
     auto-loading of `Install-Package`, `Get-Package`,
     `Invoke-PackageInstall`) works from any PowerShell session on this
-    machine. Also pre-imports the module from $PROFILE so Tab
-    completion for `-Name` works on the very first keystroke.
+    machine. Also writes a lazy-import stub block to $PROFILE so
+    Tab completion for `-Name` works on the very first keystroke
+    without eagerly loading the module on every shell start.
 
 .DESCRIPTION
     Creates a junction (no admin required for user-scope module paths)
@@ -27,20 +26,24 @@ param(
     is idempotent; pass -Force to replace an existing entry (file, real
     directory, or stale junction).
 
-    Additionally, unless -SkipProfile is passed, writes an idempotent,
-    sentinel-bracketed `Import-Module MarkMichaelis.ScoopBucket` line
-    into $PROFILE.CurrentUserAllHosts. This guarantees argument
-    completers are registered before the first Tab keypress of a fresh
-    session — PowerShell can auto-load the module on demand, but the
-    completer the module registers at load time isn't visible to the
-    same Tab call that triggered the load, so the *first* Tab in a
-    fresh session would otherwise return nothing.
+    Additionally, unless -SkipProfile is passed, writes (or migrates)
+    an idempotent, sentinel-bracketed lazy-import stub (v2) into
+    $PROFILE.CurrentUserAllHosts. The stub registers a single argument
+    completer for Install/Get/Uninstall-Package -Name; the actual
+    Import-Module is deferred until the first Tab keypress. Cmdlet
+    invocations (Install-Package etc.) auto-load the module via
+    PSModulePath.
+
+    Profile-block emission is delegated to the sibling helper
+    Add-ScoopBucketProfileBlock.ps1 so the test suite can target a
+    temp profile without running the junction step.
 
 .NOTES
     PowerShell auto-imports modules located on $env:PSModulePath the first
-    time one of their exported functions is referenced, so once installed
-    you can use the helpers without an explicit Import-Module — but
-    Tab-completion of `-Name` needs the module loaded up front.
+    time one of their exported functions is referenced. Tab completion
+    of `-Name` does NOT trigger auto-load early enough for the same
+    Tab call to see the module's argument completer, which is why the
+    stub block is needed at profile-load time.
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -100,55 +103,17 @@ if ($script:JunctionCreated) {
 
 if ($SkipProfile) { return }
 
-# Append an idempotent, sentinel-bracketed Import-Module to
-# $PROFILE.CurrentUserAllHosts so the module's argument completers are
-# wired up before the first Tab keystroke of a fresh session.
-$profilePath = $PROFILE.CurrentUserAllHosts
-$beginMarker = '# MarkMichaelis.ScoopBucket:Import:BEGIN'
-$endMarker   = '# MarkMichaelis.ScoopBucket:Import:END'
-$block = @"
-
-$beginMarker
-# Auto-loads the module so Tab completion for Install-Package / Get-Package
-# -Name works on the first keystroke. Remove this block (or re-run
-# Install-Module.ps1 -SkipProfile) to opt out.
-if (-not (Get-Module -Name MarkMichaelis.ScoopBucket)) {
-    Import-Module MarkMichaelis.ScoopBucket -ErrorAction SilentlyContinue
+# Delegate to Add-ScoopBucketProfileBlock.ps1 so the v2 lazy-import
+# stub emission is shared with the test suite (which calls the helper
+# directly with -ProfilePath against a temp file).
+$helper = Join-Path $PSScriptRoot 'Add-ScoopBucketProfileBlock.ps1'
+if (-not (Test-Path -LiteralPath $helper)) {
+    throw "Profile-block helper not found: $helper"
 }
-$endMarker
-"@
-
-if (-not (Test-Path -LiteralPath $profilePath)) {
-    if ($PSCmdlet.ShouldProcess($profilePath, 'Create profile')) {
-        $profileDir = Split-Path -Parent $profilePath
-        if (-not (Test-Path -LiteralPath $profileDir)) {
-            New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
-        }
-        Set-Content -LiteralPath $profilePath -Value $block -Encoding UTF8
-        Write-Host "Created $profilePath with MarkMichaelis.ScoopBucket import block."
-    }
-    return
+$helperArgs = @{
+    ProfilePath = $PROFILE.CurrentUserAllHosts
+    Verbose     = $VerbosePreference -eq 'Continue'
 }
-
-$current = Get-Content -Raw -LiteralPath $profilePath -ErrorAction SilentlyContinue
-if ($null -eq $current) { $current = '' }
-
-if ($current -match [regex]::Escape($beginMarker)) {
-    # Replace the existing block in-place so updates to the snippet
-    # land on a re-install without duplicating.
-    $pattern = "(?s)" + [regex]::Escape($beginMarker) + ".*?" + [regex]::Escape($endMarker)
-    $updated = [regex]::Replace($current, $pattern, ($block.Trim()))
-    if ($updated -ne $current) {
-        if ($PSCmdlet.ShouldProcess($profilePath, 'Update MarkMichaelis.ScoopBucket import block')) {
-            Set-Content -LiteralPath $profilePath -Value $updated -Encoding UTF8
-            Write-Host "Updated MarkMichaelis.ScoopBucket import block in $profilePath."
-        }
-    } else {
-        Write-Host "MarkMichaelis.ScoopBucket import block already up to date in $profilePath."
-    }
-} else {
-    if ($PSCmdlet.ShouldProcess($profilePath, 'Append MarkMichaelis.ScoopBucket import block')) {
-        Add-Content -LiteralPath $profilePath -Value $block -Encoding UTF8
-        Write-Host "Appended MarkMichaelis.ScoopBucket import block to $profilePath."
-    }
-}
+if ($PSBoundParameters.ContainsKey('WhatIf')) { $helperArgs['WhatIf'] = $WhatIfPreference }
+& $helper @helperArgs
+Write-Verbose "Wrote MarkMichaelis.ScoopBucket lazy-import (v2) block to $($PROFILE.CurrentUserAllHosts)."
