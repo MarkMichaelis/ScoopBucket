@@ -30,7 +30,7 @@ Register-ArgumentCompleter -Native -CommandName 7z -ScriptBlock {
     param(`$wordToComplete, `$commandAst, `$cursorPosition)
     @(
         'a','b','d','e','h','i','l','rn','t','u','x',
-        '-y','-r','-p','-o','-mx','-mx0','-mx1','-mx3','-mx5','-mx7','-mx9',
+        '-y','-r','-p','-o','-mx','-mx0','-mx1','-mx2','-mx3','-mx4','-mx5','-mx6','-mx7','-mx8','-mx9',
         '-t7z','-tzip','-tgzip','-tbzip2','-ttar','-txz','-twim','-tiso',
         '-aoa','-aos','-aou','-aot','-bd','-bb','-bso','-bse','-bsp',
         '-sdel','-sfx','-si','-so','-spd','-spe','-spf','-ssc','-ssw',
