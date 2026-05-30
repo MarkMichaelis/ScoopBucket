@@ -559,7 +559,18 @@ function Resolve-CliCompletionSource {
         try { $native = & $NativeCommand 2>$null | Out-String } catch { }
         if ($native -and $native.Trim()) {
             $guarded = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n$native}"
-            return @{ Source = 'Native'; Code = $guarded; PSCompletionsName = $null }
+            # NativePayload (v3, #216): raw native completer text preserved
+            # so callers can persist it to a sidecar `.ps1`. Sidecar files
+            # are the only place a leading `using namespace ...` (clap/Rust
+            # generators) parses legally; the legacy inlined $guarded form
+            # is retained only as a fallback for legacy callers that have
+            # not opted into sidecars.
+            return @{
+                Source            = 'Native'
+                Code              = $guarded
+                NativePayload     = $native
+                PSCompletionsName = $null
+            }
         }
     }
 
@@ -708,7 +719,8 @@ function Register-CliCompletion {
         [Parameter(Mandatory)][string]$Cli,
         [scriptblock]$NativeCommand,
         [switch]$Force,
-        [string]$ProfilePath
+        [string]$ProfilePath,
+        [string]$SidecarDirectory
     )
 
     $target = Get-CompletionProfilePath -OverridePath $ProfilePath
@@ -783,7 +795,23 @@ function Register-CliCompletion {
         }
     }
 
-    $newContent = Set-CompletionProfileBlock -Content $content -Cli $Cli -Block $resolved.Code -Force:$true
+    # v3 (#216): for Native sources, persist the raw payload to a sidecar
+    # `<cli>.ps1` and emit a tiny dot-source wrapper instead of inlining
+    # the payload in the profile. `.ps1` files are the only place a
+    # leading `using namespace ...` parses legally; inlining that text
+    # inside an `if {}` block in the profile is a fatal parse error
+    # (e.g. `rg --generate complete-powershell` payloads, #216).
+    $blockCode = $resolved.Code
+    if ($resolved.Source -eq 'Native' -and $resolved.NativePayload) {
+        $sidecarDir  = Get-PackageCompletionSidecarDirectory -ProfilePath $target -OverrideDirectory $SidecarDirectory
+        $sidecarPath = Write-PackageCompletionSidecar -Cli $Cli -Payload $resolved.NativePayload -Directory $sidecarDir
+        # Escape any embedded apostrophes for the single-quoted dot-source
+        # path (PowerShell single-quote strings escape `'` as `''`). Real
+        # install paths can contain apostrophes (e.g. "C:\Users\O'Brien").
+        $escapedPath = $sidecarPath -replace "'", "''"
+        $blockCode = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n    . '$escapedPath'`r`n}"
+    }
+    $newContent = Set-CompletionProfileBlock -Content $content -Cli $Cli -Block $blockCode -Force:$true
     $tmp = "$target.tmp"
     [System.IO.File]::WriteAllText($tmp, $newContent, [System.Text.UTF8Encoding]::new($false))
     Move-Item -Path $tmp -Destination $target -Force
