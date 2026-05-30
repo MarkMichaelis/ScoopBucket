@@ -213,12 +213,69 @@ function Resolve-PackageCompletionSource {
         }
     }
 
-    $pscModule = Get-Module -ListAvailable -Name PSCompletions | Select-Object -First 1
+    $pscModule = Get-Module -Name PSCompletions
+    if (-not $pscModule) {
+        $pscModule = Get-Module -ListAvailable -Name PSCompletions | Select-Object -First 1
+    }
     if ($pscModule) {
         try {
-            Import-Module PSCompletions -ErrorAction Stop
-            $listOutput = & psc list 2>$null | Out-String
-            if ($listOutput -match "(?im)^\s*$([regex]::Escape($Cli))(\s|$)") {
+            if (-not (Get-Module -Name PSCompletions)) {
+                # Suppress every output stream during Import-Module:
+                # PSCompletions prints its update banner via
+                # Write-Host / Write-Information at import time on
+                # some versions. Plain `2>&1 | Out-Null` would still
+                # leak it.
+                Import-Module PSCompletions -ErrorAction Stop *>&1 | Out-Null
+            }
+            # Confirm `psc` resolves to a command from the
+            # PSCompletions module -- not an unrelated executable on
+            # PATH that happened to win command resolution. PSCompletions
+            # actually exports `psc` as an Alias -> Function PSCompletions
+            # (whose ModuleName is 'PSCompletions'); follow the alias
+            # chain so the ownership check matches reality.
+            $pscCmd = Get-Command psc -ErrorAction SilentlyContinue
+            $resolvedCmd = $pscCmd
+            while ($resolvedCmd -and $resolvedCmd.CommandType -eq 'Alias' -and $resolvedCmd.ResolvedCommand) {
+                $resolvedCmd = $resolvedCmd.ResolvedCommand
+            }
+            if ($resolvedCmd -and $resolvedCmd.ModuleName -eq 'PSCompletions') {
+                $pattern = "(?im)^\s*$([regex]::Escape($Cli))(\s|$)"
+                $listOutput = & psc list 2>$null | Out-String
+                $hasEntry   = $listOutput -match $pattern
+
+                if (-not $hasEntry) {
+                    # Issue #226: previously the resolver returned
+                    # 'Skipped' on a list miss, leaving the upstream
+                    # PSCompletions catalog entry unfetched. Attempt
+                    # `psc add <Cli>` first so declared
+                    # Completion='pscompletions' CLIs get their
+                    # catalog entry pulled on demand. Failures must
+                    # NEVER propagate.
+                    $addFailureReason = $null
+                    try {
+                        # `*>&1 | Out-Null` swallows ALL streams
+                        # (success, error, warning, verbose, debug,
+                        # information, host). PSCompletions emits
+                        # download / banner chatter via Write-Host;
+                        # plain `2>&1 | Out-Null` would still leak it.
+                        & psc add $Cli *>&1 | Out-Null
+                    } catch {
+                        $addFailureReason = $_.Exception.Message
+                        Write-Warning "psc add ${Cli} threw: $addFailureReason"
+                    }
+                    $listOutput = & psc list 2>$null | Out-String
+                    $hasEntry   = $listOutput -match $pattern
+                    if (-not $hasEntry) {
+                        $reason = if ($addFailureReason) {
+                            "psc add ${Cli} failed: $addFailureReason"
+                        } else {
+                            "psc add ${Cli} did not populate the local catalog (entry missing from PSCompletions upstream catalog)."
+                        }
+                        Write-Warning "Resolve-PackageCompletionSource: $reason"
+                        return @{ Source = 'Skipped'; Code = $null; PSCompletionsName = $null; Reason = $reason }
+                    }
+                }
+
                 $code = "if (Get-Command psc -ErrorAction SilentlyContinue) {`r`n    Import-Module PSCompletions -ErrorAction SilentlyContinue`r`n}"
                 return @{ Source = 'PSCompletions'; Code = $code; PSCompletionsName = $Cli }
             }
@@ -454,12 +511,14 @@ function Register-PackageCompletion {
     }
 
     if ($resolved.Source -eq 'Skipped') {
-        $reason = if ($NativeCommand) {
+        $reason = if ($resolved.Reason) {
+            $resolved.Reason
+        } elseif ($NativeCommand) {
             "Native command produced no output for '$Cli' and PSCompletions has no catalog entry."
         } else {
             "No -NativeCommand supplied and PSCompletions has no catalog entry for '$Cli'."
         }
-        if ($NativeCommand -and $Mode -ne 'pscompletions') {
+        if ($NativeCommand -and $Mode -ne 'pscompletions' -and -not $resolved.Reason) {
             Write-Warning "Register-PackageCompletion: $reason"
         }
         return [pscustomobject]@{
