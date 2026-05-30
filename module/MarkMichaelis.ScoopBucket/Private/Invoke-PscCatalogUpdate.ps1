@@ -59,8 +59,10 @@ function Invoke-PscCatalogUpdate {
                 $candidates = @(
                     Join-Path $pscModule.ModuleBase 'config.json'
                     Join-Path $pscModule.ModuleBase 'data\config.json'
-                    Join-Path $env:APPDATA 'PSCompletions\config.json'
                 )
+                if ($env:APPDATA) {
+                    $candidates += Join-Path $env:APPDATA 'PSCompletions\config.json'
+                }
                 $configPath = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
                 if ($configPath) {
                     $cfg = Get-Content -Path $configPath -Raw -Encoding UTF8 | ConvertFrom-Json

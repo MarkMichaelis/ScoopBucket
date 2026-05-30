@@ -107,7 +107,12 @@ function Update-PackageCompletion {
         if ($needsPscUpdate) { break }
     }
     if ($needsPscUpdate) {
-        Invoke-PscCatalogUpdate
+        # Honor -WhatIf / -Confirm: catalog refresh and config write are
+        # observable side effects, so gate them through ShouldProcess
+        # like the per-CLI registrations below.
+        if ($PSCmdlet.ShouldProcess('PSCompletions catalog', 'Run psc update * and disable update banner')) {
+            Invoke-PscCatalogUpdate
+        }
     }
 
     foreach ($b in $bundles) {
