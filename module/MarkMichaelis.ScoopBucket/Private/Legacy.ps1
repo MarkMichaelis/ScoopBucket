@@ -11,16 +11,38 @@
 # TODO: Generalize past hard-coded bucket owner.
 $script:UserBucket = 'MarkMichaelis'
 
+# Idempotency guard for Initialize-ScoopEnvironment. Stays $false until the
+# three lightweight scoop libs (core / buckets / manifest) successfully
+# dot-source. A failed init leaves the guard $false so callers can retry
+# after the underlying scoop install is repaired.
+$script:ScoopEnvironmentInitialized = $false
+
 function Initialize-ScoopEnvironment {
     <#
     .SYNOPSIS
-        Resolve $env:SCOOP defensively and dot-source the scoop internal
-        libraries (`parse_app`, `Find-BucketDirectory`, `search_bucket`) so
-        the `scoop` / `Get-LocalBucket` wrappers in this module can call
-        them. Called once by MarkMichaelis.ScoopBucket.psm1 on module load.
+        Resolve $env:SCOOP defensively and dot-source scoop's lightweight
+        internal libraries (`parse_app`, `Find-BucketDirectory`) into MODULE
+        scope. Idempotent: re-entry is a cheap no-op once the guard flips.
+
+        Invoked once with the dot-source operator from .psm1 so the inner
+        `. $p` calls land in module scope (parse_app / Find-BucketDirectory
+        are then resolvable by `scoop` / `Get-LocalBucket` wrappers). A
+        plain (non-dot-sourced) call would land the inner functions in
+        THIS function's local scope where they would evaporate on return.
+
+        scoop-search.ps1 is intentionally excluded: its dot-source costs
+        ~1.8s (it pulls in versions.ps1 + download.ps1) and is only needed
+        by the `scoop search -PSCustomObject` branch. That branch lazily
+        loads it via Initialize-ScoopSearchEnvironment on demand.
+
+        On failure (e.g. a scoop lib missing or throwing), the guard is
+        NOT flipped, so a later retry after the underlying install is
+        repaired will run the dot-source again.
     #>
     [CmdletBinding()]
     param()
+
+    if ($script:ScoopEnvironmentInitialized) { return }
 
     $resolved = Resolve-ScoopRoot
     if (-not $resolved) {
@@ -32,15 +54,46 @@ function Initialize-ScoopEnvironment {
     foreach ($rel in @(
             'lib\core.ps1',
             'lib\buckets.ps1',
-            'lib\manifest.ps1',
-            'libexec\scoop-search.ps1'
+            'lib\manifest.ps1'
         )) {
         $p = Join-Path $currentScoopDirectory $rel
         if (Test-Path $p) {
-            # *>$null suppresses every stream so scoop-search.ps1's banner
-            # ("Results from local buckets...") doesn't leak into callers.
+            # *>$null suppresses every stream so library banners don't
+            # leak into callers.
             . $p *>$null
         }
+    }
+    # Only set the guard after every file dot-sourced cleanly; any throw
+    # above propagates and leaves the guard false (retry-friendly).
+    $script:ScoopEnvironmentInitialized = $true
+}
+
+function Initialize-ScoopSearchEnvironment {
+    <#
+    .SYNOPSIS
+        Lazy loader for scoop-search.ps1. Dot-sources scoop-search.ps1
+        (which itself pulls in lib\versions.ps1 + lib\download.ps1, ~1.8s
+        total) into the CALLER's scope.
+
+        Always invoked with the dot-source operator from the `scoop`
+        wrapper's `search -PSCustomObject` branch so that `search_bucket`
+        becomes resolvable for the remainder of that invocation. Each
+        call re-loads (no module-scope guard) because we deliberately
+        avoid permanently polluting module scope with the heavy
+        scoop-search dependencies; sessions that never search never pay
+        the cost.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $resolved = Resolve-ScoopRoot
+    if (-not $resolved) {
+        Write-Verbose '$env:SCOOP not found; scoop-search lazy init skipped.'
+        return
+    }
+    $p = Join-Path $resolved 'apps\scoop\current\libexec\scoop-search.ps1'
+    if (Test-Path $p) {
+        . $p *>$null
     }
 }
 
@@ -162,6 +215,12 @@ function scoop {
         }
         'search' {
             if ($options -contains '-PSCustomObject') {
+                # Dot-source scoop-search.ps1 into THIS function scope on
+                # every call. It is excluded from the eager init because
+                # it transitively pulls in versions.ps1 + download.ps1
+                # (~1.8s) -- sessions that never `scoop search
+                # -PSCustomObject` should not pay that cost on import.
+                . Initialize-ScoopSearchEnvironment
                 Get-LocalBucket | ForEach-Object {
                     $bucket = $_
                     search_bucket $_ $arg1 | ForEach-Object {
