@@ -68,9 +68,18 @@ function Invoke-PscCatalogUpdate {
         return
     }
     if ($pscCmd.ModuleName -ne 'PSCompletions') {
-        $resolved = if ($pscCmd.ModuleName) { "module '$($pscCmd.ModuleName)'" } else { "$($pscCmd.CommandType) '$($pscCmd.Source)'" }
-        Write-Warning "Invoke-PscCatalogUpdate: 'psc' resolves to $resolved (expected PSCompletions module function); skipping catalog refresh."
-        return
+        # PSCompletions actually exports `psc` as an Alias -> Function
+        # PSCompletions (whose ModuleName is 'PSCompletions'); follow
+        # the alias chain so the ownership guard matches reality.
+        $resolvedCmd = $pscCmd
+        while ($resolvedCmd -and $resolvedCmd.CommandType -eq 'Alias' -and $resolvedCmd.ResolvedCommand) {
+            $resolvedCmd = $resolvedCmd.ResolvedCommand
+        }
+        if (-not ($resolvedCmd -and $resolvedCmd.ModuleName -eq 'PSCompletions')) {
+            $resolved = if ($pscCmd.ModuleName) { "module '$($pscCmd.ModuleName)'" } else { "$($pscCmd.CommandType) '$($pscCmd.Source)'" }
+            Write-Warning "Invoke-PscCatalogUpdate: 'psc' resolves to $resolved (expected PSCompletions module function); skipping catalog refresh."
+            return
+        }
     }
 
     try {
