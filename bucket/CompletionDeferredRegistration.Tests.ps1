@@ -40,12 +40,12 @@ Describe 'Register-PackageCompletion: deferred OnIdle wrap + cached native text'
             Register-PackageCompletion -Cli demo1 -NativeCommand $nc -Mode native -ProfilePath $ProfilePath -Confirm:$false | Out-Null
         }
         $raw = Get-Content -Raw -Path $script:profilePath
-        $raw | Should -Match 'ScoopBucket:CliCompletion:demo1:BEGIN v3'
+        $raw | Should -Match 'ScoopBucket:CliCompletion:demo1:BEGIN v4'
         $raw | Should -Match 'Register-EngineEvent -SourceIdentifier PowerShell\.OnIdle -MaxTriggerCount 1'
-        # v3 (#216): the OnIdle Action body now dot-sources a sidecar
-        # `<cli>.ps1`; the raw Register-ArgumentCompleter call lives in
-        # that sidecar so payloads beginning with `using namespace ...`
-        # can parse legally.
+        # v4 (#220): one shared OnIdle subscriber drains a queue; each
+        # per-CLI block enqueues a scriptblock that dot-sources the
+        # sidecar `<cli>.ps1`. Raw Register-ArgumentCompleter call still
+        # lives in the sidecar (v3 sidecar architecture preserved).
         $raw | Should -Match "(?m)\.\s+'.*?demo1\.ps1'"
         $sidecar = Join-Path (Split-Path -Parent $script:profilePath) 'completions\demo1.ps1'
         Test-Path $sidecar | Should -BeTrue
@@ -74,7 +74,7 @@ Describe 'Register-PackageCompletion: deferred OnIdle wrap + cached native text'
         $raw | Should -Match "(?m)\.\s+'.*?demo2\.ps1'"
     }
 
-    It 'rewrites an existing v1 block as v3 on re-register (transparent migration)' {
+    It 'rewrites an existing v1 block as v4 on re-register (transparent migration)' {
         $v1 = @"
 # ScoopBucket:CliCompletion:demo3:BEGIN v1
 if (Get-Command demo3 -ErrorAction SilentlyContinue) {
@@ -92,7 +92,7 @@ Register-ArgumentCompleter -Native -CommandName demo3 -ScriptBlock { }
         }
         $raw = Get-Content -Raw -Path $script:profilePath
         ([regex]::Matches($raw, 'ScoopBucket:CliCompletion:demo3:BEGIN').Count) | Should -Be 1
-        $raw | Should -Match 'ScoopBucket:CliCompletion:demo3:BEGIN v3'
+        $raw | Should -Match 'ScoopBucket:CliCompletion:demo3:BEGIN v4'
         $raw | Should -Match 'Register-EngineEvent -SourceIdentifier PowerShell\.OnIdle'
         $raw | Should -Not -Match 'ScoopBucket:CliCompletion:demo3:BEGIN v1'
     }
@@ -110,7 +110,7 @@ Register-ArgumentCompleter -Native -CommandName demo3 -ScriptBlock { }
         # the sidecar from inside the deferred OnIdle Action.
         $raw | Should -Not -Match '(?m)warp\.exe'
         $raw | Should -Not -Match 'Invoke-Expression'
-        $m = [regex]::Match($raw, '(?ms)^\# ScoopBucket:CliCompletion:demo4:BEGIN v3\r?\n(.+?)^\# ScoopBucket:CliCompletion:demo4:END')
+        $m = [regex]::Match($raw, '(?ms)^\# ScoopBucket:CliCompletion:demo4:BEGIN v4\r?\n(.+?)^\# ScoopBucket:CliCompletion:demo4:END')
         $m.Success | Should -BeTrue
         $body = $m.Groups[1].Value
 
@@ -125,6 +125,46 @@ Register-ArgumentCompleter -Native -CommandName demo3 -ScriptBlock { }
         $sidecar = Join-Path (Split-Path -Parent $script:profilePath) 'completions\demo4.ps1'
         Test-Path $sidecar | Should -BeTrue
         (Get-Content -Raw -Path $sidecar) | Should -Match 'warp\.exe'
+    }
+
+    It 'v4 (#220): N per-CLI blocks produce exactly ONE Register-EngineEvent subscriber when the profile is dot-sourced' {
+        # Reproduces the bug fixed by v4: v3 wrapped each CLI in its own
+        # Register-EngineEvent. Empirically OnIdle fires only one
+        # subscriber Action per pump tick, so with 30+ subscribers the
+        # last CLIs did not register until ~10+ seconds idle. v4 must
+        # collapse to a single subscriber that drains a shared queue.
+        $profilePath = $script:profilePath
+        $clis = 1..5 | ForEach-Object { "demoBatch$_" }
+        InModuleScope MarkMichaelis.ScoopBucket -Parameters @{ ProfilePath = $profilePath; Clis = $clis } {
+            param($ProfilePath, $Clis)
+            foreach ($cli in $Clis) {
+                $nc = [scriptblock]::Create("Write-Output 'Register-ArgumentCompleter -Native -CommandName $cli -ScriptBlock { }'")
+                Register-PackageCompletion -Cli $cli -NativeCommand $nc -Mode native -ProfilePath $ProfilePath -Confirm:$false | Out-Null
+            }
+        }
+        $raw = Get-Content -Raw -Path $script:profilePath
+        # All 5 blocks should be present...
+        foreach ($cli in $clis) {
+            $raw | Should -Match "ScoopBucket:CliCompletion:$cli`:BEGIN v4"
+        }
+        # ...but the Register-EngineEvent call must only execute ONCE,
+        # gated by `if (-not $Global:__ScoopBucketCompletionBootstrap)`.
+        ([regex]::Matches($raw, 'Register-EngineEvent').Count) | Should -Be $clis.Count -Because 'Each block contains the bootstrap clause for idempotency, but only one fires at runtime.'
+        ([regex]::Matches($raw, '__ScoopBucketCompletionBootstrap').Count) | Should -BeGreaterThan 0
+        ([regex]::Matches($raw, '__ScoopBucketCompletionQueue').Count) | Should -BeGreaterThan 0
+
+        # Functional check: dot-source the profile in a fresh runspace
+        # and verify exactly one PowerShell.OnIdle subscriber exists.
+        $probe = @"
+. '$($script:profilePath)' 2>`$null
+@(Get-EventSubscriber -SourceIdentifier PowerShell.OnIdle -ErrorAction SilentlyContinue).Count
+"@
+        $pwsh = (Get-Process -Id $PID).Path
+        if (-not $pwsh) { $pwsh = 'pwsh' }
+        $probeFile = Join-Path $script:sandbox 'probe-batch.ps1'
+        Set-Content -Path $probeFile -Value $probe -Encoding UTF8
+        $count = & $pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probeFile 2>$null
+        [int]$count | Should -Be 1 -Because 'v4 must register exactly one shared OnIdle subscriber regardless of how many per-CLI blocks are dot-sourced.'
     }
 }
 
@@ -206,7 +246,7 @@ Register-ArgumentCompleter -Native -CommandName $cli -ScriptBlock { }
 
         Update-PackageCompletion -Force -ProfilePath $script:profilePath2 -Confirm:$false | Out-Null
         $raw = Get-Content -Raw -Path $script:profilePath2
-        $raw | Should -Match "ScoopBucket:CliCompletion:$cli`:BEGIN v3"
+        $raw | Should -Match "ScoopBucket:CliCompletion:$cli`:BEGIN v4"
         $raw | Should -Match 'Register-EngineEvent -SourceIdentifier PowerShell\.OnIdle'
         # v3: the refreshed text now lives in the sidecar, not the profile.
         $sidecar = Join-Path (Split-Path -Parent $script:profilePath2) "completions\$cli.ps1"
