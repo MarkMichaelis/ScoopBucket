@@ -13,9 +13,9 @@ param(
 .DESCRIPTION
     Emits a v2 sentinel block that DEFERS Import-Module
     MarkMichaelis.ScoopBucket until either:
-      - Tab completion fires on Install-Package / Get-Package /
-        Uninstall-Package -Name (handled by a stub argument completer
-        that triggers the import then re-runs completion), or
+      - Tab completion fires on Install-Package / Get-Package -Name
+        (handled by a stub argument completer that triggers the import
+        then re-runs completion), or
       - The user invokes one of those cmdlets directly (handled by
         PowerShell's built-in module auto-loading from PSModulePath).
 
@@ -44,10 +44,10 @@ $block = @"
 
 $beginV2Marker
 # Lazy-loads MarkMichaelis.ScoopBucket on first use to keep cold pwsh
-# start fast. Cmdlet calls (Install-Package / Get-Package /
-# Uninstall-Package) auto-load the module via PSModulePath. The stub
-# argument completer below triggers the import on the very first Tab
-# keypress and returns real package-name suggestions in the same call.
+# start fast. Cmdlet calls (Install-Package / Get-Package) auto-load
+# the module via PSModulePath. The stub argument completer below
+# triggers the import on the very first Tab keypress and returns real
+# package-name suggestions in the same call.
 # Re-run module/Install-Module.ps1 -SkipProfile to opt out.
 if (-not `$Global:__MarkMichaelisScoopBucketStubInstalled) {
     `$Global:__MarkMichaelisScoopBucketStubInstalled = `$true
@@ -75,7 +75,7 @@ if (-not `$Global:__MarkMichaelisScoopBucketStubInstalled) {
             }
         } `$wordToComplete
     }
-    Register-ArgumentCompleter -CommandName 'Install-Package','Get-Package','Uninstall-Package' -ParameterName 'Name' -ScriptBlock `$__msbStub
+    Register-ArgumentCompleter -CommandName 'Install-Package','Get-Package' -ParameterName 'Name' -ScriptBlock `$__msbStub
     Remove-Variable __msbStub -ErrorAction SilentlyContinue
 }
 $endMarker
