@@ -34,7 +34,17 @@ Describe 'PSCompletions hard dependency removed' -Tag 'Light','Module' {
 
     It 'module no longer ships Invoke-PscCatalogUpdate' {
         $mod = Get-Module MarkMichaelis.ScoopBucket
-        $hasFn = & $mod { [bool](Get-Command Invoke-PscCatalogUpdate -CommandType Function -ErrorAction SilentlyContinue) }
+        # Filter to the loaded ScoopBucket module specifically: an
+        # unscoped Get-Command could match a same-named function loaded
+        # elsewhere in the session (or auto-discovered from another
+        # module on PSModulePath). Restricting to commands whose
+        # ModuleName matches the module under test isolates the check.
+        $hasFn = & $mod {
+            [bool](
+                Get-Command -CommandType Function -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -eq 'Invoke-PscCatalogUpdate' -and $_.ModuleName -eq 'MarkMichaelis.ScoopBucket' }
+            )
+        }
         $hasFn | Should -BeFalse -Because "Issue #241 removed Invoke-PscCatalogUpdate; the helper is dead code now that no production bundle uses Completion='pscompletions'"
     }
 
