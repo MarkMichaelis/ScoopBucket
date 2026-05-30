@@ -191,9 +191,17 @@ function Get-NpmGlobalRoot {
     [OutputType([string])]
     param()
 
-    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return $null }
+    # On Windows, prefer `npm.cmd` explicitly: when PowerShell's call
+    # operator invokes `npm` (which resolves to npm.ps1 under Scoop and
+    # most other npm-on-Windows installs), the .ps1 shim's parameter
+    # parsing mangles the first positional argument -- `& npm prefix -g`
+    # is dispatched as `npm pm -g` and fails with `Unknown command: pm`.
+    # `npm.cmd` is the batch shim and passes args verbatim.
+    $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if (-not $npm) { $npm = Get-Command npm -ErrorAction SilentlyContinue }
+    if (-not $npm) { return $null }
     try {
-        $prefix = (& npm prefix -g 2>$null)
+        $prefix = & $npm.Source prefix -g 2>$null
         if ($LASTEXITCODE -ne 0 -or -not $prefix) { return $null }
         return ($prefix | Out-String).Trim()
     } catch {
