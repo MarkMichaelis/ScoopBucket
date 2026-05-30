@@ -101,8 +101,11 @@ Describe 'Update-PackageCompletion auto psc update (issue #223)' -Tag 'Light' {
         $profilePath = Join-Path ([System.IO.Path]::GetTempPath()) ("pscupd-profile-$([guid]::NewGuid().ToString('N')).ps1")
         try {
             Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-PscCatalogUpdate { }
+            # Mock registration so the test exercises the no-pscompletions
+            # predicate itself, not the -WhatIf gate.
+            Mock -ModuleName MarkMichaelis.ScoopBucket Register-PackageCompletion { [pscustomobject]@{ Source='Native'; Reason='mock' } }
 
-            Update-PackageCompletion -BucketPath $script:bucketNoPsc -ProfilePath $profilePath -WhatIf | Out-Null
+            Update-PackageCompletion -BucketPath $script:bucketNoPsc -ProfilePath $profilePath -Confirm:$false | Out-Null
 
             Should -Invoke -ModuleName MarkMichaelis.ScoopBucket -CommandName Invoke-PscCatalogUpdate -Times 0 -Exactly
         } finally {
