@@ -21,8 +21,26 @@ $Packages = [Package[]]@(
         Installer   = 'winget'
         Id          = '7Zip.7Zip'
         CliCommands = @('7z')
-        Completion  = 'pscompletions'
-        ExpectedCompletions = @{ '7z' = @('a','x','l') }
+        Completion  = 'auto'
+        Notes       = '7z has no `7z completion powershell` subcommand; the PSCompletions catalog entry is third-party. Phase 2 of the native-completion migration replaces it with a hand-curated NativeCommandScript covering 7z''s small/stable CLI surface (commands a/b/d/e/h/i/l/rn/t/u/x and the common switches). See #233.'
+        ExpectedCompletions = @{ '7z' = @('a','x','l','t','-y') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName 7z -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        'a','b','d','e','h','i','l','rn','t','u','x',
+        '-y','-r','-p','-o','-mx','-mx0','-mx1','-mx3','-mx5','-mx7','-mx9',
+        '-t7z','-tzip','-tgzip','-tbzip2','-ttar','-txz','-twim','-tiso',
+        '-aoa','-aos','-aou','-aot','-bd','-bb','-bso','-bse','-bsp',
+        '-sdel','-sfx','-si','-so','-spd','-spe','-spf','-ssc','-ssw',
+        '-stl','-stx','-slp','-snh','-snl','-snr','-stm','-w','-x','-i'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
     }
     [Package]@{ Name = 'Everything';                    Installer = 'winget'; Id = 'voidtools.Everything'
                 Companions = @('Everything CLI') }
