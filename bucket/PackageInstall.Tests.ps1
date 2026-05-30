@@ -409,8 +409,13 @@ Describe 'Completion registration' -Tag 'Light','Module' {
         $r = & $script:RegisterFn -Cli 'idem' `
             -NativeCommand { 'second' } -Mode 'native' -ProfilePath $script:profilePath -Confirm:$false
         $r.Action | Should -Be 'Replaced'
-        (Get-Content $script:profilePath -Raw) | Should -Match 'second'
-        (Get-Content $script:profilePath -Raw) | Should -Not -Match 'first'
+        # v3 (#216): native payload lives in a sidecar .ps1 next to the
+        # profile; the profile only dot-sources it. Assert the sidecar
+        # got replaced (second wins, first is gone).
+        $sidecar = Join-Path (Split-Path -Parent $script:profilePath) 'completions\idem.ps1'
+        Test-Path $sidecar | Should -BeTrue
+        (Get-Content $sidecar -Raw) | Should -Match 'second'
+        (Get-Content $sidecar -Raw) | Should -Not -Match 'first'
     }
 
     It 'rerunning with identical native output produces a byte-identical block' {
