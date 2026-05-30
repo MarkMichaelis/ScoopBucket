@@ -346,12 +346,15 @@ directly. `Register-CliCompletion` will emit a `Write-Warning` if a
 future change re-introduces a dead native command (silent dead
 wiring would otherwise hide).
 
-Bundles that install many CLIs (`AIAgents`, `ClientBasePackages`,
-`DeveloperBasePackages`) additionally call `Invoke-CliCompletionsSweep
--Force` at the end of their install to register a native-completion
-block for every CLI declared by a bucket package whose owning bundle
-didn't supply one inline. To re-run the sweep manually after
-installing other tools by hand:
+The `AIAgents` bundle additionally calls `Invoke-CliCompletionsSweep
+-Force` at the end of its install as a best-effort registration pass
+for any bucket-declared CLI whose owning bundle didn't supply a
+NativeCommandScript inline. The sweep walks the union of `CliCommands`
+across every `[Package]` and registers a native-completion block for
+each CLI that resolves to a usable `NativeCommand`; CLIs with no
+native source resolve to `Skipped` with a clear `Reason` (post-#241
+there is no PSCompletions fallback). To re-run the sweep manually
+after installing other tools by hand:
 
 ```powershell
 Import-Module D:\Git\ScoopBucket\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1 -Force

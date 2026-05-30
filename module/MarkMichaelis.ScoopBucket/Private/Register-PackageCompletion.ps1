@@ -7,8 +7,12 @@
 #
 # Strategy:
 #   - Sentinel-delimited block per CLI in $PROFILE.AllUsersAllHosts.
-#   - Native scriptblock preferred; PSCompletions fallback when no
-#     native output is available.
+#   - Native scriptblock is the only completion source. Issue #241
+#     removed the PSCompletions fallback once every bucket entry
+#     adopted a NativeCommandScript. If the native script produces
+#     no output (or there is no native script at all), the CLI
+#     resolves to Source='Skipped' with a Reason -- it is no longer
+#     routed through `psc add`/`psc list`.
 #   - Idempotent: existing blocks preserved unless -Force.
 #   - Requires elevation to write to AllUsersAllHosts; honours
 #     SupportsShouldProcess.
@@ -410,12 +414,19 @@ function Register-PackageCompletion {
         Bare command name (e.g. 'gh').
     .PARAMETER NativeCommand
         Scriptblock that emits the CLI's PowerShell completion source on
-        stdout. When omitted (or empty output), the PSCompletions
-        catalog probe runs as fallback.
+        stdout. When omitted (or empty output), the CLI resolves to
+        Source='Skipped' with a Reason (post-#241 the resolver no
+        longer falls back to a PSCompletions catalog probe).
     .PARAMETER Mode
-        'native'        — only the native scriptblock, no PSCompletions fallback.
-        'pscompletions' — skip native, go straight to PSCompletions probe.
-        'auto'          — native first, fall back to PSCompletions.
+        'native'        — only the native scriptblock.
+        'pscompletions' — preserved as a recognized value for schema
+                          compatibility (Package.Completion ValidateSet);
+                          post-#241 always resolves to 'Skipped' with a
+                          remediation Reason, because the PSCompletions
+                          branch was removed.
+        'auto'          — native scriptblock if available, otherwise
+                          'Skipped' (pre-#241 this used to fall back
+                          to PSCompletions).
         Defaults to 'auto'.
     .PARAMETER ProfilePath
         Test hook: write to this file instead of AllUsersAllHosts.
