@@ -476,7 +476,13 @@ function Register-PackageCompletion {
     if ($resolved.Source -eq 'Native' -and $resolved.NativePayload) {
         $sidecarDir  = Get-PackageCompletionSidecarDirectory -ProfilePath $target -OverrideDirectory $SidecarDirectory
         $sidecarPath = Write-PackageCompletionSidecar -Cli $Cli -Payload $resolved.NativePayload -Directory $sidecarDir
-        $innerCode = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n    . '$sidecarPath'`r`n}"
+        # Single-quote the dot-source path and escape any embedded
+        # apostrophes (PowerShell single-quote strings escape `'` as
+        # `''`). Real-world install paths can contain apostrophes
+        # (e.g. drives mapped under "C:\Users\O'Brien\..."); without
+        # this the generated profile would be a parse error.
+        $escapedPath = $sidecarPath -replace "'", "''"
+        $innerCode = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n    . '$escapedPath'`r`n}"
     } else {
         $innerCode = $resolved.Code
     }
