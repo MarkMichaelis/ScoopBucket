@@ -334,6 +334,18 @@ Register-ArgumentCompleter -Native -CommandName copilot -ScriptBlock {
 
 Invoke-PackageInstall -Packages $Packages -Bundle 'AIAgents'
 
+# Probe-mode short-circuit: when Get-BundlePackages enumerates the bundle
+# in a child runspace it shims Invoke-PackageInstall and sets this flag,
+# signaling that the trailing imperative work below (npm/dotnet installs,
+# config file writes, HKCU env-var writes, profile-block injection) must
+# be skipped. Production runs leave the flag unset so the work proceeds.
+if ($global:__SBPKG_IS_PROBE) { return }
+
+# Dot-source MCP-wiring helpers. AIAgents.Mcp.ps1 contains function
+# definitions only -- no top-level work -- so the file is safe to source
+# from this bundle as well as from bucket/AIAgents.Mcp.Tests.ps1.
+. (Join-Path $PSScriptRoot 'AIAgents.Mcp.ps1')
+
 # ---------------------------------------------------------------------------
 # MCP server prerequisites that are NOT npm-based.
 # ---------------------------------------------------------------------------
@@ -411,27 +423,68 @@ if ([string]::IsNullOrWhiteSpace($GithubToken)) {
 
 $DeprecatedMcpServers = @('shell')
 
+# ---------------------------------------------------------------------------
+# Pre-install MCP server npm packages globally so each agent spawn invokes
+# the resolved .cmd shim directly instead of paying a fresh npx tarball-
+# fetch round-trip on first use. We deliberately keep `npm install -g
+# <pkg>@latest` (no version pin) so a routine bucket reinstall pulls fixes;
+# `Resolve-McpServerCommand` falls back to `npx -y <pkg>` per-entry when
+# global install or bin resolution fails (graceful degradation).
+# ---------------------------------------------------------------------------
+
+$McpNpmPackages = @(
+    '@upstash/context7-mcp',
+    '@playwright/mcp',
+    '@modelcontextprotocol/server-github',
+    '@modelcontextprotocol/server-filesystem'
+)
+
+if (Get-Command npm -ErrorAction SilentlyContinue) {
+    foreach ($pkg in $McpNpmPackages) {
+        Write-Host "Installing $pkg globally (latest)..."
+        & npm.cmd install --global "$pkg@latest" 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "npm install -g $pkg failed; that MCP entry will fall back to 'npx -y'."
+        }
+    }
+}
+else {
+    Write-Warning 'npm not found; all MCP npm entries will fall back to npx (slow first-spawn).'
+}
+
+$NpmGlobalRoot = Get-NpmGlobalRoot
+
+$context7Cmd   = Resolve-McpServerCommand -PackageName '@upstash/context7-mcp'                  -NpmGlobalRoot $NpmGlobalRoot
+$playwrightCmd = Resolve-McpServerCommand -PackageName '@playwright/mcp'                        -NpmGlobalRoot $NpmGlobalRoot
+$filesystemCmd = Resolve-McpServerCommand -PackageName '@modelcontextprotocol/server-filesystem' -NpmGlobalRoot $NpmGlobalRoot -ExtraArguments @($env:USERPROFILE)
+$githubCmd     = Resolve-McpServerCommand -PackageName '@modelcontextprotocol/server-github'    -NpmGlobalRoot $NpmGlobalRoot
+
 $McpServers = @(
     @{
         Name      = 'context7'
-        Command   = 'npx'
-        Arguments = @('-y', '@upstash/context7-mcp')
+        Command   = $context7Cmd.Command
+        Arguments = $context7Cmd.Arguments
     }
     @{
         Name      = 'playwright'
-        Command   = 'npx'
-        Arguments = @('-y', '@playwright/mcp@latest')
+        Command   = $playwrightCmd.Command
+        Arguments = $playwrightCmd.Arguments
     }
     @{
         Name      = 'filesystem'
-        Command   = 'npx'
-        Arguments = @('-y', '@modelcontextprotocol/server-filesystem', $env:USERPROFILE)
+        Command   = $filesystemCmd.Command
+        Arguments = $filesystemCmd.Arguments
     }
     @{
-        Name      = 'github'
-        Command   = 'npx'
-        Arguments = @('-y', '@modelcontextprotocol/server-github')
-        Env       = @{ GITHUB_PERSONAL_ACCESS_TOKEN = $GithubToken }
+        Name       = 'github'
+        Command    = $githubCmd.Command
+        Arguments  = $githubCmd.Arguments
+        # No `Env` block: the token is provisioned out-of-band via HKCU
+        # (Set-PersistedGitHubToken below) and the profile self-heal
+        # sentinel, so it is no longer scattered across config files.
+        # GitHub Copilot CLI ships its own remote `github-mcp-server`
+        # built in; skip writing this entry there to avoid duplication.
+        SkipAgents = @('GitHub Copilot CLI')
     }
 )
 
@@ -443,117 +496,6 @@ if ($PoshMcpAvailable) {
     }
 }
 
-Function Add-McpServerToJsonConfig {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$AgentLabel,
-        [Parameter(Mandatory)][hashtable]$Server
-    )
-
-    $dir = Split-Path -Parent $Path
-    if (-not (Test-Path $dir)) {
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    }
-
-    if (Test-Path $Path) {
-        try {
-            $config = Get-Content -Path $Path -Raw | ConvertFrom-Json
-        }
-        catch {
-            Write-Warning "$AgentLabel`: existing config at $Path is not valid JSON; skipping $($Server.Name)."
-            return
-        }
-    }
-    else {
-        $config = [pscustomobject]@{}
-    }
-
-    if (-not $config.PSObject.Properties['mcpServers']) {
-        $config | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{})
-    }
-
-    $entry = [pscustomobject]@{
-        command = $Server.Command
-        args    = $Server.Arguments
-    }
-    if ($Server.ContainsKey('Env') -and $Server.Env -and $Server.Env.Count -gt 0) {
-        $envObj = [pscustomobject]@{}
-        foreach ($k in $Server.Env.Keys) {
-            $val = $Server.Env[$k]
-            if ($null -eq $val) { $val = '' }
-            $envObj | Add-Member -NotePropertyName $k -NotePropertyValue $val
-        }
-        $entry | Add-Member -NotePropertyName env -NotePropertyValue $envObj
-    }
-
-    if ($config.mcpServers.PSObject.Properties[$Server.Name]) {
-        $config.mcpServers.($Server.Name) = $entry
-    }
-    else {
-        $config.mcpServers | Add-Member -NotePropertyName $Server.Name -NotePropertyValue $entry
-    }
-
-    $config | ConvertTo-Json -Depth 20 | Set-Content -Path $Path -Encoding UTF8
-    Write-Host "$AgentLabel`: configured $($Server.Name) MCP in $Path"
-}
-
-Function Add-McpServerToCodex {
-    param(
-        [Parameter(Mandatory)][hashtable]$Server
-    )
-
-    $path = Join-Path $env:USERPROFILE '.codex\config.toml'
-    $dir  = Split-Path -Parent $path
-    if (-not (Test-Path $dir)) {
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    }
-
-    # TOML basic strings interpret backslash as an escape character. Any
-    # raw Windows path like 'C:\Users\Mark' contains '\U' which the TOML
-    # parser tries to consume as a \UXXXXXXXX Unicode escape and fails
-    # with "too few unicode value digits". Escape backslashes (\ -> \\)
-    # and double-quotes (" -> \") in every interpolated value.
-    #
-    # Note on PowerShell -replace replacement strings: in .NET regex
-    # replacement, '$' is special but '\' is literal. So replacement
-    # '\\' (2 chars) emits 2 chars '\\', and replacement '\"' emits '\"'.
-    $argsToml = ($Server.Arguments | ForEach-Object {
-        $esc = $_ -replace '\\','\\' -replace '"','\"'
-        '"' + $esc + '"'
-    }) -join ', '
-    $cmdEsc = $Server.Command -replace '\\','\\' -replace '"','\"'
-    $section = @"
-[mcp_servers.$($Server.Name)]
-command = "$cmdEsc"
-args = [$argsToml]
-"@
-    if ($Server.ContainsKey('Env') -and $Server.Env -and $Server.Env.Count -gt 0) {
-        $envLines = foreach ($k in $Server.Env.Keys) {
-            $v = $Server.Env[$k]
-            if ($null -eq $v) { $v = '' }
-            $vEsc = $v -replace '\\','\\' -replace '"','\"'
-            "$k = `"$vEsc`""
-        }
-        $section += "`r`n[mcp_servers.$($Server.Name).env]`r`n" + ($envLines -join "`r`n")
-    }
-
-    $sectionPattern    = "(?ms)^\[mcp_servers\.$([regex]::Escape($Server.Name))\].*?(?=^\[|\z)"
-    $envSectionPattern = "(?ms)^\[mcp_servers\.$([regex]::Escape($Server.Name))\.env\].*?(?=^\[|\z)"
-
-    if (Test-Path $path) {
-        $content = Get-Content -Path $path -Raw
-        $content = [regex]::Replace($content, $envSectionPattern, '')
-        $content = [regex]::Replace($content, $sectionPattern, '')
-        $content = $content.TrimEnd() + "`r`n`r`n" + $section + "`r`n"
-        Set-Content -Path $path -Value $content -Encoding UTF8
-    }
-    else {
-        Set-Content -Path $path -Value ($section + "`r`n") -Encoding UTF8
-    }
-    Write-Host "Codex CLI: configured $($Server.Name) MCP in $path"
-}
-
 $JsonAgents = @(
     @{ Label = 'Claude Desktop';      Path = (Join-Path $env:APPDATA      'Claude\claude_desktop_config.json') }
     @{ Label = 'Claude Code CLI';     Path = (Join-Path $env:USERPROFILE  '.claude.json') }
@@ -561,55 +503,42 @@ $JsonAgents = @(
     @{ Label = 'GitHub Copilot CLI';  Path = (Join-Path $env:USERPROFILE  '.copilot\mcp-config.json') }
 )
 
-Function Remove-McpServerFromJsonConfig {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$AgentLabel,
-        [Parameter(Mandatory)][string]$ServerName
-    )
-
-    if (-not (Test-Path $Path)) { return }
-    try {
-        $config = Get-Content -Path $Path -Raw | ConvertFrom-Json
-    }
-    catch {
-        Write-Warning "$AgentLabel`: existing config at $Path is not valid JSON; skipping prune of $ServerName."
-        return
-    }
-    if (-not $config.PSObject.Properties['mcpServers']) { return }
-    if (-not $config.mcpServers.PSObject.Properties[$ServerName]) { return }
-
-    $config.mcpServers.PSObject.Properties.Remove($ServerName)
-    $config | ConvertTo-Json -Depth 20 | Set-Content -Path $Path -Encoding UTF8
-    Write-Host "$AgentLabel`: pruned deprecated $ServerName MCP from $Path"
-}
-
-Function Remove-McpServerFromCodex {
-    param(
-        [Parameter(Mandatory)][string]$ServerName
-    )
-
-    $path = Join-Path $env:USERPROFILE '.codex\config.toml'
-    if (-not (Test-Path $path)) { return }
-
-    $sectionPattern    = "(?ms)^\[mcp_servers\.$([regex]::Escape($ServerName))\].*?(?=^\[|\z)"
-    $envSectionPattern = "(?ms)^\[mcp_servers\.$([regex]::Escape($ServerName))\.env\].*?(?=^\[|\z)"
-
-    $content    = Get-Content -Path $path -Raw
-    $newContent = [regex]::Replace($content, $envSectionPattern, '')
-    $newContent = [regex]::Replace($newContent, $sectionPattern, '')
-    if ($newContent -ne $content) {
-        Set-Content -Path $path -Value $newContent.TrimEnd() -Encoding UTF8
-        Write-Host "Codex CLI: pruned deprecated $ServerName MCP from $path"
-    }
-}
-
 foreach ($server in $McpServers) {
+    $skip = @()
+    if ($server.ContainsKey('SkipAgents') -and $server.SkipAgents) { $skip = @($server.SkipAgents) }
+
     foreach ($agent in $JsonAgents) {
+        if ($skip -contains $agent.Label) {
+            Write-Host "$($agent.Label): skipping $($server.Name) MCP (built-in equivalent)."
+            continue
+        }
         Add-McpServerToJsonConfig -Path $agent.Path -AgentLabel $agent.Label -Server $server
     }
-    Add-McpServerToCodex -Server $server
+    if ($skip -notcontains 'Codex CLI') {
+        Add-McpServerToCodex -Server $server
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Provision the GitHub PAT out-of-band so it does NOT live in any agent
+# config file. Claude Desktop launches from the Start menu and will not
+# inherit shell env, so we additionally persist the value at HKCU User
+# (or HKLM Machine when elevated) scope. Profile sentinel acts as a
+# self-heal fallback if HKCU is ever cleared.
+# ---------------------------------------------------------------------------
+
+$IsElevated = Test-IsElevated
+
+if (-not [string]::IsNullOrWhiteSpace($GithubToken)) {
+    Set-PersistedGitHubToken -Token $GithubToken -IsElevated:$IsElevated
+    $scopeLabel = if ($IsElevated) { 'HKLM Machine' } else { 'HKCU User' }
+    Write-Host "GitHub MCP: persisted GITHUB_PERSONAL_ACCESS_TOKEN at $scopeLabel scope."
+}
+
+foreach ($profilePath in (Get-McpProfileTargets -IsElevated:$IsElevated)) {
+    if (Add-McpProfileSentinel -Path $profilePath) {
+        Write-Host "GitHub MCP: installed self-heal block in $profilePath"
+    }
 }
 
 if ($Reset) {
@@ -619,6 +548,36 @@ if ($Reset) {
             Remove-McpServerFromJsonConfig -Path $agent.Path -AgentLabel $agent.Label -ServerName $name
         }
         Remove-McpServerFromCodex -ServerName $name
+    }
+
+    # Prune entries this run intentionally skipped (e.g., GitHub Copilot
+    # CLI) so users upgrading from a pre-skip version get their stale
+    # `github` entry cleaned out of `~\.copilot\mcp-config.json`.
+    foreach ($server in $McpServers) {
+        if (-not $server.ContainsKey('SkipAgents')) { continue }
+        foreach ($skipLabel in @($server.SkipAgents)) {
+            $agent = $JsonAgents | Where-Object { $_.Label -eq $skipLabel } | Select-Object -First 1
+            if ($agent) {
+                Remove-McpServerFromJsonConfig -Path $agent.Path -AgentLabel $agent.Label -ServerName $server.Name
+            }
+        }
+    }
+
+    Write-Host "-Reset: removing GitHub PAT self-heal block from PowerShell profile(s)..."
+    foreach ($profilePath in (Get-McpProfileTargets -IsElevated:$IsElevated)) {
+        if (Remove-McpProfileSentinel -Path $profilePath) {
+            Write-Host "  pruned $profilePath"
+        }
+    }
+
+    Write-Host "-Reset: clearing persisted GITHUB_PERSONAL_ACCESS_TOKEN env var..."
+    Clear-PersistedGitHubToken -IsElevated:$IsElevated
+
+    if (Get-Command npm -ErrorAction SilentlyContinue) {
+        Write-Host "-Reset: uninstalling MCP npm packages globally..."
+        foreach ($pkg in $McpNpmPackages) {
+            & npm.cmd uninstall --global $pkg 2>&1 | Out-Host
+        }
     }
 }
 

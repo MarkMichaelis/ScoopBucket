@@ -79,6 +79,10 @@ function Get-ScoopBucketModulePath { return '$packageClass' }
 
 function global:Invoke-PackageInstall {
     param([Parameter(Mandatory)][object[]]`$Packages, [Parameter(Mandatory)][string]`$Bundle, [Parameter(ValueFromRemainingArguments)]`$Remaining)
+    # Mark the runspace as a probe so bundle scripts that continue past
+    # this shimmed call (e.g. AIAgents.ps1's MCP wiring) can short-circuit
+    # before performing real side effects.
+    `$global:__SBPKG_IS_PROBE = `$true
     `$exported = foreach (`$p in `$Packages) {
         # Pre-invoke the NativeCommandScript per declared CLI inside this
         # child runspace so the parent process can assert on what the
