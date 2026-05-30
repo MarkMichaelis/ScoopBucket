@@ -45,7 +45,6 @@
         'Install-LocalManifest',
         'Install-BucketApp',
         'Register-CliCompletion',
-        'Install-PSCompletionsModule',
         'Register-AllCliCompletions',
         'Invoke-CliCompletionsSweep',
         'Save-Artifact'

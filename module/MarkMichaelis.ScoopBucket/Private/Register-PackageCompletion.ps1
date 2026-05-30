@@ -195,15 +195,14 @@ function Resolve-PackageCompletionSource {
         [switch]$PreferPSCompletions
     )
 
-    # The PSCompletions branch below emits Write-Warning on `psc add`
-    # failures. Callers that pass -WarningAction Stop or set
-    # $WarningPreference='Stop' would otherwise turn those warnings
-    # into terminating exceptions, short-circuiting the try/catch and
-    # dropping us into the bottom Skipped return WITHOUT a Reason
-    # (which regresses the new diagnostic). Force non-terminating
-    # warnings for the duration of this function -- same pattern as
-    # Invoke-PscCatalogUpdate.
-    $WarningPreference = 'Continue'
+    # Issue #241: PSCompletions integration was removed once every
+    # production bucket entry adopted Completion='auto' with a
+    # NativeCommandScript or Completion='native'. The 'pscompletions'
+    # value is preserved as a recognized package class (so the
+    # [Package] schema does not break) but resolution always reports
+    # Source='Skipped' with a clear remediation reason. To revive it,
+    # restore the helper from git history (last present at the parent
+    # commit of the change that closed Issue #241).
 
     if ($NativeCommand -and -not $PreferPSCompletions) {
         $native = $null
@@ -223,82 +222,12 @@ function Resolve-PackageCompletionSource {
         }
     }
 
-    $pscModule = Get-Module -Name PSCompletions
-    if (-not $pscModule) {
-        $pscModule = Get-Module -ListAvailable -Name PSCompletions | Select-Object -First 1
+    return @{
+        Source = 'Skipped'
+        Code = $null
+        PSCompletionsName = $null
+        Reason = 'PSCompletions integration removed (#241); use Completion=auto with a NativeCommandScript instead.'
     }
-    if ($pscModule) {
-        try {
-            if (-not (Get-Module -Name PSCompletions)) {
-                # Suppress every output stream during Import-Module:
-                # PSCompletions prints its update banner via
-                # Write-Host / Write-Information at import time on
-                # some versions. Plain `2>&1 | Out-Null` would still
-                # leak it.
-                Import-Module PSCompletions -ErrorAction Stop *>&1 | Out-Null
-            }
-            # Confirm `psc` resolves to a command from the
-            # PSCompletions module -- not an unrelated executable on
-            # PATH that happened to win command resolution. PSCompletions
-            # actually exports `psc` as an Alias -> Function PSCompletions
-            # (whose ModuleName is 'PSCompletions'); follow the alias
-            # chain so the ownership check matches reality.
-            $pscCmd = Get-Command psc -ErrorAction SilentlyContinue
-            $resolvedCmd = $pscCmd
-            while ($resolvedCmd -and $resolvedCmd.CommandType -eq 'Alias' -and $resolvedCmd.ResolvedCommand) {
-                $resolvedCmd = $resolvedCmd.ResolvedCommand
-            }
-            if ($resolvedCmd -and $resolvedCmd.ModuleName -eq 'PSCompletions') {
-                $pattern = "(?im)^\s*$([regex]::Escape($Cli))(\s|$)"
-                $listOutput = & psc list 2>$null | Out-String
-                $hasEntry   = $listOutput -match $pattern
-
-                if (-not $hasEntry) {
-                    # Issue #226: previously the resolver returned
-                    # 'Skipped' on a list miss, leaving the upstream
-                    # PSCompletions catalog entry unfetched. Attempt
-                    # `psc add <Cli>` first so declared
-                    # Completion='pscompletions' CLIs get their
-                    # catalog entry pulled on demand. Failures must
-                    # NEVER propagate.
-                    $addFailureReason = $null
-                    try {
-                        # `*>&1 | Out-Null` swallows ALL streams
-                        # (success, error, warning, verbose, debug,
-                        # information, host). PSCompletions emits
-                        # download / banner chatter via Write-Host;
-                        # plain `2>&1 | Out-Null` would still leak it.
-                        & psc add $Cli *>&1 | Out-Null
-                    } catch {
-                        # Capture the failure but defer the Write-Warning
-                        # until AFTER the re-check, so success-after-throw
-                        # (rare but possible if `psc add` partially
-                        # populated the catalog before throwing) does not
-                        # surface a misleading warning, and conversely a
-                        # genuine failure produces exactly one warning
-                        # rather than two.
-                        $addFailureReason = $_.Exception.Message
-                    }
-                    $listOutput = & psc list 2>$null | Out-String
-                    $hasEntry   = $listOutput -match $pattern
-                    if (-not $hasEntry) {
-                        $reason = if ($addFailureReason) {
-                            "psc add ${Cli} failed: $addFailureReason"
-                        } else {
-                            "psc add ${Cli} did not populate the local catalog (entry missing from PSCompletions upstream catalog)."
-                        }
-                        Write-Warning "Resolve-PackageCompletionSource: $reason"
-                        return @{ Source = 'Skipped'; Code = $null; PSCompletionsName = $null; Reason = $reason }
-                    }
-                }
-
-                $code = "if (Get-Command psc -ErrorAction SilentlyContinue) {`r`n    Import-Module PSCompletions -ErrorAction SilentlyContinue`r`n}"
-                return @{ Source = 'PSCompletions'; Code = $code; PSCompletionsName = $Cli }
-            }
-        } catch { }
-    }
-
-    return @{ Source = 'Skipped'; Code = $null; PSCompletionsName = $null }
 }
 
 function Read-PackageCompletionProfileContent {
@@ -543,16 +472,10 @@ function Register-PackageCompletion {
         }
     }
 
-    if ($resolved.Source -eq 'PSCompletions') {
-        if ($PSCmdlet.ShouldProcess($Cli, "psc add $Cli")) {
-            try {
-                Import-Module PSCompletions -ErrorAction Stop
-                & psc add $Cli 2>$null | Out-Null
-            } catch {
-                Write-Warning "psc add $Cli failed: $($_.Exception.Message)"
-            }
-        }
-    }
+    # Issue #241: Source can no longer be 'PSCompletions' -- the
+    # resolver always returns Native or Skipped. Any 'pscompletions'
+    # mode request falls through to Skipped above, so no post-resolve
+    # `psc add` step is needed.
 
     $shouldProcessAction = if ($existed) { "Replace completion block for '$Cli' ($($resolved.Source))" }
                            else         { "Add completion block for '$Cli' ($($resolved.Source))" }
