@@ -42,7 +42,12 @@ function Invoke-PscCatalogUpdate {
             return
         }
         try {
-            Import-Module PSCompletions -ErrorAction Stop
+            # Suppress every output stream during Import-Module: the
+            # PSCompletions module prints its update banner via
+            # Write-Host / Write-Information at import time on some
+            # versions; failures still surface as terminating exceptions
+            # which the catch handles.
+            Import-Module PSCompletions -ErrorAction Stop *>&1 | Out-Null
         } catch {
             Write-Warning "Invoke-PscCatalogUpdate: Import-Module PSCompletions failed: $($_.Exception.Message)"
             return
@@ -50,13 +55,18 @@ function Invoke-PscCatalogUpdate {
     }
 
     try {
-        & psc update '*' 2>&1 | Out-Null
+        # `*>&1 | Out-Null` swallows ALL streams (success, error,
+        # warning, verbose, debug, information, host). PSCompletions
+        # emits the nag banner via Write-Host / Write-Information, so
+        # plain `2>&1 | Out-Null` would still leak it. Terminating
+        # exceptions still hit the catch block below.
+        & psc update '*' *>&1 | Out-Null
     } catch {
         Write-Warning "psc update * failed: $($_.Exception.Message). PSCompletions catalog may be stale."
     }
 
     try {
-        & psc config enable_completions_update 0 2>&1 | Out-Null
+        & psc config enable_completions_update 0 *>&1 | Out-Null
     } catch {
         Write-Warning "psc config enable_completions_update 0 failed: $($_.Exception.Message). Attempting direct config edit."
         try {
