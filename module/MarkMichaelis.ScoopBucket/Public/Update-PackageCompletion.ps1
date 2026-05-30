@@ -6,19 +6,12 @@ function Update-PackageCompletion {
         block in $PROFILE.AllUsersAllHosts.
 
     .DESCRIPTION
-        Solves two related "I have the CLI installed but `<cli> <Tab>`
-        only completes file names" scenarios:
-
-          (1) "I installed Bitwarden CLI, then installed PSCompletions,
-              but `bw <Tab>` still only completes files." Originally
-              Register-PackageCompletion fell through to its 'Skipped'
-              branch because PSCompletions wasn't there yet.
-
-          (2) "I restored my dev machine — the CLIs are back on PATH but
-              $PROFILE.AllUsersAllHosts was not part of the backup, so
-              no sentinel blocks exist." For native-completion CLIs
-              (`gh`, `rg`, …) this used to require running the original
-              Install-Package per bundle.
+        Solves the "I have the CLI installed but `<cli> <Tab>` only
+        completes file names" recovery scenario: after restoring a dev
+        machine, the CLIs are back on PATH but $PROFILE.AllUsersAllHosts
+        was not part of the backup, so no sentinel blocks exist. For
+        native-completion CLIs (`gh`, `rg`, …) this used to require
+        running the original Install-Package per bundle.
 
         Update-PackageCompletion walks every declarative bundle via
         Get-BundlePackages, finds Packages whose Completion mode is
@@ -33,9 +26,16 @@ function Update-PackageCompletion {
         repair walks need no access to the original `<cli> completion
         powershell` command and no re-install.
 
-        Called automatically by the PSCompletions bundle's
-        PostInstallScript so `Install-Package PSCompletions` heals
-        already-installed CLIs in one shot.
+        Issue #241 removed the PSCompletions integration: any package
+        declared Completion='pscompletions' (none remain in this bucket)
+        now resolves to Source='Skipped' with a remediation Reason
+        instead of being routed through `psc add`/`psc list`. The
+        'pscompletions' Completion value is preserved as a recognized
+        package class for schema compatibility, but no longer
+        contributes a runtime completion block. The PSCompletions
+        bundle itself was deleted in #241, so the previously-documented
+        "Install-Package PSCompletions heals already-installed CLIs"
+        flow no longer applies.
 
     .PARAMETER BucketPath
         Override the auto-detected bucket directory (forwarded to
@@ -53,8 +53,8 @@ function Update-PackageCompletion {
     .OUTPUTS
         PSCustomObject[] — one record per (Cli, Package) candidate,
         with Cli, Package, Bundle, Mode, Action (Registered | Preserved
-        | Skipped | WhatIf), Source (Native | PSCompletions | Skipped),
-        and Reason fields.
+        | Skipped | WhatIf), Source (Native | Skipped — PSCompletions
+        was removed in #241), and Reason fields.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     [OutputType([pscustomobject[]])]
