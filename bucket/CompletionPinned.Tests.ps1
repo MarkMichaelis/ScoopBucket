@@ -71,7 +71,7 @@ Describe 'CliCompletion pinned contract -- per-bundle native registration' -Tag 
         # never inside an if/Action scriptblock (v2's regression).
         # v4 (#221) collapses the per-block OnIdle handler into a single
         # batched OnIdle bootstrap that drains a queue of registered CLIs,
-        # cutting profile-load Register-ObjectEvent calls from O(n) to 1.
+        # cutting profile-load Register-EngineEvent calls from O(n) to 1.
         $src = Get-Content -Raw -Path (Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\Private\Register-PackageCompletion.ps1')
         $src | Should -Match "(?m)^\s*\`$script:CompletionSentinelVersion\s*=\s*'v4'\s*$" -Because 'Register-PackageCompletion.ps1 must pin sentinel version v4'
     }
