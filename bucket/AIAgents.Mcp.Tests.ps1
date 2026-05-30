@@ -169,6 +169,40 @@ Describe 'AIAgents.Mcp helpers' -Tag 'Light','Bundle' {
         }
     }
 
+    Context 'Get-NpmGlobalRoot' {
+        It 'uses npm.cmd (not npm.ps1) so args are not mangled by the .ps1 shim (#249)' {
+            # Repro for #249: on Windows where `npm` resolves to npm.ps1
+            # (Scoop nodejs install), `& npm prefix -g` is dispatched
+            # through the .ps1 shim as `npm pm -g` and fails with
+            # "Unknown command: pm". Verify by placing an npm.cmd stub on
+            # a temp PATH that echoes a known path, and asserting we
+            # actually invoked it (not the broken default npm).
+            $stubDir = New-TempDir
+            $script:TempRoots.Add($stubDir)
+            $expected = (Join-Path $stubDir 'global-root').Replace('\','/')
+            New-Item -ItemType Directory -Path (Join-Path $stubDir 'global-root') | Out-Null
+
+            # The .cmd stub: if invoked correctly with `prefix -g`, echo $expected.
+            # If the .ps1 shim were invoked instead, it would never reach this.
+            $stubCmd = Join-Path $stubDir 'npm.cmd'
+            @"
+@echo off
+if "%1"=="prefix" if "%2"=="-g" (echo $($expected -replace '/','\') & exit /b 0)
+echo unexpected: %*
+exit /b 1
+"@ | Set-Content -Path $stubCmd -Encoding ASCII
+
+            $savedPath = $env:PATH
+            try {
+                $env:PATH = "$stubDir;$env:PATH"
+                $result = Get-NpmGlobalRoot
+                $result | Should -Be ($expected -replace '/','\')
+            } finally {
+                $env:PATH = $savedPath
+            }
+        }
+    }
+
     Context 'Resolve-NpmBin' {
         BeforeEach {
             $script:TmpRoot = New-TempDir
