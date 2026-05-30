@@ -117,98 +117,97 @@ Describe 'Update-PackageCompletion auto psc update (issue #223)' -Tag 'Light' {
 Describe 'Invoke-PscCatalogUpdate helper (issue #223)' -Tag 'Light' {
 
     BeforeEach {
-        # Inject a stub `psc` function in the module scope so production
-        # code's `Get-Command psc` and `& psc ...` find it. Records
-        # invocation summaries (joined arg strings) in module-scope flags.
-        InModuleScope MarkMichaelis.ScoopBucket {
+        # Stand up a fake `PSCompletions` module that exports a stub
+        # `psc` function. Production code now verifies that the command
+        # it invokes actually comes from a module named PSCompletions
+        # (not just any `psc` on PATH), so we cannot inject the stub
+        # via plain `function script:psc` in the bucket module scope.
+        $script:fakePscModule = New-Module -Name PSCompletions -ScriptBlock {
             $script:PscUpdateCalls = 0
             $script:PscConfigCalls = 0
             $script:PscLastUpdateArg = $null
             $script:PscLastConfigArgs = $null
-            function script:psc {
+            $script:PscThrows = $false
+            $script:PscThrowsOnUpdate = $false
+            function psc {
                 param()
                 if ($args.Count -ge 1 -and $args[0] -eq 'update') {
                     $script:PscUpdateCalls++
                     if ($args.Count -ge 2) { $script:PscLastUpdateArg = [string]$args[1] }
+                    if ($script:PscThrows -or $script:PscThrowsOnUpdate) { throw 'simulated psc throw on update' }
                 } elseif ($args.Count -ge 1 -and $args[0] -eq 'config') {
                     $script:PscConfigCalls++
                     $script:PscLastConfigArgs = @($args | ForEach-Object { [string]$_ })
+                    if ($script:PscThrows) { throw 'simulated psc throw on config' }
                 }
             }
-        }
+            Export-ModuleMember -Function psc -Variable PscUpdateCalls,PscConfigCalls,PscLastUpdateArg,PscLastConfigArgs,PscThrows,PscThrowsOnUpdate
+        } | Import-Module -PassThru
     }
 
     AfterEach {
-        InModuleScope MarkMichaelis.ScoopBucket {
-            Remove-Item function:script:psc -ErrorAction Ignore
-            $script:PscUpdateCalls = $null
-            $script:PscConfigCalls = $null
-            $script:PscLastUpdateArg = $null
-            $script:PscLastConfigArgs = $null
+        if ($script:fakePscModule) {
+            Remove-Module -ModuleInfo $script:fakePscModule -Force -ErrorAction Ignore
+            $script:fakePscModule = $null
         }
     }
 
     It 'invokes `psc config enable_completions_update 0` after a successful `psc update *`' {
         InModuleScope MarkMichaelis.ScoopBucket {
-            Invoke-PscCatalogUpdate
-
-            $script:PscUpdateCalls | Should -Be 1
-            $script:PscLastUpdateArg | Should -Be '*'
-            $script:PscConfigCalls | Should -BeGreaterOrEqual 1
-            $script:PscLastConfigArgs | Should -Not -BeNullOrEmpty
-            $script:PscLastConfigArgs[1] | Should -Be 'enable_completions_update'
-            $script:PscLastConfigArgs[2] | Should -Be '0'
+            Invoke-PscCatalogUpdate -WarningAction SilentlyContinue
         }
+
+        $script:fakePscModule.SessionState.PSVariable.GetValue('PscUpdateCalls') | Should -Be 1
+        $script:fakePscModule.SessionState.PSVariable.GetValue('PscLastUpdateArg') | Should -Be '*'
+        $script:fakePscModule.SessionState.PSVariable.GetValue('PscConfigCalls') | Should -BeGreaterOrEqual 1
+        $cfg = @($script:fakePscModule.SessionState.PSVariable.GetValue('PscLastConfigArgs'))
+        $cfg | Should -Not -BeNullOrEmpty
+        $cfg[1] | Should -Be 'enable_completions_update'
+        $cfg[2] | Should -Be '0'
     }
 
     It 'does not throw under -WarningAction Stop (best-effort contract)' {
-        InModuleScope MarkMichaelis.ScoopBucket {
-            # Force every code path that emits a Write-Warning:
-            #   1. psc update throws -> warning
-            #   2. psc config throws -> warning + fallback
-            function script:psc {
-                param()
-                throw 'simulated psc failure'
-            }
+        $script:fakePscModule.SessionState.PSVariable.Set('PscThrows', $true)
 
-            $threw = $false
-            try {
+        $threw = $false
+        try {
+            InModuleScope MarkMichaelis.ScoopBucket {
                 Invoke-PscCatalogUpdate -WarningAction Stop
-            } catch {
-                $threw = $true
             }
-            $threw | Should -BeFalse
+        } catch {
+            $threw = $true
         }
+        $threw | Should -BeFalse
     }
 
     It 'emits Write-Warning and returns when `psc update *` throws (does not propagate)' {
-        InModuleScope MarkMichaelis.ScoopBucket {
-            # Override stub: throw on `update`, succeed on `config`.
-            function script:psc {
-                param()
-                if ($args.Count -ge 1 -and $args[0] -eq 'update') {
-                    $script:PscUpdateCalls++
-                    throw 'simulated __need_update_data exception'
-                }
-            }
+        $script:fakePscModule.SessionState.PSVariable.Set('PscThrowsOnUpdate', $true)
 
-            $warnings = $null
-            $threw = $false
-            try {
+        $warnings = $null
+        $threw = $false
+        try {
+            InModuleScope MarkMichaelis.ScoopBucket {
                 Invoke-PscCatalogUpdate -WarningVariable warnings -WarningAction SilentlyContinue
-            } catch {
-                $threw = $true
+                $script:CapturedWarnings = $warnings
             }
-            $threw | Should -BeFalse
-            $warnings = @($warnings)
-            $warnings.Count | Should -BeGreaterOrEqual 1
-            ($warnings | ForEach-Object { [string]$_ }) -join "`n" | Should -Match 'psc update'
+            $warnings = InModuleScope MarkMichaelis.ScoopBucket { $script:CapturedWarnings }
+        } catch {
+            $threw = $true
         }
+        $threw | Should -BeFalse
+        $warnings = @($warnings)
+        $warnings.Count | Should -BeGreaterOrEqual 1
+        ($warnings | ForEach-Object { [string]$_ }) -join "`n" | Should -Match 'psc update'
     }
 
     It 'edits the JSON config file directly when `psc config` itself throws (fallback path)' {
-        # Stage a fake PSCompletions module on disk so the fallback can
-        # find a `config.json` under (Get-Module).ModuleBase.
+        $script:fakePscModule.SessionState.PSVariable.Set('PscThrows', $true)
+
+        # Stage a config.json under our fake module's ModuleBase. Since
+        # `New-Module` does not give the module an on-disk ModuleBase,
+        # we have to stub `Get-Module PSCompletions` inside the helper
+        # to return a hand-crafted object whose ModuleBase points at a
+        # real directory.
         $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("PscFake-$([guid]::NewGuid().ToString('N'))")
         New-Item -ItemType Directory -Path $stage | Out-Null
         $configPath = Join-Path $stage 'config.json'
@@ -217,24 +216,26 @@ Describe 'Invoke-PscCatalogUpdate helper (issue #223)' -Tag 'Light' {
         try {
             InModuleScope MarkMichaelis.ScoopBucket -Parameters @{ Stage = $stage } {
                 param($Stage)
-
-                # psc command always throws so both update + config hit
-                # the catch path; the catch then runs the direct edit.
-                function script:psc { param() throw 'simulated psc throw' }
-
-                # Replace Get-Module so the helper resolves to our stage
-                # dir without polluting the real module loader.
-                $script:FakePscModule = [pscustomobject]@{ ModuleBase = $Stage; Name = 'PSCompletions' }
+                $script:FakePscBase = [pscustomobject]@{ ModuleBase = $Stage; Name = 'PSCompletions' }
+                # Override only the *single-argument* `Get-Module PSCompletions`
+                # call inside the fallback. Other call sites (e.g. resolving the
+                # imported test module) still hit the real Get-Module via splat.
                 function script:Get-Module {
-                    [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)][object[]]$Rest)
-                    return $script:FakePscModule
+                    [CmdletBinding()] param(
+                        [Parameter(ValueFromPipeline=$true,Position=0)][string[]]$Name,
+                        [switch]$ListAvailable,
+                        [Parameter(ValueFromRemainingArguments=$true)][object[]]$Rest
+                    )
+                    if ($Name -contains 'PSCompletions' -and -not $ListAvailable) {
+                        return $script:FakePscBase
+                    }
+                    Microsoft.PowerShell.Core\Get-Module @PSBoundParameters
                 }
-
                 try {
                     Invoke-PscCatalogUpdate -WarningAction SilentlyContinue
                 } finally {
                     Remove-Item function:script:Get-Module -ErrorAction Ignore
-                    $script:FakePscModule = $null
+                    $script:FakePscBase = $null
                 }
             }
 
@@ -246,3 +247,4 @@ Describe 'Invoke-PscCatalogUpdate helper (issue #223)' -Tag 'Light' {
         }
     }
 }
+
