@@ -105,7 +105,22 @@ if ($Uninstall) {
         }
         if ($pointsHere -or $Force) {
             if ($PSCmdlet.ShouldProcess($target, 'Remove MarkMichaelis.ScoopBucket junction')) {
-                Remove-Item -LiteralPath $target -Recurse -Force
+                if ($isJunction) {
+                    # PowerShell's Remove-Item -Recurse follows the
+                    # reparse point and tries to delete the *target*
+                    # contents (which fails with Access Denied if the
+                    # target is read-only or the junction has the
+                    # ReadOnly attribute set, as New-Item -ItemType
+                    # Junction does on some hosts). Strip ReadOnly
+                    # then use the .NET non-recursive Directory.Delete
+                    # which removes only the link itself.
+                    if (($existing.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
+                        $existing.Attributes = $existing.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+                    }
+                    [System.IO.Directory]::Delete($target, $false)
+                } else {
+                    Remove-Item -LiteralPath $target -Recurse -Force
+                }
                 Write-Host "Removed MarkMichaelis.ScoopBucket entry at $target."
             }
         } else {
