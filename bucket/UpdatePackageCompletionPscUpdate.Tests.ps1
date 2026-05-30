@@ -49,6 +49,17 @@ Invoke-PackageInstall -Packages `$Packages -Bundle 'PscBundle'
 Invoke-PackageInstall -Packages `$Packages -Bundle 'NoPscBundle'
 "@
 
+    # Bucket whose only pscompletions-mode entry is `Completion='auto'`
+    # WITHOUT a NativeCommandScript: effectiveMode collapses to
+    # 'pscompletions', so the catalog refresh must still fire.
+    $script:bucketAutoNoNative = New-TestBucket -BundleBody @"
+`$Packages = [Package[]]@(
+    [Package]@{ Name='AutoNoNative'; Installer='winget'; Id='Test.AutoNoNative'; CliCommands=@('$($script:onPathCli)-twin'); Completion='auto' }
+    [Package]@{ Name='NoneOnly';     Installer='winget'; Id='Test.NoneOnly';     CliCommands=@('$($script:onPathCli)-none'); Completion='none' }
+)
+Invoke-PackageInstall -Packages `$Packages -Bundle 'AutoNoNativeBundle'
+"@
+
     # Shim PATH so the synthetic CLIs resolve via Get-Command.
     $script:shimDir = Join-Path ([System.IO.Path]::GetTempPath()) ("pscupdate-shims-$([guid]::NewGuid().ToString('N'))")
     New-Item -ItemType Directory -Path $script:shimDir | Out-Null
@@ -61,7 +72,7 @@ Invoke-PackageInstall -Packages `$Packages -Bundle 'NoPscBundle'
 
 AfterAll {
     if ($script:savedPath) { $env:PATH = $script:savedPath }
-    foreach ($d in @($script:bucketWithPsc, $script:bucketNoPsc, $script:shimDir)) {
+    foreach ($d in @($script:bucketWithPsc, $script:bucketNoPsc, $script:bucketAutoNoNative, $script:shimDir)) {
         if ($d -and (Test-Path $d)) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction Ignore }
     }
 }
@@ -77,6 +88,25 @@ Describe 'Update-PackageCompletion auto psc update (issue #223)' -Tag 'Light' {
             Mock -ModuleName MarkMichaelis.ScoopBucket Register-PackageCompletion { [pscustomobject]@{ Source='PSCompletions'; Reason='mock' } }
 
             Update-PackageCompletion -BucketPath $script:bucketWithPsc -ProfilePath $profilePath -Confirm:$false | Out-Null
+
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket -CommandName Invoke-PscCatalogUpdate -Times 1 -Exactly
+        } finally {
+            if (Test-Path $profilePath) { Remove-Item -LiteralPath $profilePath -Force -ErrorAction Ignore }
+        }
+    }
+
+    It 'invokes Invoke-PscCatalogUpdate when the only eligible entry is Completion=auto without NativeCommandScript' {
+        # auto + no native script collapses to effective mode
+        # 'pscompletions' inside Update-PackageCompletion, so the
+        # catalog refresh must fire even though no entry is explicitly
+        # tagged Completion='pscompletions'. Behaviorally distinct from
+        # the prior test (which uses explicit pscompletions entries).
+        $profilePath = Join-Path ([System.IO.Path]::GetTempPath()) ("pscupd-profile-$([guid]::NewGuid().ToString('N')).ps1")
+        try {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-PscCatalogUpdate { } -Verifiable
+            Mock -ModuleName MarkMichaelis.ScoopBucket Register-PackageCompletion { [pscustomobject]@{ Source='PSCompletions'; Reason='mock' } }
+
+            Update-PackageCompletion -BucketPath $script:bucketAutoNoNative -ProfilePath $profilePath -Confirm:$false | Out-Null
 
             Should -Invoke -ModuleName MarkMichaelis.ScoopBucket -CommandName Invoke-PscCatalogUpdate -Times 1 -Exactly
         } finally {

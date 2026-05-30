@@ -67,8 +67,9 @@ function Invoke-PscCatalogUpdate {
         Write-Warning "Invoke-PscCatalogUpdate: PSCompletions loaded but 'psc' command not found; skipping catalog refresh."
         return
     }
-    if ($pscCmd.ModuleName -and $pscCmd.ModuleName -ne 'PSCompletions') {
-        Write-Warning "Invoke-PscCatalogUpdate: 'psc' resolves to module '$($pscCmd.ModuleName)' (expected 'PSCompletions'); skipping catalog refresh."
+    if ($pscCmd.ModuleName -ne 'PSCompletions') {
+        $resolved = if ($pscCmd.ModuleName) { "module '$($pscCmd.ModuleName)'" } else { "$($pscCmd.CommandType) '$($pscCmd.Source)'" }
+        Write-Warning "Invoke-PscCatalogUpdate: 'psc' resolves to $resolved (expected PSCompletions module function); skipping catalog refresh."
         return
     }
 
