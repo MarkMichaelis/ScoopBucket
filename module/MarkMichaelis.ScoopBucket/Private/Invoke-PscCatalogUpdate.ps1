@@ -35,7 +35,13 @@ function Invoke-PscCatalogUpdate {
     # non-terminating regardless of caller configuration.
     $WarningPreference = 'Continue'
 
-    if (-not (Get-Command psc -ErrorAction SilentlyContinue)) {
+    # Always ensure PSCompletions is loaded before invoking `psc`.
+    # PowerShell's command resolution order is function > cmdlet >
+    # alias > application, so once PSCompletions is loaded its exported
+    # `psc` function shadows any unrelated `psc` executable that may
+    # also be on PATH. If PSCompletions is not installed at all, return
+    # quietly -- the catalog refresh is meaningless without the module.
+    if (-not (Get-Module -Name PSCompletions)) {
         $pscModule = Get-Module -ListAvailable -Name PSCompletions | Select-Object -First 1
         if (-not $pscModule) {
             Write-Verbose 'Invoke-PscCatalogUpdate: PSCompletions not installed; skipping psc update *.'
@@ -52,6 +58,18 @@ function Invoke-PscCatalogUpdate {
             Write-Warning "Invoke-PscCatalogUpdate: Import-Module PSCompletions failed: $($_.Exception.Message)"
             return
         }
+    }
+    # Sanity check: confirm `psc` resolves to PSCompletions, not a PATH
+    # binary that somehow won the resolution race (e.g. a function
+    # alias pointed at an external executable).
+    $pscCmd = Get-Command psc -ErrorAction SilentlyContinue
+    if (-not $pscCmd) {
+        Write-Warning "Invoke-PscCatalogUpdate: PSCompletions loaded but 'psc' command not found; skipping catalog refresh."
+        return
+    }
+    if ($pscCmd.ModuleName -and $pscCmd.ModuleName -ne 'PSCompletions') {
+        Write-Warning "Invoke-PscCatalogUpdate: 'psc' resolves to module '$($pscCmd.ModuleName)' (expected 'PSCompletions'); skipping catalog refresh."
+        return
     }
 
     try {
