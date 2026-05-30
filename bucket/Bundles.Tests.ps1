@@ -333,6 +333,42 @@ Describe 'Specific cross-bundle placement contracts' -Tag 'Light','Bundle' {
         $collisions | Should -BeNullOrEmpty -Because "within-bundle CLI duplicates: $(($collisions | ForEach-Object { "$($_.Bundle):$($_.Cli) -> $($_.Packages -join '+')" }) -join '; ')"
     }
 
+    It 'node, npm, and npx are claimed as a completion source by exactly one bundle entry' {
+        # Regression guard for issue #222: a stale Node.js entry in
+        # DeveloperBasePackages declared CliCommands=@('node','npm') with
+        # Completion='pscompletions' while AIAgents already owns
+        # node/npm/npx via Completion='auto' + a hand-curated
+        # NativeCommandScript. With the resolver chicken-and-egg masking
+        # the pscompletions branch the duplication was inert today, but
+        # once that resolver bug is fixed both entries would write
+        # profile blocks for the same CLIs and the outcome becomes
+        # order-dependent.
+        #
+        # Some CLIs (e.g. 'code', 'devenv') are *intentionally* declared
+        # in more than one bundle because the Visual Studio install
+        # workflow needs them visible from multiple bundles. Those are
+        # validated by their own dedicated tests. Here we narrowly
+        # assert the node/npm/npx ownership contract: AIAgents alone
+        # owns the Node.js runtime CLIs because it ships the only
+        # NativeCommandScript that registers all three uniformly.
+        $targets = @('node','npm','npx')
+        $ownership = @{}
+        foreach ($p in $script:allPkgs) {
+            $mode = if ($p.Completion) { [string]$p.Completion } else { '' }
+            if ([string]::IsNullOrWhiteSpace($mode) -or $mode -eq 'none') { continue }
+            foreach ($cli in @($p.CliCommands)) {
+                if ($targets -notcontains $cli) { continue }
+                if (-not $ownership.ContainsKey($cli)) { $ownership[$cli] = @() }
+                $ownership[$cli] += "$($p.Bundle)/$($p.Name)[$mode]"
+            }
+        }
+        foreach ($cli in $targets) {
+            $claimers = @($ownership[$cli])
+            $claimers.Count | Should -Be 1 -Because "exactly one bundle entry must claim '$cli' as a completion source; got: $($claimers -join ', ')"
+            $claimers[0] | Should -BeLike 'AIAgents/Node.js*' -Because "AIAgents is the authoritative source for node/npm/npx completion (see comment near the AIAgents.ps1 Node.js entry)"
+        }
+    }
+
     It 'Claude Desktop is owned by the AIAgents bundle' {
         $script:byBundle.AIAgents.Name           | Should -Contain 'Claude Desktop'
         $script:byBundle.ClientBasePackages.Name | Should -Not -Contain 'Claude Desktop'
