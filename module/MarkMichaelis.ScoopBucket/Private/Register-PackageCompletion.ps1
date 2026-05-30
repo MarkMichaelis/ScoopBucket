@@ -13,7 +13,97 @@
 #   - Requires elevation to write to AllUsersAllHosts; honours
 #     SupportsShouldProcess.
 
-$script:CompletionSentinelVersion = 'v2'
+$script:CompletionSentinelVersion = 'v3'
+
+# Default sidecar root for cached native completer payloads (v3+, #216).
+# Each registered CLI gets <Dir>\<cli>.ps1 holding the raw payload --
+# `.ps1` lets the payload's leading `using namespace ...` parse legally,
+# which it cannot when inlined inside an OnIdle Action scriptblock.
+$script:CompletionSidecarDirDefault = if ($env:ProgramData) {
+    Join-Path $env:ProgramData 'ScoopBucket\completions'
+} else {
+    Join-Path ([System.IO.Path]::GetTempPath()) 'ScoopBucket\completions'
+}
+
+function Get-PackageCompletionSidecarDirectory {
+    <#
+    .SYNOPSIS
+        Resolve the directory that holds cached native completer payloads
+        (one `<cli>.ps1` per registered CLI). v3+ (#216).
+    .DESCRIPTION
+        Resolution order:
+          1. -OverrideDirectory wins (test hook).
+          2. When -ProfilePath is supplied AND differs from
+             $PROFILE.AllUsersAllHosts, use `<dir-of-ProfilePath>\completions`.
+             This keeps Pester sandboxes self-contained without an
+             additional explicit hook.
+          3. Otherwise return $script:CompletionSidecarDirDefault
+             ($env:ProgramData\ScoopBucket\completions).
+        Creates the directory on demand. Elevation is enforced upstream by
+        Get-PackageCompletionProfilePath -- the prod sidecar lives in
+        ProgramData which already requires admin to write to, and test
+        overrides bypass elevation.
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [string]$ProfilePath,
+        [string]$OverrideDirectory
+    )
+
+    $dir = $OverrideDirectory
+    if (-not $dir) {
+        if ($ProfilePath -and $ProfilePath -ne $PROFILE.AllUsersAllHosts) {
+            $dir = Join-Path (Split-Path -Parent $ProfilePath) 'completions'
+        } else {
+            $dir = $script:CompletionSidecarDirDefault
+        }
+    }
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    return $dir
+}
+
+function Write-PackageCompletionSidecar {
+    <#
+    .SYNOPSIS
+        Atomically write the raw native completer payload for $Cli to
+        `<Directory>\<Cli>.ps1` as UTF-8 (no BOM).
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Cli,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Payload,
+        [Parameter(Mandatory)][string]$Directory
+    )
+    $target = Join-Path $Directory ($Cli + '.ps1')
+    $tmp = "$target.tmp"
+    [System.IO.File]::WriteAllText($tmp, $Payload, [System.Text.UTF8Encoding]::new($false))
+    Move-Item -Path $tmp -Destination $target -Force
+    return $target
+}
+
+function Remove-PackageCompletionSidecar {
+    <#
+    .SYNOPSIS
+        Delete `<Directory>\<Cli>.ps1` if it exists. Inverse of
+        Write-PackageCompletionSidecar. Silent no-op when absent.
+    #>
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Cli,
+        [Parameter(Mandatory)][string]$Directory
+    )
+    $target = Join-Path $Directory ($Cli + '.ps1')
+    if (Test-Path $target) {
+        Remove-Item -LiteralPath $target -Force -ErrorAction Stop
+        return $true
+    }
+    return $false
+}
 
 function Format-DeferredCompletionBlock {
     <#
@@ -87,7 +177,12 @@ function Resolve-PackageCompletionSource {
         try { $native = & $NativeCommand $Cli 2>$null | Out-String } catch { }
         if ($native -and $native.Trim()) {
             $guarded = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n$native}"
-            return @{ Source = 'Native'; Code = $guarded; PSCompletionsName = $null }
+            # NativePayload is the RAW completer text (may start with
+            # `using namespace ...`); callers that persist to a sidecar
+            # .ps1 use it verbatim. `Code` is the legacy in-runspace form
+            # wrapped in a Get-Command guard, still used by
+            # Import-PackageCompletion's synchronous execution path.
+            return @{ Source = 'Native'; Code = $guarded; PSCompletionsName = $null; NativePayload = $native }
         }
     }
 
@@ -171,7 +266,10 @@ function Remove-PackageCompletionBlock {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)][string]$Cli,
-        [string]$ProfilePath
+        [string]$ProfilePath,
+        # Test hook: read/delete sidecars from here instead of
+        # $env:ProgramData\ScoopBucket\completions. v3+ (#216).
+        [string]$SidecarDirectory
     )
 
     $target = Get-PackageCompletionProfilePath -OverridePath $ProfilePath
@@ -207,6 +305,17 @@ function Remove-PackageCompletionBlock {
     $tmp = "$target.tmp"
     [System.IO.File]::WriteAllText($tmp, $stripped.Content, [System.Text.UTF8Encoding]::new($false))
     Move-Item -Path $tmp -Destination $target -Force
+
+    # v3 (#216): also delete the matching sidecar `<cli>.ps1` so we
+    # don't leave orphaned cached payloads behind when a CLI is
+    # uninstalled. Silent no-op if no sidecar exists (e.g. PSCompletions
+    # source, or never registered under v3).
+    try {
+        $sidecarDir = Get-PackageCompletionSidecarDirectory -ProfilePath $target -OverrideDirectory $SidecarDirectory
+        Remove-PackageCompletionSidecar -Cli $Cli -Directory $sidecarDir | Out-Null
+    } catch {
+        Write-Warning "Remove-PackageCompletionBlock: failed to remove sidecar for '$Cli': $($_.Exception.Message)"
+    }
 
     return [pscustomobject]@{
         Cli = $Cli; Action = 'Removed'; ProfilePath = $target; Reason = $null
@@ -278,7 +387,10 @@ function Register-PackageCompletion {
         # native invocation entirely -- this is the fast path that
         # avoids re-spawning the CLI's `<cli> completions powershell`
         # at every install/update (#212).
-        [string]$PreCapturedNative
+        [string]$PreCapturedNative,
+        # Test hook: write `<dir>\<cli>.ps1` sidecars here instead of
+        # $env:ProgramData\ScoopBucket\completions. v3+ (#216).
+        [string]$SidecarDirectory
     )
 
     $target = Get-PackageCompletionProfilePath -OverridePath $ProfilePath
@@ -296,7 +408,7 @@ function Register-PackageCompletion {
     $resolved = $null
     if ($PreCapturedNative -and $PreCapturedNative.Trim() -and $Mode -ne 'pscompletions') {
         $guarded = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n$PreCapturedNative}"
-        $resolved = @{ Source = 'Native'; Code = $guarded; PSCompletionsName = $null }
+        $resolved = @{ Source = 'Native'; Code = $guarded; PSCompletionsName = $null; NativePayload = $PreCapturedNative }
     } else {
         $resolveSplat = @{ Cli = $Cli }
         if ($NativeCommand -and $Mode -ne 'pscompletions') {
@@ -354,7 +466,21 @@ function Register-PackageCompletion {
     # the prompt is drawn (#212). In-runspace activation via
     # Import-PackageCompletion deliberately bypasses this -- the user
     # there is asking to register NOW, not on next idle.
-    $deferred = Format-DeferredCompletionBlock -InnerCode $resolved.Code
+    #
+    # v3 (#216): for Native sources, persist the raw payload to a
+    # sidecar `<cli>.ps1` and make the deferred body a tiny dot-source.
+    # `.ps1` files are the only place a leading `using namespace ...`
+    # parses legally; inlining the payload inside the OnIdle Action
+    # block (as v2 did) is a fatal parse error for clap/Rust completers
+    # whose first line IS `using namespace System.Management.Automation`.
+    if ($resolved.Source -eq 'Native' -and $resolved.NativePayload) {
+        $sidecarDir  = Get-PackageCompletionSidecarDirectory -ProfilePath $target -OverrideDirectory $SidecarDirectory
+        $sidecarPath = Write-PackageCompletionSidecar -Cli $Cli -Payload $resolved.NativePayload -Directory $sidecarDir
+        $innerCode = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n    . '$sidecarPath'`r`n}"
+    } else {
+        $innerCode = $resolved.Code
+    }
+    $deferred = Format-DeferredCompletionBlock -InnerCode $innerCode
 
     $newContent = Set-PackageCompletionProfileBlock -Content $content -Cli $Cli -Block $deferred
     $tmp = "$target.tmp"

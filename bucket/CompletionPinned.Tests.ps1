@@ -58,15 +58,19 @@ Describe 'CliCompletion pinned contract -- per-bundle native registration' -Tag 
         @($pkg.ExpectedCompletions[$Cli]).Count | Should -BeGreaterThan 0 -Because "ExpectedCompletions['$Cli'] must list at least one expected subcommand"
     }
 
-    It 'uses sentinel version v2' {
+    It 'uses sentinel version v3' {
         # $script:CompletionSentinelVersion lives inside the module and is not
         # visible from this test runspace; assert against the source instead so
         # any bump of the sentinel format requires updating this guard too.
-        # v2 (#212) wraps the cached completer payload in
-        # Register-EngineEvent PowerShell.OnIdle -MaxTriggerCount 1 -Action
-        # so startup defers registration until the first idle tick.
+        # v3 (#216) persists each cached native completer payload to a
+        # sidecar .ps1 file under $env:ProgramData\ScoopBucket\completions
+        # and emits a tiny `. '<sidecar>.ps1'` dot-source inside the OnIdle
+        # Action body. This is required because clap/Rust-derived completers
+        # emit a leading `using namespace System.Management.Automation` which
+        # the parser only accepts as the FIRST statement of a script file --
+        # never inside an if/Action scriptblock (v2's regression).
         $src = Get-Content -Raw -Path (Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\Private\Register-PackageCompletion.ps1')
-        $src | Should -Match "(?m)^\s*\`$script:CompletionSentinelVersion\s*=\s*'v2'\s*$" -Because 'Register-PackageCompletion.ps1 must pin sentinel version v2'
+        $src | Should -Match "(?m)^\s*\`$script:CompletionSentinelVersion\s*=\s*'v3'\s*$" -Because 'Register-PackageCompletion.ps1 must pin sentinel version v3'
     }
 
     It 'Register-CliCompletion exposes the -NativeCommand parameter' {

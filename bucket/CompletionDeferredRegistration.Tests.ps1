@@ -40,8 +40,16 @@ Describe 'Register-PackageCompletion: deferred OnIdle wrap + cached native text'
             Register-PackageCompletion -Cli demo1 -NativeCommand $nc -Mode native -ProfilePath $ProfilePath -Confirm:$false | Out-Null
         }
         $raw = Get-Content -Raw -Path $script:profilePath
-        $raw | Should -Match 'ScoopBucket:CliCompletion:demo1:BEGIN v2'
+        $raw | Should -Match 'ScoopBucket:CliCompletion:demo1:BEGIN v3'
         $raw | Should -Match 'Register-EngineEvent -SourceIdentifier PowerShell\.OnIdle -MaxTriggerCount 1'
+        # v3 (#216): the OnIdle Action body now dot-sources a sidecar
+        # `<cli>.ps1`; the raw Register-ArgumentCompleter call lives in
+        # that sidecar so payloads beginning with `using namespace ...`
+        # can parse legally.
+        $raw | Should -Match "(?m)\.\s+'.*?demo1\.ps1'"
+        $sidecar = Join-Path (Split-Path -Parent $script:profilePath) 'completions\demo1.ps1'
+        Test-Path $sidecar | Should -BeTrue
+        (Get-Content -Raw -Path $sidecar) | Should -Match 'Register-ArgumentCompleter -Native -CommandName demo1'
     }
 
     It '-PreCapturedNative overrides NativeCommand (the scriptblock is not invoked)' {
@@ -57,11 +65,16 @@ Describe 'Register-PackageCompletion: deferred OnIdle wrap + cached native text'
         }
         $result.Invocations | Should -Be 0
         $raw = Get-Content -Raw -Path $script:profilePath
-        $raw | Should -Match 'Register-ArgumentCompleter -Native -CommandName demo2'
         $raw | Should -Match 'Register-EngineEvent -SourceIdentifier PowerShell\.OnIdle'
+        # v3: cached completer text lives in the sidecar, not inline in
+        # the profile.
+        $sidecar = Join-Path (Split-Path -Parent $script:profilePath) 'completions\demo2.ps1'
+        Test-Path $sidecar | Should -BeTrue
+        (Get-Content -Raw -Path $sidecar) | Should -Match 'Register-ArgumentCompleter -Native -CommandName demo2'
+        $raw | Should -Match "(?m)\.\s+'.*?demo2\.ps1'"
     }
 
-    It 'rewrites an existing v1 block as v2 on re-register (transparent migration)' {
+    It 'rewrites an existing v1 block as v3 on re-register (transparent migration)' {
         $v1 = @"
 # ScoopBucket:CliCompletion:demo3:BEGIN v1
 if (Get-Command demo3 -ErrorAction SilentlyContinue) {
@@ -79,12 +92,12 @@ Register-ArgumentCompleter -Native -CommandName demo3 -ScriptBlock { }
         }
         $raw = Get-Content -Raw -Path $script:profilePath
         ([regex]::Matches($raw, 'ScoopBucket:CliCompletion:demo3:BEGIN').Count) | Should -Be 1
-        $raw | Should -Match 'ScoopBucket:CliCompletion:demo3:BEGIN v2'
+        $raw | Should -Match 'ScoopBucket:CliCompletion:demo3:BEGIN v3'
         $raw | Should -Match 'Register-EngineEvent -SourceIdentifier PowerShell\.OnIdle'
         $raw | Should -Not -Match 'ScoopBucket:CliCompletion:demo3:BEGIN v1'
     }
 
-    It 'profile-load critical path contains no top-level subprocess call (subprocess body sits inside the deferred Action)' {
+    It 'profile-load critical path contains no top-level subprocess call (subprocess body sits inside the sidecar, not the profile)' {
         $profilePath = $script:profilePath
         InModuleScope MarkMichaelis.ScoopBucket -Parameters @{ ProfilePath = $profilePath } {
             param($ProfilePath)
@@ -92,7 +105,12 @@ Register-ArgumentCompleter -Native -CommandName demo3 -ScriptBlock { }
             Register-PackageCompletion -Cli demo4 -NativeCommand $subprocessy -Mode native -ProfilePath $ProfilePath -Confirm:$false | Out-Null
         }
         $raw = Get-Content -Raw -Path $script:profilePath
-        $m = [regex]::Match($raw, '(?ms)^\# ScoopBucket:CliCompletion:demo4:BEGIN v2\r?\n(.+?)^\# ScoopBucket:CliCompletion:demo4:END')
+        # v3: subprocess text is persisted to the sidecar and NEVER
+        # appears in the profile itself; the profile only dot-sources
+        # the sidecar from inside the deferred OnIdle Action.
+        $raw | Should -Not -Match '(?m)warp\.exe'
+        $raw | Should -Not -Match 'Invoke-Expression'
+        $m = [regex]::Match($raw, '(?ms)^\# ScoopBucket:CliCompletion:demo4:BEGIN v3\r?\n(.+?)^\# ScoopBucket:CliCompletion:demo4:END')
         $m.Success | Should -BeTrue
         $body = $m.Groups[1].Value
 
@@ -101,6 +119,12 @@ Register-ArgumentCompleter -Native -CommandName demo3 -ScriptBlock { }
         $criticalPath = $body.Substring(0, $idx)
         $criticalPath | Should -Not -Match '(?m)^\s*&\s'
         $criticalPath | Should -Not -Match 'Invoke-Expression'
+
+        # The subprocess text lives in the sidecar -- confirm the sidecar
+        # was written, but stays off the profile critical path.
+        $sidecar = Join-Path (Split-Path -Parent $script:profilePath) 'completions\demo4.ps1'
+        Test-Path $sidecar | Should -BeTrue
+        (Get-Content -Raw -Path $sidecar) | Should -Match 'warp\.exe'
     }
 }
 
@@ -129,7 +153,7 @@ Describe 'Import-PackageCompletion: synchronous, no OnIdle deferral' -Tag 'Light
     }
 }
 
-Describe 'Update-PackageCompletion: -Force rewrites stale v1 blocks as v2 + OnIdle' -Tag 'Light','DeferredCompletion' {
+Describe 'Update-PackageCompletion: -Force rewrites stale v1/v2 blocks as v3 + OnIdle + sidecar' -Tag 'Light','DeferredCompletion' {
 
     BeforeAll {
         $psd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
@@ -150,7 +174,7 @@ Describe 'Update-PackageCompletion: -Force rewrites stale v1 blocks as v2 + OnId
         if (Test-Path $script:sandbox2) { Remove-Item -Recurse -Force $script:sandbox2 -ErrorAction SilentlyContinue }
     }
 
-    It '-Force replaces a v1 block with a v2 OnIdle-wrapped block' {
+    It '-Force replaces a v1 block with a v3 OnIdle + sidecar block' {
         if (-not $script:realCli) {
             Set-ItResult -Skipped -Because 'No reference CLI on PATH for the test to anchor on.'
             return
@@ -182,8 +206,11 @@ Register-ArgumentCompleter -Native -CommandName $cli -ScriptBlock { }
 
         Update-PackageCompletion -Force -ProfilePath $script:profilePath2 -Confirm:$false | Out-Null
         $raw = Get-Content -Raw -Path $script:profilePath2
-        $raw | Should -Match "ScoopBucket:CliCompletion:$cli`:BEGIN v2"
+        $raw | Should -Match "ScoopBucket:CliCompletion:$cli`:BEGIN v3"
         $raw | Should -Match 'Register-EngineEvent -SourceIdentifier PowerShell\.OnIdle'
-        $raw | Should -Match 'refreshed'
+        # v3: the refreshed text now lives in the sidecar, not the profile.
+        $sidecar = Join-Path (Split-Path -Parent $script:profilePath2) "completions\$cli.ps1"
+        Test-Path $sidecar | Should -BeTrue
+        (Get-Content -Raw -Path $sidecar) | Should -Match 'refreshed'
     }
 }
