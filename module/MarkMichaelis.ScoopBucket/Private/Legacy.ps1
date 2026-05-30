@@ -51,20 +51,33 @@ function Initialize-ScoopEnvironment {
     }
     $env:SCOOP = $resolved
     $currentScoopDirectory = "$env:SCOOP\apps\scoop\current"
-    foreach ($rel in @(
-            'lib\core.ps1',
-            'lib\buckets.ps1',
-            'lib\manifest.ps1'
-        )) {
+    $required = @(
+        'lib\core.ps1',
+        'lib\buckets.ps1',
+        'lib\manifest.ps1'
+    )
+    $missing = @()
+    foreach ($rel in $required) {
         $p = Join-Path $currentScoopDirectory $rel
         if (Test-Path $p) {
             # *>$null suppresses every stream so library banners don't
             # leak into callers.
             . $p *>$null
+        } else {
+            $missing += $rel
         }
     }
-    # Only set the guard after every file dot-sourced cleanly; any throw
-    # above propagates and leaves the guard false (retry-friendly).
+    if ($missing.Count -gt 0) {
+        # Leave the guard $false so a retry after the scoop install is
+        # repaired re-attempts the dot-source (matches the throw-path
+        # contract). Missing libs are not the same as a broken scoop and
+        # may be transient (e.g. mid-install), so warn rather than throw.
+        Write-Verbose "Initialize-ScoopEnvironment: missing scoop libs under '$currentScoopDirectory' ($($missing -join ', ')); guard left false for retry."
+        return
+    }
+    # Only set the guard after every required file dot-sourced cleanly;
+    # any throw above propagates and leaves the guard false
+    # (retry-friendly).
     $script:ScoopEnvironmentInitialized = $true
 }
 
