@@ -161,6 +161,26 @@ Describe 'Invoke-PscCatalogUpdate helper (issue #223)' -Tag 'Light' {
         }
     }
 
+    It 'does not throw under -WarningAction Stop (best-effort contract)' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            # Force every code path that emits a Write-Warning:
+            #   1. psc update throws -> warning
+            #   2. psc config throws -> warning + fallback
+            function script:psc {
+                param()
+                throw 'simulated psc failure'
+            }
+
+            $threw = $false
+            try {
+                Invoke-PscCatalogUpdate -WarningAction Stop
+            } catch {
+                $threw = $true
+            }
+            $threw | Should -BeFalse
+        }
+    }
+
     It 'emits Write-Warning and returns when `psc update *` throws (does not propagate)' {
         InModuleScope MarkMichaelis.ScoopBucket {
             # Override stub: throw on `update`, succeed on `config`.

@@ -28,6 +28,13 @@ function Invoke-PscCatalogUpdate {
     [CmdletBinding()]
     param()
 
+    # Best-effort contract: the helper MUST NOT propagate errors.
+    # Callers may set -WarningAction Stop or $WarningPreference = 'Stop',
+    # which would make plain Write-Warning terminating. Override the
+    # local warning preference so every Write-Warning below stays
+    # non-terminating regardless of caller configuration.
+    $WarningPreference = 'Continue'
+
     if (-not (Get-Command psc -ErrorAction SilentlyContinue)) {
         $pscModule = Get-Module -ListAvailable -Name PSCompletions | Select-Object -First 1
         if (-not $pscModule) {
