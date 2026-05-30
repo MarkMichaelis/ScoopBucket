@@ -53,8 +53,9 @@ function Update-PackageCompletion {
     .OUTPUTS
         PSCustomObject[] — one record per (Cli, Package) candidate,
         with Cli, Package, Bundle, Mode, Action (Registered | Preserved
-        | Skipped | WhatIf), Source (Native | Skipped — PSCompletions
-        was removed in #241), and Reason fields.
+        | Skipped | WhatIf), Source (Native | Existing | Skipped —
+        'Existing' accompanies Action='Preserved'; PSCompletions was
+        removed in #241), and Reason fields.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     [OutputType([pscustomobject[]])]
