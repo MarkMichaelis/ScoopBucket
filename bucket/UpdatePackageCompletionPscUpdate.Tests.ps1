@@ -205,4 +205,44 @@ Describe 'Invoke-PscCatalogUpdate helper (issue #223)' -Tag 'Light' {
             ($warnings | ForEach-Object { [string]$_ }) -join "`n" | Should -Match 'psc update'
         }
     }
+
+    It 'edits the JSON config file directly when `psc config` itself throws (fallback path)' {
+        # Stage a fake PSCompletions module on disk so the fallback can
+        # find a `config.json` under (Get-Module).ModuleBase.
+        $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("PscFake-$([guid]::NewGuid().ToString('N'))")
+        New-Item -ItemType Directory -Path $stage | Out-Null
+        $configPath = Join-Path $stage 'config.json'
+        '{ "enable_completions_update": "1", "other": "keep" }' | Set-Content -Path $configPath -Encoding UTF8
+
+        try {
+            InModuleScope MarkMichaelis.ScoopBucket -Parameters @{ Stage = $stage } {
+                param($Stage)
+
+                # psc command always throws so both update + config hit
+                # the catch path; the catch then runs the direct edit.
+                function script:psc { param() throw 'simulated psc throw' }
+
+                # Replace Get-Module so the helper resolves to our stage
+                # dir without polluting the real module loader.
+                $script:FakePscModule = [pscustomobject]@{ ModuleBase = $Stage; Name = 'PSCompletions' }
+                function script:Get-Module {
+                    [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)][object[]]$Rest)
+                    return $script:FakePscModule
+                }
+
+                try {
+                    Invoke-PscCatalogUpdate -WarningAction SilentlyContinue
+                } finally {
+                    Remove-Item function:script:Get-Module -ErrorAction Ignore
+                    $script:FakePscModule = $null
+                }
+            }
+
+            $after = Get-Content -Path $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            [string]$after.enable_completions_update | Should -Be '0'
+            [string]$after.other                     | Should -Be 'keep'
+        } finally {
+            Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Ignore
+        }
+    }
 }
