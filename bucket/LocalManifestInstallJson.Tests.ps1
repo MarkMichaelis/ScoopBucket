@@ -72,8 +72,8 @@ Describe 'Update-LocalManifestInstallMetadata' -Tag 'Light' {
 
         $urls = (Get-Content (Join-Path $fake.CurrentDir 'manifest.json') -Raw | ConvertFrom-Json).url
         @($urls) | Should -Be @(
-            'https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/Sample.ps1',
-            'https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/Utils.ps1'
+            'https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/Sample.ps1',
+            'https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/Utils.ps1'
         )
     }
 
