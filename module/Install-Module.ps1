@@ -6,7 +6,14 @@ param(
     # `Install-Package -Name <Tab>` argument completer fires on the
     # first keystroke without paying the ~1 s `Import-Module` cost on
     # every shell start. Pass -SkipProfile to suppress this.
-    [switch]$SkipProfile
+    [switch]$SkipProfile,
+
+    # Reverse a previous install: remove the sentinel-bracketed v1/v2
+    # block from $PROFILE.CurrentUserAllHosts AND remove the
+    # PSModulePath junction (only if it points back to this repo).
+    # After -Uninstall, use the module by `cd`-ing here and running
+    # `Import-Module .\module\MarkMichaelis.ScoopBucket`. See #251.
+    [switch]$Uninstall
 )
 
 <#
@@ -65,14 +72,59 @@ if (-not $userModulePath) {
     $userModulePath = Join-Path $HOME 'Documents\PowerShell\Modules'
 }
 
+$target = Join-Path $userModulePath 'MarkMichaelis.ScoopBucket'
+
+if ($Uninstall) {
+    # Strip the v1/v2 sentinel block from the profile (delegated to
+    # the same helper used by the install path).
+    $helper = Join-Path $PSScriptRoot 'Add-ScoopBucketProfileBlock.ps1'
+    if (Test-Path -LiteralPath $helper) {
+        $helperArgs = @{
+            ProfilePath = $PROFILE.CurrentUserAllHosts
+            Remove      = $true
+            Verbose     = $VerbosePreference -eq 'Continue'
+        }
+        if ($PSBoundParameters.ContainsKey('WhatIf')) { $helperArgs['WhatIf'] = $WhatIfPreference }
+        & $helper @helperArgs
+        Write-Host "Removed MarkMichaelis.ScoopBucket lazy-import block from $($PROFILE.CurrentUserAllHosts) (if present)."
+    } else {
+        Write-Warning "Profile-block helper not found at $helper; skipping profile cleanup."
+    }
+
+    # Remove the junction iff it points back to this repo. Leave any
+    # non-junction install (e.g. real directory from a different
+    # workflow) alone unless -Force is passed.
+    if (Test-Path -LiteralPath $target) {
+        $existing = Get-Item -LiteralPath $target -Force
+        $isJunction = ($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+        $pointsHere = $false
+        if ($isJunction -and $existing.Target) {
+            try {
+                $pointsHere = (Resolve-Path -LiteralPath $existing.Target).Path -eq (Resolve-Path -LiteralPath $source).Path
+            } catch { $pointsHere = $false }
+        }
+        if ($pointsHere -or $Force) {
+            if ($PSCmdlet.ShouldProcess($target, 'Remove MarkMichaelis.ScoopBucket junction')) {
+                Remove-Item -LiteralPath $target -Recurse -Force
+                Write-Host "Removed MarkMichaelis.ScoopBucket entry at $target."
+            }
+        } else {
+            Write-Warning "Entry at $target is not a junction to this repo; leaving it in place. Pass -Force to remove anyway."
+        }
+    } else {
+        Write-Verbose "No MarkMichaelis.ScoopBucket entry at $target; nothing to remove."
+    }
+
+    Write-Host "Uninstall complete. To use the module from this repo: cd here and run 'Import-Module .\module\MarkMichaelis.ScoopBucket'."
+    return
+}
+
 if (-not (Test-Path -LiteralPath $userModulePath -PathType Container)) {
     Write-Verbose "Creating module path: $userModulePath"
     if ($PSCmdlet.ShouldProcess($userModulePath, 'New-Item -ItemType Directory')) {
         New-Item -ItemType Directory -Force -Path $userModulePath | Out-Null
     }
 }
-
-$target = Join-Path $userModulePath 'MarkMichaelis.ScoopBucket'
 
 if (Test-Path -LiteralPath $target) {
     $existing = Get-Item -LiteralPath $target -Force

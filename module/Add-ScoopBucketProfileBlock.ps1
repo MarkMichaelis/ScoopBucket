@@ -2,7 +2,12 @@
 param(
     # Override the target profile (default: $PROFILE.CurrentUserAllHosts).
     # Tests pass a temp path here so they don't disturb the host.
-    [string]$ProfilePath = $PROFILE.CurrentUserAllHosts
+    [string]$ProfilePath = $PROFILE.CurrentUserAllHosts,
+
+    # Strip any existing MarkMichaelis.ScoopBucket sentinel block
+    # (v1 or v2) instead of emitting one. Used by
+    # Install-Module.ps1 -Uninstall (#251).
+    [switch]$Remove
 )
 
 <#
@@ -83,6 +88,29 @@ $endMarker
 
 if (-not $ProfilePath) {
     throw 'ProfilePath is empty; cannot emit MarkMichaelis.ScoopBucket profile block.'
+}
+
+if ($Remove) {
+    if (-not (Test-Path -LiteralPath $ProfilePath)) {
+        Write-Verbose "No profile at $ProfilePath; nothing to remove."
+        return
+    }
+    $current = Get-Content -Raw -LiteralPath $ProfilePath -ErrorAction SilentlyContinue
+    if ($null -eq $current -or $current -eq '') {
+        Write-Verbose "Profile $ProfilePath is empty; nothing to remove."
+        return
+    }
+    $removalPattern = '(?s)\r?\n?' + [regex]::Escape($beginV1Marker) + '.*?' + [regex]::Escape($endMarker) + '\r?\n?'
+    if (-not [regex]::IsMatch($current, $removalPattern)) {
+        Write-Verbose "No MarkMichaelis.ScoopBucket sentinel block found in $ProfilePath."
+        return
+    }
+    $updated = [regex]::Replace($current, $removalPattern, "`n")
+    if ($PSCmdlet.ShouldProcess($ProfilePath, 'Remove MarkMichaelis.ScoopBucket import block')) {
+        Set-Content -LiteralPath $ProfilePath -Value $updated -Encoding UTF8
+        Write-Verbose "Removed MarkMichaelis.ScoopBucket import block from $ProfilePath."
+    }
+    return
 }
 
 if (-not (Test-Path -LiteralPath $ProfilePath)) {

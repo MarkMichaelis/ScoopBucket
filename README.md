@@ -134,6 +134,24 @@ auto-load), saving ~1 s of cold pwsh startup. Re-running
 `Install-Module.ps1` migrates the legacy v1 eager-`Import-Module`
 block in-place.
 
+**Per-directory-only usage (no global install):** if you only use this
+bucket from inside the repo and don't want *any* profile / PSModulePath
+footprint, run:
+
+```powershell
+pwsh -File .\module\Install-Module.ps1 -Uninstall
+```
+
+`-Uninstall` strips the sentinel block from `$PROFILE.CurrentUserAllHosts`
+and removes the `MarkMichaelis.ScoopBucket` junction from your user
+module path (only if the junction points back to this repo). Then load
+the module on demand:
+
+```powershell
+cd C:\path\to\scoop
+Import-Module .\module\MarkMichaelis.ScoopBucket
+```
+
 Note: `Install-Package` and `Get-Package` deliberately shadow the
 rarely-used built-in `PackageManagement` cmdlets of the same name. The
 OneGet cmdlets remain reachable as `PackageManagement\Install-Package`

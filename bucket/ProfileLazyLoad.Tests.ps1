@@ -189,3 +189,74 @@ if (-not (Get-Module -Name MarkMichaelis.ScoopBucket)) {
         }
     }
 }
+
+Describe 'Add-ScoopBucketProfileBlock.ps1 -Remove strips the sentinel block (#251)' -Tag 'Light','Module' {
+    It 'removes a v2 sentinel block in place, preserving surrounding content' {
+        $tempProfile = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-remove-v2-$([guid]::NewGuid().ToString('N')).ps1"
+        try {
+            $before = "Write-Host 'before'`n"
+            $after  = "`nWrite-Host 'after'`n"
+            Set-Content -LiteralPath $tempProfile -Value $before -Encoding utf8
+            & $script:helperScript -ProfilePath $tempProfile | Out-Null
+            Add-Content -LiteralPath $tempProfile -Value $after -Encoding utf8
+
+            & $script:helperScript -ProfilePath $tempProfile -Remove | Out-Null
+            $content = Get-Content -Raw -LiteralPath $tempProfile
+
+            $content | Should -Not -Match '# MarkMichaelis\.ScoopBucket:Import:BEGIN'
+            $content | Should -Not -Match '# MarkMichaelis\.ScoopBucket:Import:END'
+            $content | Should -Match "Write-Host 'before'"
+            $content | Should -Match "Write-Host 'after'"
+        } finally {
+            Remove-Item -LiteralPath $tempProfile -ErrorAction Ignore
+        }
+    }
+
+    It 'removes a legacy v1 sentinel block too' {
+        $tempProfile = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-remove-v1-$([guid]::NewGuid().ToString('N')).ps1"
+        try {
+            $v1Block = @'
+# MarkMichaelis.ScoopBucket:Import:BEGIN
+if (-not (Get-Module -Name MarkMichaelis.ScoopBucket)) {
+    Import-Module MarkMichaelis.ScoopBucket -ErrorAction SilentlyContinue
+}
+# MarkMichaelis.ScoopBucket:Import:END
+'@
+            Set-Content -LiteralPath $tempProfile -Value $v1Block -Encoding utf8
+
+            & $script:helperScript -ProfilePath $tempProfile -Remove | Out-Null
+            $content = Get-Content -Raw -LiteralPath $tempProfile -ErrorAction SilentlyContinue
+            if ($null -eq $content) { $content = '' }
+
+            $content | Should -Not -Match '# MarkMichaelis\.ScoopBucket:Import:BEGIN'
+            $content | Should -Not -Match 'Import-Module MarkMichaelis\.ScoopBucket'
+        } finally {
+            Remove-Item -LiteralPath $tempProfile -ErrorAction Ignore
+        }
+    }
+
+    It 'is a no-op when the profile has no sentinel block' {
+        $tempProfile = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-remove-noop-$([guid]::NewGuid().ToString('N')).ps1"
+        try {
+            $original = "# unrelated profile content`nWrite-Host 'hi'`n"
+            Set-Content -LiteralPath $tempProfile -Value $original -Encoding utf8
+
+            & $script:helperScript -ProfilePath $tempProfile -Remove | Out-Null
+            $content = Get-Content -Raw -LiteralPath $tempProfile
+
+            $content.TrimEnd() | Should -Be $original.TrimEnd()
+        } finally {
+            Remove-Item -LiteralPath $tempProfile -ErrorAction Ignore
+        }
+    }
+}
+
+Describe 'Install-Module.ps1 -Uninstall surfaces the -Remove path (#251)' -Tag 'Light','Module' {
+    It 'accepts -Uninstall and runs without throwing under -WhatIf' {
+        # We invoke under -WhatIf so the host's real profile / junction
+        # are not modified. The contract here is only: the script
+        # parses the new switch and reaches the uninstall branch
+        # without throwing.
+        { & $script:installScript -Uninstall -WhatIf } | Should -Not -Throw
+    }
+}
