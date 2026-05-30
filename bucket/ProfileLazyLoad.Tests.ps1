@@ -99,6 +99,7 @@ Describe 'v2 stub completer triggers import and returns real suggestions on firs
             # default file-fallback would clearly produce '.git' etc.
             # if the stub completer didn't fire.
             $probe = @"
+`$env:PSModulePath = '$($script:repoRoot.Replace("'","''"))\module' + [IO.Path]::PathSeparator + `$env:PSModulePath
 . '$tempProfile'
 Set-Location '$($script:repoRoot)'
 `$r = [System.Management.Automation.CommandCompletion]::CompleteInput('Install-Package -Name ', 22, `$null)
@@ -131,6 +132,7 @@ Set-Location '$($script:repoRoot)'
             Set-Content -LiteralPath $tempProfile -Value $block -Encoding utf8
 
             $probe = @"
+`$env:PSModulePath = '$($script:repoRoot.Replace("'","''"))\module' + [IO.Path]::PathSeparator + `$env:PSModulePath
 . '$tempProfile'
 [System.Management.Automation.CommandCompletion]::CompleteInput('Install-Package -Name ', 22, `$null) | Out-Null
 if (Get-Module MarkMichaelis.ScoopBucket) { 'LOADED' } else { 'UNLOADED' }
