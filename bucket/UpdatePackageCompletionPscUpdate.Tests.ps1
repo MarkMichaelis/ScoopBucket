@@ -72,10 +72,26 @@ Describe 'Update-PackageCompletion auto psc update (issue #223)' -Tag 'Light' {
         $profilePath = Join-Path ([System.IO.Path]::GetTempPath()) ("pscupd-profile-$([guid]::NewGuid().ToString('N')).ps1")
         try {
             Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-PscCatalogUpdate { } -Verifiable
+            # Mock Register-PackageCompletion so the test does not write
+            # the real profile and stays focused on the catalog gate.
+            Mock -ModuleName MarkMichaelis.ScoopBucket Register-PackageCompletion { [pscustomobject]@{ Source='PSCompletions'; Reason='mock' } }
+
+            Update-PackageCompletion -BucketPath $script:bucketWithPsc -ProfilePath $profilePath -Confirm:$false | Out-Null
+
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket -CommandName Invoke-PscCatalogUpdate -Times 1 -Exactly
+        } finally {
+            if (Test-Path $profilePath) { Remove-Item -LiteralPath $profilePath -Force -ErrorAction Ignore }
+        }
+    }
+
+    It 'does NOT invoke Invoke-PscCatalogUpdate under -WhatIf (catalog has observable side effects)' {
+        $profilePath = Join-Path ([System.IO.Path]::GetTempPath()) ("pscupd-profile-$([guid]::NewGuid().ToString('N')).ps1")
+        try {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-PscCatalogUpdate { }
 
             Update-PackageCompletion -BucketPath $script:bucketWithPsc -ProfilePath $profilePath -WhatIf | Out-Null
 
-            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket -CommandName Invoke-PscCatalogUpdate -Times 1 -Exactly
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket -CommandName Invoke-PscCatalogUpdate -Times 0 -Exactly
         } finally {
             if (Test-Path $profilePath) { Remove-Item -LiteralPath $profilePath -Force -ErrorAction Ignore }
         }
