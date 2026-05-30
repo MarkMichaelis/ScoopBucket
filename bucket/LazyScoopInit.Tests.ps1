@@ -89,4 +89,36 @@ Describe 'Initialize-ScoopEnvironment idempotent guard' -Tag 'Light','Module' {
             Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction Ignore
         }
     }
+
+    It 'leaves the guard $false when a required scoop lib is missing (Copilot review #219)' {
+        # Regression: a half-installed scoop (e.g. mid-install or lib
+        # file deleted) means Test-Path returns $false for one of the
+        # required libs. The loop must skip that file BUT leave the
+        # guard $false so a subsequent call after the install is
+        # repaired re-attempts the dot-source.
+        Import-Module $script:psd1 -Force
+        script:Set-GuardState $false
+
+        $tempRoot = Join-Path ([IO.Path]::GetTempPath()) "lazyinit-missing-$([guid]::NewGuid().ToString('N'))"
+        $libDir   = Join-Path $tempRoot 'apps\scoop\current\lib'
+        New-Item -ItemType Directory -Force -Path $libDir | Out-Null
+        Set-Content -LiteralPath (Join-Path $libDir 'core.ps1')    -Value '# stub' -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $libDir 'buckets.ps1') -Value '# stub' -Encoding utf8
+        # Intentionally omit manifest.ps1.
+
+        $savedScoop = $env:SCOOP
+        try {
+            $env:SCOOP = $tempRoot
+            { script:Invoke-Init } | Should -Not -Throw
+            script:Get-GuardState | Should -BeFalse -Because 'missing required lib must leave guard false so retry-after-repair works'
+
+            # Repair: drop in the missing lib; retry must succeed.
+            Set-Content -LiteralPath (Join-Path $libDir 'manifest.ps1') -Value '# repaired stub' -Encoding utf8
+            { script:Invoke-Init } | Should -Not -Throw
+            script:Get-GuardState | Should -BeTrue
+        } finally {
+            $env:SCOOP = $savedScoop
+            Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction Ignore
+        }
+    }
 }
