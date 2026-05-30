@@ -83,38 +83,6 @@ function Update-PackageCompletion {
 
     $results = New-Object System.Collections.Generic.List[object]
 
-    # Issue #223: front-load a single `psc update *` catalog refresh
-    # whenever the resolved package set contains any pscompletions-mode
-    # entries. Effective pscompletions mode happens when:
-    #   - Completion = 'pscompletions', OR
-    #   - Completion = 'auto' with no NativeCommandScript (effectiveMode
-    #     collapses to 'pscompletions' below).
-    # If no such entries exist we skip the refresh entirely so we never
-    # Import-Module PSCompletions and never trigger its nag banner.
-    $needsPscUpdate = $false
-    foreach ($b in $bundles) {
-        foreach ($p in $b.Packages) {
-            if (-not $p.CliCommands -or $p.CliCommands.Count -eq 0) { continue }
-            $m = "$($p.Completion)"
-            if ([string]::IsNullOrWhiteSpace($m)) { $m = 'auto' }
-            if ($m -notin @('pscompletions','auto','native')) { continue }
-            $hasNative = [bool]$p.HasNativeCommandScript -or [bool]$p.NativeCommandScript
-            if ($m -eq 'pscompletions' -or ($m -eq 'auto' -and -not $hasNative)) {
-                $needsPscUpdate = $true
-                break
-            }
-        }
-        if ($needsPscUpdate) { break }
-    }
-    if ($needsPscUpdate) {
-        # Honor -WhatIf / -Confirm: catalog refresh and config write are
-        # observable side effects, so gate them through ShouldProcess
-        # like the per-CLI registrations below.
-        if ($PSCmdlet.ShouldProcess('PSCompletions catalog', 'Run psc update * and disable update banner')) {
-            Invoke-PscCatalogUpdate
-        }
-    }
-
     foreach ($b in $bundles) {
         foreach ($p in $b.Packages) {
             if (-not $p.CliCommands -or $p.CliCommands.Count -eq 0) { continue }

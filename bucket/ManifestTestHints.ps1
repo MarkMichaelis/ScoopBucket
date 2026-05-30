@@ -66,9 +66,7 @@
                                     } }
 
     # --- PowerShell modules ------------------------------------------------
-    PSCompletions              = @{ Verify = 'Custom'; PreserveIfInstalled = $true
-                                    Script = { [bool](Get-Module -ListAvailable -Name PSCompletions) }
-                                    Reason = "PSGallery module; verification is module discoverability via Get-Module -ListAvailable. PreserveIfInstalled skips a destructive `scoop uninstall` (there is no scoop record to remove) — the harness still validates idempotency on the second invoke." }
+    # (PSCompletions hint removed in #241 along with the PSCompletions.ps1 bundle.)
 
     # --- Manual / heavyweight installs -------------------------------------
     ChatGPT                    = @{ Verify = 'Custom'; Manual = $true

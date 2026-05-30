@@ -895,25 +895,6 @@ function Register-CliCompletion {
     }
 }
 
-function Install-PSCompletionsModule {
-    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
-    param([switch]$Force)
-
-    if (-not $Force -and (Get-Module -ListAvailable -Name PSCompletions)) {
-        Write-Verbose 'PSCompletions module already installed; skipping.'
-        return
-    }
-    if ($PSCmdlet.ShouldProcess('PSCompletions module', "Install-Module -Scope AllUsers$(if ($Force) { ' -Force' })")) {
-        try {
-            $params = @{ Name = 'PSCompletions'; Scope = 'AllUsers'; AllowClobber = $true; ErrorAction = 'Stop' }
-            if ($Force) { $params['Force'] = $true }
-            Install-Module @params
-        } catch {
-            Write-Warning "Install-Module PSCompletions failed: $($_.Exception.Message). PSCompletions fallback will be unavailable."
-        }
-    }
-}
-
 function Get-BucketCliName {
     <#
     .SYNOPSIS
@@ -1040,8 +1021,6 @@ function Invoke-CliCompletionsSweep {
     )
 
     Write-Host 'Configuring PowerShell tab completion for installed CLI tools...'
-
-    Install-PSCompletionsModule -Force:$Force -WhatIf:$WhatIfPreference
 
     $splat = @{ Force = [bool]$Force }
     if ($ProfilePath) { $splat['ProfilePath'] = $ProfilePath }

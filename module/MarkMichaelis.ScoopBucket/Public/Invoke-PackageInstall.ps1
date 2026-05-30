@@ -113,25 +113,6 @@ function Invoke-PackageInstall {
     $states = New-Object System.Collections.Generic.List[object]
     $isCi = [bool]$env:CI
 
-    # If any package in this run requests PSCompletions-backed tab completion
-    # (Completion='pscompletions' or 'auto'), make sure the PSCompletions
-    # module is available before Register-PackageCompletion runs. Otherwise
-    # Resolve-PackageCompletionSource silently returns 'Skipped' and the
-    # completion never lands in the user's profile — which is exactly what
-    # used to happen for `bw` (Bitwarden CLI) on a fresh box.
-    if (-not $SkipCompletion -and -not $DryRun) {
-        $needsPSCompletions = $ordered | Where-Object {
-            $_.Completion -in @('pscompletions','auto') -and $_.CliCommands.Count -gt 0
-        }
-        if ($needsPSCompletions -and -not (Get-Module -ListAvailable -Name PSCompletions)) {
-            try {
-                Install-PSCompletionsModule -Confirm:$false
-            } catch {
-                Write-Warning "Invoke-PackageInstall: Install-PSCompletionsModule failed: $($_.Exception.Message). PSCompletions-backed completions will be skipped."
-            }
-        }
-    }
-
     foreach ($pkg in $ordered) {
         $state  = 'Pending'
         $reason = $null

@@ -16,13 +16,6 @@ Install-Module PSReadLine -Force -Scope AllUsers   # Update the version of PSRea
 Install-Module Microsoft.PowerShell.SecretManagement -Scope AllUsers
 Install-Module WinGet-Essentials -Repository PSGallery -Scope AllUsers
 Install-Module Microsoft.PowerShell.ConsoleGuiTools -Repository PSGallery -Scope AllUsers
-# PSCompletions powers the PSCompletions-backed tab completion for CLIs
-# whose `<tool> completion` subcommand has no PowerShell output (bw,
-# copilot, gcloud — see #73). Invoke-PackageInstall will also lazy-install
-# this on first need, but having it baked into the PowerShell bundle
-# means a freshly imaged box gets it before any individual CLI install
-# is requested.
-Install-PSCompletionsModule -Confirm:$false
 choco install Pester
 
 # Install Scott Hanselman's Windows Terminal Copilot CLI skill
