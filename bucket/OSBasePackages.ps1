@@ -13,8 +13,23 @@ $Packages = [Package[]]@(
         Installer   = 'winget'
         Id          = 'Microsoft.WindowsTerminal'
         CliCommands = @('wt')
-        Completion  = 'pscompletions'
-        ExpectedCompletions = @{ wt = @('new-tab','split-pane','focus-tab') }
+        Completion  = 'auto'
+        Notes       = 'Phase 2: converted from pscompletions to a native in-tree completer (#232). wt has no upstream PowerShell completion command; documented CLI surface is small and stable (https://learn.microsoft.com/en-us/windows/terminal/command-line-arguments).'
+        ExpectedCompletions = @{ wt = @('new-tab','split-pane','focus-tab','move-focus','swap-pane','--window','-w','--maximized','-M','--fullscreen','-F','--focus','-f') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName wt -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        'new-tab','split-pane','focus-tab','move-focus','swap-pane',
+        '--window','-w','--maximized','-M','--fullscreen','-F','--focus','-f',
+        '--help','-h','--version','-v'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
     }
     [Package]@{
         Name        = '7-Zip'
