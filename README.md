@@ -125,9 +125,14 @@ Install-Package -Name beyon<Tab>       # Tab-completes to 'Beyond Compare'
 completer that suggests every package declared in any bundle (prefix
 first, then substring), so you don't need to remember exact spelling.
 For the completer to fire on the *very first* Tab in a fresh
-PowerShell session, `module\Install-Module.ps1` also writes an
-idempotent `Import-Module MarkMichaelis.ScoopBucket` snippet into
-`$PROFILE.CurrentUserAllHosts` (pass `-SkipProfile` to suppress).
+PowerShell session, `module\Install-Module.ps1` writes an
+idempotent **lazy-import stub (v2)** into `$PROFILE.CurrentUserAllHosts`
+(pass `-SkipProfile` to suppress). The stub adds <10 ms to profile
+load -- it only registers an argument completer; the module itself
+loads on the first Tab (or on the first cmdlet call, via PSModulePath
+auto-load), saving ~1 s of cold pwsh startup. Re-running
+`Install-Module.ps1` migrates the legacy v1 eager-`Import-Module`
+block in-place.
 
 Note: `Install-Package` and `Get-Package` deliberately shadow the
 rarely-used built-in `PackageManagement` cmdlets of the same name. The
