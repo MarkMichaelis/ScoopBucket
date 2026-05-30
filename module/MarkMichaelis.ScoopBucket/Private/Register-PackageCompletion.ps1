@@ -211,11 +211,24 @@ function Resolve-PackageCompletionSource {
     if ($NativeCommand -and -not $PreferPSCompletions) {
         $native = $null
         $nativeError = $null
+        $nativeStderr = $null
         # Pass $Cli so multi-CLI packages (e.g. Sysinternals Suite) can emit
         # a per-CLI Register-ArgumentCompleter from a single shared
         # NativeCommandScript. Existing paramless scriptblocks (gh, rg, bw,
         # gcloud) simply ignore the extra argument.
-        try { $native = & $NativeCommand $Cli 2>$null | Out-String } catch { $nativeError = $_.Exception.Message }
+        # Capture both terminating exceptions ($nativeError) and
+        # non-terminating error records ($nativeStderr) so a script
+        # that fails by writing to the error stream without throwing
+        # still surfaces a meaningful Reason instead of silently
+        # collapsing to "produced no output".
+        try {
+            $native = & $NativeCommand $Cli 2>&1 | ForEach-Object {
+                if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                    if (-not $nativeStderr) { $nativeStderr = New-Object System.Collections.Generic.List[string] }
+                    $nativeStderr.Add($_.ToString())
+                } else { $_ }
+            } | Out-String
+        } catch { $nativeError = $_.Exception.Message }
         if ($native -and $native.Trim()) {
             $guarded = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n$native}"
             # NativePayload is the RAW completer text (may start with
@@ -226,11 +239,16 @@ function Resolve-PackageCompletionSource {
             return @{ Source = 'Native'; Code = $guarded; PSCompletionsName = $null; NativePayload = $native }
         }
         # Native path was attempted but produced no usable completer.
-        # Surface the actual failure mode (empty output vs. thrown
-        # exception) instead of blaming PSCompletions removal -- now
-        # that the PSCompletions fallback is gone, this IS the failure.
+        # Surface the actual failure mode (empty output / stderr text /
+        # thrown exception) instead of blaming PSCompletions removal --
+        # now that the PSCompletions fallback is gone, this IS the
+        # failure.
         $reason = if ($nativeError) {
             "NativeCommandScript for '$Cli' threw: $nativeError. No PSCompletions fallback (#241); fix the script or set Completion='none'."
+        } elseif ($nativeStderr -and $nativeStderr.Count -gt 0) {
+            $errSummary = ($nativeStderr -join '; ')
+            if ($errSummary.Length -gt 240) { $errSummary = $errSummary.Substring(0, 240) + '...' }
+            "NativeCommandScript for '$Cli' produced no stdout; stderr: $errSummary. No PSCompletions fallback (#241); fix the script or set Completion='none'."
         } else {
             "NativeCommandScript for '$Cli' produced no output. No PSCompletions fallback (#241); fix the script or set Completion='none'."
         }

@@ -287,13 +287,14 @@ required to be retrofitted.
   `-Init` hook, etc.). If the tool has no built-in PowerShell completion
   story, hand-author a `NativeCommandScript` scriptblock on the
   `[Package]` declaration that emits the appropriate
-  `Register-ArgumentCompleter` calls (see `AIAgents.ps1`'s
-  npx-MCP-server completer for an example pattern). Completion
-  registration belongs in the bundle's `.ps1` (idempotent — guard so
-  re-runs don't double-register). The bucket used to install
-  `abgox/PSCompletions` as a fallback for tools without first-party
-  completion; that hard dependency was removed in #241 once every
-  bucket entry was migrated to native scripts.
+  `Register-ArgumentCompleter` calls (see the `Node.js` package in
+  `AIAgents.ps1` for an example: a single shared `NativeCommandScript`
+  registers completion for `node`, `npm`, and `npx` uniformly).
+  Completion registration belongs in the bundle's `.ps1` (idempotent
+  — guard so re-runs don't double-register). The bucket used to
+  install `abgox/PSCompletions` as a fallback for tools without
+  first-party completion; that hard dependency was removed in #241
+  once every bucket entry was migrated to native scripts.
 
 ### CLI-availability discovery (in progress)
 
@@ -346,15 +347,18 @@ directly. `Register-CliCompletion` will emit a `Write-Warning` if a
 future change re-introduces a dead native command (silent dead
 wiring would otherwise hide).
 
-The `AIAgents` bundle additionally calls `Invoke-CliCompletionsSweep
--Force` at the end of its install as a best-effort registration pass
-for any bucket-declared CLI whose owning bundle didn't supply a
-NativeCommandScript inline. The sweep walks the union of `CliCommands`
-across every `[Package]` and registers a native-completion block for
-each CLI that resolves to a usable `NativeCommand`; CLIs with no
-native source resolve to `Skipped` with a clear `Reason` (post-#241
-there is no PSCompletions fallback). To re-run the sweep manually
-after installing other tools by hand:
+The `AIAgents` bundle calls `Invoke-CliCompletionsSweep -Force` at
+the end of its install as a best-effort registration pass. The sweep
+delegates to the legacy `Register-AllCliCompletions` /
+`Register-CliCompletion` path (not the modern declarative
+`NativeCommandScript` resolver), enumerating either bucket-declared
+CLIs or `$env:PATH` depending on `-IncludeAllPath`. Per-CLI completion
+is resolved via the legacy resolver, which (a) tries any
+`-NativeCommand` scriptblock the bundle supplied for that CLI and
+(b) opportunistically uses `PSCompletions` *only if the user
+installed the module themselves* — post-#241 the bucket never
+installs PSCompletions on the user's behalf. To re-run the sweep
+manually after installing other tools by hand:
 
 ```powershell
 Import-Module D:\Git\ScoopBucket\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1 -Force
