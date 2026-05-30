@@ -66,7 +66,15 @@ Describe 'CliCompletion idempotency' -Tag 'Heavy','Idempotency' {
     It '-Force:$false preserves a manually-modified block' {
         Invoke-FixtureRegistration -ProfilePath $script:profilePath -Names @('gh') -Force
         $content = Get-Content -Raw -Path $script:profilePath
-        $mutated = $content -replace 'Register-ArgumentCompleter -CommandName gh','Register-ArgumentCompleter -CommandName gh # USER MUTATION'
+        # Inject a marker comment immediately after the BEGIN sentinel for
+        # 'gh'. This is layout-stable across sentinel-format bumps: v3
+        # inlined the registration text inside the block; v4 emits a
+        # one-line dot-source to a sidecar. Asserting only that *some*
+        # in-block mutation survives a non-Force re-registration captures
+        # the real contract -- "do not overwrite an existing block unless
+        # -Force is passed" -- without re-encoding the block's payload.
+        $mutated = $content -replace '(?m)(^# ScoopBucket:CliCompletion:gh:BEGIN [^\r\n]+\r?\n)', "`$1# USER MUTATION`r`n"
+        $mutated | Should -Match 'USER MUTATION' -Because 'sanity: the test fixture must actually mutate the block before re-registering'
         [System.IO.File]::WriteAllText($script:profilePath, $mutated, [System.Text.UTF8Encoding]::new($false))
         Invoke-FixtureRegistration -ProfilePath $script:profilePath -Names @('gh')   # no -Force
         $after = Get-Content -Raw -Path $script:profilePath

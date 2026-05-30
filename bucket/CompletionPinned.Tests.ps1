@@ -58,7 +58,7 @@ Describe 'CliCompletion pinned contract -- per-bundle native registration' -Tag 
         @($pkg.ExpectedCompletions[$Cli]).Count | Should -BeGreaterThan 0 -Because "ExpectedCompletions['$Cli'] must list at least one expected subcommand"
     }
 
-    It 'uses sentinel version v3' {
+    It 'uses sentinel version v4' {
         # $script:CompletionSentinelVersion lives inside the module and is not
         # visible from this test runspace; assert against the source instead so
         # any bump of the sentinel format requires updating this guard too.
@@ -69,8 +69,11 @@ Describe 'CliCompletion pinned contract -- per-bundle native registration' -Tag 
         # emit a leading `using namespace System.Management.Automation` which
         # the parser only accepts as the FIRST statement of a script file --
         # never inside an if/Action scriptblock (v2's regression).
+        # v4 (#221) collapses the per-block OnIdle handler into a single
+        # batched OnIdle bootstrap that drains a queue of registered CLIs,
+        # cutting profile-load Register-ObjectEvent calls from O(n) to 1.
         $src = Get-Content -Raw -Path (Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\Private\Register-PackageCompletion.ps1')
-        $src | Should -Match "(?m)^\s*\`$script:CompletionSentinelVersion\s*=\s*'v3'\s*$" -Because 'Register-PackageCompletion.ps1 must pin sentinel version v3'
+        $src | Should -Match "(?m)^\s*\`$script:CompletionSentinelVersion\s*=\s*'v4'\s*$" -Because 'Register-PackageCompletion.ps1 must pin sentinel version v4'
     }
 
     It 'Register-CliCompletion exposes the -NativeCommand parameter' {
