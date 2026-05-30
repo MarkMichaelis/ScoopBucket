@@ -11,8 +11,20 @@ $Packages = [Package[]]@(
         Installer   = 'scoop'
         Id          = 'main/dotnet'
         CliCommands = @('dotnet')
-        Completion  = 'pscompletions'
-        ExpectedCompletions = @{ dotnet = @('build','run','test') }
+        Completion  = 'auto'
+        Notes       = 'Sources tab completion from the official `dotnet complete` API (https://learn.microsoft.com/en-us/dotnet/core/tools/enable-tab-autocomplete) instead of the third-party PSCompletions catalog so completions track whatever subcommands the installed SDK ships. Hand-curated ExpectedCompletions covers the canonical top-level verbs the test harness validates.'
+        ExpectedCompletions = @{ dotnet = @('add','build','clean','pack','publish','restore','run','test') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName dotnet -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    dotnet complete --position `$cursorPosition "`$commandAst" |
+        ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+        }
+}
+"@
+        }
     }
     [Package]@{
         Name        = 'Visual Studio'
