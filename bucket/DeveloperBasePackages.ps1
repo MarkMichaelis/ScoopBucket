@@ -136,8 +136,23 @@ Register-ArgumentCompleter -Native -CommandName copilot -ScriptBlock {
         Installer   = 'winget'
         Id          = 'Python.Python.3.14'
         CliCommands = @('python')
-        Completion  = 'pscompletions'
-        ExpectedCompletions = @{ python = @('--help','--version','-m') }
+        Completion  = 'auto'
+        Notes       = 'CPython ships no native PowerShell completion provider and the PSCompletions catalog entry is opaque (depends on a network catalog fetch). Hand-curated CPython CLI flag list -- deterministic, hermetic, and consistent with devenv/code/copilot/aspire in the same bundle (#229).'
+        ExpectedCompletions = @{ python = @('-c','-m','-V','--version','-h','--help') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName python -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '-c','-m','-i','-u','-V','--version','-h','--help',
+        '-O','-OO','-q','-s','-S','-v','-W','-x',
+        '-b','-B','-d','-E','-I','-P','-R'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
     }
 
     [Package]@{
