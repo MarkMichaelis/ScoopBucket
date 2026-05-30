@@ -194,8 +194,23 @@ Register-ArgumentCompleter -Native -CommandName code -ScriptBlock {
         Installer   = 'scoop'
         Id          = 'main/ffmpeg'
         CliCommands = @('ffmpeg')
-        Completion  = 'pscompletions'
-        ExpectedCompletions = @{ ffmpeg = @('-i','-y','-version') }
+        Completion  = 'auto'
+        Notes       = 'ffmpeg has no PowerShell completion command and is not in PSCompletions catalog (#73). Surface area is too large to enumerate dynamically (encoders/decoders/filters in the thousands), so v1 ships a hand-curated list of the most-used flags. Future enhancement: parse `ffmpeg -encoders` / `-formats` for value completion.'
+        ExpectedCompletions = @{ ffmpeg = @('-i','-c:v','-c:a','-y','-vf') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName ffmpeg -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '-i','-c:v','-c:a','-b:v','-b:a','-r','-s','-vf','-af','-y','-n',
+        '-ss','-t','-to','-f','-vn','-an','-codec:v','-codec:a','-preset',
+        '-crf','-pix_fmt','-loglevel'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
     }
     [Package]@{
         Name        = 'ripgrep'

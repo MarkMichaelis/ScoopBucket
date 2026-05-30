@@ -40,6 +40,7 @@ Describe 'CliCompletion pinned contract -- per-bundle native registration' -Tag 
         @{ Cli = 'rg';     Bundle = 'OSBasePackages' }
         @{ Cli = 'bw';     Bundle = 'ClientBasePackages' }
         @{ Cli = 'gcloud'; Bundle = 'OSBasePackages' }
+        @{ Cli = 'ffmpeg'; Bundle = 'OSBasePackages' }
     ) {
         param($Cli, $Bundle)
 
