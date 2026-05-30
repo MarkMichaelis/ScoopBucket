@@ -285,10 +285,15 @@ required to be retrofitted.
   using whatever first-party mechanism the tool ships
   (`<tool> completion powershell`, `Register-ArgumentCompleter`, an
   `-Init` hook, etc.). If the tool has no built-in PowerShell completion
-  story, register it via
-  [`PSCompletions`](https://github.com/abgox/PSCompletions). Completion
+  story, hand-author a `NativeCommandScript` scriptblock on the
+  `[Package]` declaration that emits the appropriate
+  `Register-ArgumentCompleter` calls (see `AIAgents.ps1`'s
+  npx-MCP-server completer for an example pattern). Completion
   registration belongs in the bundle's `.ps1` (idempotent — guard so
-  re-runs don't double-register).
+  re-runs don't double-register). The bucket used to install
+  `abgox/PSCompletions` as a fallback for tools without first-party
+  completion; that hard dependency was removed in #241 once every
+  bucket entry was migrated to native scripts.
 
 ### CLI-availability discovery (in progress)
 
@@ -334,20 +339,19 @@ with `-NativeCommand`. The currently-pinned set is:
 | rg  | `OSBasePackages.ps1`| `rg --generate complete-powershell` (≥ v14) |
 
 CLIs whose `completion` subcommand does **not** support PowerShell
-(currently `bw`, `copilot`, `gcloud` — see #73) deliberately have no
-`-NativeCommand` wiring. They receive completion via the PSCompletions
-fallback below, and `Register-CliCompletion` will emit a
-`Write-Warning` if a future change re-introduces a dead native
-command (silent dead wiring would otherwise hide).
+(currently `bw`, `copilot`, `gcloud` — see #73) carry a
+hand-authored `NativeCommandScript` on their `[Package]` declaration
+that emits the appropriate `Register-ArgumentCompleter` blocks
+directly. `Register-CliCompletion` will emit a `Write-Warning` if a
+future change re-introduces a dead native command (silent dead
+wiring would otherwise hide).
 
 Bundles that install many CLIs (`AIAgents`, `ClientBasePackages`,
 `DeveloperBasePackages`) additionally call `Invoke-CliCompletionsSweep
--Force` at the end of their install, which (a) ensures the
-[`PSCompletions`](https://github.com/abgox/PSCompletions) module is
-installed and (b) registers a PSCompletions-fallback block for every
-CLI declared by a bucket package whose owning bundle didn't supply a
-native command. To re-run the sweep manually after installing other
-tools by hand:
+-Force` at the end of their install to register a native-completion
+block for every CLI declared by a bucket package whose owning bundle
+didn't supply one inline. To re-run the sweep manually after
+installing other tools by hand:
 
 ```powershell
 Import-Module D:\Git\ScoopBucket\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1 -Force
@@ -368,10 +372,12 @@ Register-AllCliCompletions -IncludeAllPath
 
 ### Recovering from a broken completion block
 
-`PSCompletions` is third-party content and has occasionally shipped
-completions whose PSReadLine key handler references a property that
-doesn't exist on the object PSReadLine actually passes — the symptom
-is every Tab press emitting:
+The bucket previously shipped an opportunistic
+[`PSCompletions`](https://github.com/abgox/PSCompletions) fallback for
+CLIs without first-party completion. PSCompletions is third-party
+content and occasionally shipped completions whose PSReadLine key
+handler referenced a property that doesn't exist on the object
+PSReadLine actually passes — the symptom was every Tab press emitting:
 
 ```
 An exception occurred in custom key handler, see $error for more
@@ -404,12 +410,13 @@ psc remove <CLI>
 
 To repair completion blocks for CLIs whose owning bundles are already
 installed -- for example after restoring a dev machine where the
-`AllUsersAllHosts` profile wasn't backed up, or after installing
-`PSCompletions` *after* the CLIs it covers -- use the declarative-bundle
-walker `Update-PackageCompletion`. It scans every declarative `[Package]`
-across the bucket, finds CLIs on `PATH` with no sentinel block in the
-profile, and registers them. Native, `PSCompletions`, and `auto`
-completion modes are all repaired:
+`AllUsersAllHosts` profile wasn't backed up -- use the
+declarative-bundle walker `Update-PackageCompletion`. It scans every
+declarative `[Package]` across the bucket, finds CLIs on `PATH` with
+no sentinel block in the profile, and registers them. Native and
+`auto`-with-NativeCommandScript completion modes are repaired; legacy
+`pscompletions` declarations (none remain in this bucket as of #241)
+resolve to `Skipped` with a clear reason:
 
 ```powershell
 Import-Module MarkMichaelis.ScoopBucket -Force
@@ -425,8 +432,10 @@ Native repairs reuse the `NativeCommandOutputs` text captured by
 Behavior:
 
 - Each CLI is resolved in order: caller-supplied `-NativeCommand`
-  scriptblock (owned by the install script) → `PSCompletions`
-  (`abgox/PSCompletions`) fallback → skipped with a reason.
+  scriptblock (owned by the install script) → skipped with a reason.
+  Prior to #241 a `PSCompletions` fallback sat between the two; that
+  branch was removed once every bucket entry adopted a
+  `NativeCommandScript`.
 - All registrations are written as sentinel-delimited blocks
   (`# ScoopBucket:CliCompletion:<cli>:BEGIN v2 … :END`) inside
   `$PROFILE.AllUsersAllHosts`. The v2 block wraps the cached
@@ -493,7 +502,7 @@ files when the shape doesn't fit "install + idempotent + verify":
 **Module-level tests** (`Package.Tests.ps1`, `PackageInstall.Tests.ps1`,
 `PackageOrder.Tests.ps1`, `PackageNameCompletion.Tests.ps1`,
 `InstallPackageFilter.Tests.ps1`, `Bundles.Tests.ps1`,
-`ModuleBootstrap.Tests.ps1`, `PSCompletionsAutoInstall.Tests.ps1`,
+`ModuleBootstrap.Tests.ps1`, `PSCompletionsNotAutoInstalled.Tests.ps1`,
 `Completion*.Tests.ps1`, `CliAvailabilityPinned.Tests.ps1`,
 `Save-Artifact.Tests.ps1`, `ManifestVersionBumps.Tests.ps1`,
 `PackageCommands.Tests.ps1`, `CliCompletionOutput.Tests.ps1`) exercise
