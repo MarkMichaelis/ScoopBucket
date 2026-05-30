@@ -398,7 +398,7 @@ function Install-LocalManifest {
         $manifest.url = @(
             $manifest.url | ForEach-Object {
                 $rewritten = $_ -replace `
-                    'https://raw\.githubusercontent\.com/MarkMichaelis/ScoopBucket/master/bucket', `
+                    'https://raw\.githubusercontent\.com/MarkMichaelis/ScoopBucket/(master|main)/bucket', `
                     $LocalBucketRoot
                 ([Uri]$rewritten).AbsoluteUri
             }
@@ -546,7 +546,7 @@ function Update-LocalManifestInstallMetadata {
                 $manifestJson = Get-Content -LiteralPath $manifestJsonPath -Raw -ErrorAction Stop |
                     ConvertFrom-Json -ErrorAction Stop
                 if ($manifestJson.url) {
-                    $canonicalPrefix = "https://raw.githubusercontent.com/$BucketName/ScoopBucket/master/bucket"
+                    $canonicalPrefix = "https://raw.githubusercontent.com/$BucketName/ScoopBucket/main/bucket"
                     $manifestJson.url = @(
                         $manifestJson.url | ForEach-Object {
                             # Strip any file:// or local path prefix and rebuild against canonical master URL.
