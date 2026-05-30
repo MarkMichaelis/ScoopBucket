@@ -56,7 +56,7 @@ Register-ArgumentCompleter -Native -CommandName demoUns -ScriptBlock {
         # (a) profile must NOT contain a `using namespace` line anywhere.
         $raw | Should -Not -Match '(?m)^\s*using\s+namespace\b' -Because 'inline `using namespace` inside an if/Action block is a fatal parse error'
         # (b) v3 sentinel + OnIdle wrapper still present.
-        $raw | Should -Match 'ScoopBucket:CliCompletion:demoUns:BEGIN v3'
+        $raw | Should -Match 'ScoopBucket:CliCompletion:demoUns:BEGIN v4'
         $raw | Should -Match 'Register-EngineEvent -SourceIdentifier PowerShell\.OnIdle'
         # (c) the OnIdle body is just a dot-source of the sidecar.
         $expectedSidecar = Join-Path $script:sidecarDir 'demoUns.ps1'

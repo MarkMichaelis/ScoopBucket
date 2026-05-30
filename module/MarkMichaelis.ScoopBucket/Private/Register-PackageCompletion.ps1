@@ -13,7 +13,7 @@
 #   - Requires elevation to write to AllUsersAllHosts; honours
 #     SupportsShouldProcess.
 
-$script:CompletionSentinelVersion = 'v3'
+$script:CompletionSentinelVersion = 'v4'
 
 # Default sidecar root for cached native completer payloads (v3+, #216).
 # Each registered CLI gets <Dir>\<cli>.ps1 holding the raw payload --
@@ -108,25 +108,52 @@ function Remove-PackageCompletionSidecar {
 function Format-DeferredCompletionBlock {
     <#
     .SYNOPSIS
-        Wrap a completer-registration scriptblock string in a
-        PowerShell.OnIdle one-shot deferred handler so the cost of
-        Register-ArgumentCompleter (and any cached subprocess work
-        baked into the inner code) is paid AFTER the prompt is drawn,
-        not before. Profile-block only -- in-runspace activation via
+        Wrap a completer-registration scriptblock string in a queue-add
+        statement that defers all per-CLI registration to a single
+        shared PowerShell.OnIdle handler (#220).
+    .DESCRIPTION
+        v3 (#216) wrapped each CLI's registration in its own
+        Register-EngineEvent. Empirically, PowerShell.OnIdle fires only
+        one engine-event Action per pump tick, so with 30+ subscribers
+        the LAST CLIs didn't register until ~10-13 seconds after the
+        prompt drew -- long enough for users to hit Tab and see no
+        completions.
+        v4 collapses this to a per-block enqueue plus a one-time
+        bootstrap. The first block evaluated initializes
+        `$Global:__ScoopBucketCompletionQueue` and registers a SINGLE
+        OnIdle subscriber that drains the whole queue on the first
+        idle. All subsequent blocks just call .Add(). Result: a single
+        OnIdle tick (typically within ~50ms of the prompt) registers
+        every queued CLI.
+        Profile-block only -- in-runspace activation via
         Import-PackageCompletion stays synchronous because the user
-        explicitly asked to register NOW (#212).
+        there explicitly asked to register NOW (#212).
     #>
     [OutputType([string])]
     [CmdletBinding()]
     param([Parameter(Mandatory)][AllowEmptyString()][string]$InnerCode)
-    # `| Out-Null` keeps the returned PSEventJob off the success stream
-    # so dot-sourcing the profile doesn't print a stray "Id Name ..."
-    # banner. MaxTriggerCount=1 ensures we register the completer
-    # exactly once -- after that the subscriber unregisters itself.
+    # The bootstrap-and-enqueue pattern is identical in every block;
+    # the bootstrap clause is idempotent so removing any single block
+    # never breaks the others. `| Out-Null` keeps the returned
+    # PSEventJob off the success stream so dot-sourcing the profile
+    # stays silent.
     return @"
-`$null = Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -MaxTriggerCount 1 -Action {
+if (-not `$Global:__ScoopBucketCompletionQueue) {
+    `$Global:__ScoopBucketCompletionQueue = [System.Collections.Generic.List[scriptblock]]::new()
+}
+`$Global:__ScoopBucketCompletionQueue.Add({
 $InnerCode
-} | Out-Null
+}) | Out-Null
+if (-not `$Global:__ScoopBucketCompletionBootstrap) {
+    `$Global:__ScoopBucketCompletionBootstrap = `$true
+    `$null = Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -MaxTriggerCount 1 -Action {
+        `$q = `$Global:__ScoopBucketCompletionQueue
+        if (`$q) {
+            foreach (`$sb in `$q) { try { . `$sb } catch { } }
+            `$q.Clear()
+        }
+    } | Out-Null
+}
 "@
 }
 
@@ -555,10 +582,11 @@ function Test-PackageCompletionWorks {
 `$ErrorActionPreference='SilentlyContinue'
 . '$ProfilePath' 2>`$null
 # The profile blocks written by Register-PackageCompletion defer their
-# Register-ArgumentCompleter calls to PowerShell.OnIdle (#212). The
-# OnIdle event does not auto-fire in non-interactive `pwsh -File`
-# runs, so manually invoke any pending subscribers' actions before
-# probing the completion engine.
+# Register-ArgumentCompleter calls to a single PowerShell.OnIdle
+# subscriber that drains a shared queue (#220). OnIdle does not
+# auto-fire in non-interactive `pwsh -File` runs, so manually invoke
+# the subscriber's Action -- it will drain the queue and register every
+# pending CLI in one pass.
 foreach (`$sub in @(Get-EventSubscriber -SourceIdentifier 'PowerShell.OnIdle' -ErrorAction SilentlyContinue)) {
     try {
         `$cmd = `$sub.Action.Command

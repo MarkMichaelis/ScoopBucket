@@ -147,7 +147,7 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
         # The profile itself must reference the sidecar and use the v3
         # sentinel; the payload must live in the sidecar.
         $profileContent = Get-Content -Raw -Encoding UTF8 $script:profilePath
-        $profileContent | Should -Match "ScoopBucket:CliCompletion:$($script:onPathCli)-native:BEGIN v3"
+        $profileContent | Should -Match "ScoopBucket:CliCompletion:$($script:onPathCli)-native:BEGIN v4"
         $sidecar = Join-Path (Split-Path -Parent $script:profilePath) "completions\$($script:onPathCli)-native.ps1"
         Test-Path $sidecar | Should -BeTrue
         (Get-Content -Raw -Encoding UTF8 $sidecar) | Should -Match 'auto-native-completion-source'
