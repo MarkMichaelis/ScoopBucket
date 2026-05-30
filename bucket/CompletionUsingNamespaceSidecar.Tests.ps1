@@ -108,6 +108,35 @@ try {
         $out | Should -Match '(?m)^OK\s*$' -Because "profile must parse without ParserError; got: $out"
         $out | Should -Not -Match "using' statement must appear"
     }
+
+    It 'escapes apostrophes in the sidecar path so install dirs like ``C:\Users\O''Brien`` parse cleanly' {
+        # Regression: Copilot review on PR #218 caught that the
+        # generated `. '$sidecarPath'` was unsafe -- a sidecar dir whose
+        # path contained a literal apostrophe would break the single-
+        # quoted PowerShell string and abort profile parsing. Use a
+        # sandbox dir whose name embeds an apostrophe to prove the fix.
+        $apostropheDir = Join-Path $script:sandbox "O'Brien-completions"
+        New-Item -ItemType Directory -Path $apostropheDir -Force | Out-Null
+        $apostropheProfile = Join-Path $script:sandbox "ProfileApos.ps1"
+        InModuleScope MarkMichaelis.ScoopBucket -Parameters @{ ProfilePath = $apostropheProfile; SidecarDir = $apostropheDir } {
+            param($ProfilePath, $SidecarDir)
+            $nc = [scriptblock]::Create("Write-Output 'Register-ArgumentCompleter -Native -CommandName demoApos -ScriptBlock { ''hi'' }'")
+            Register-PackageCompletion -Cli demoApos -NativeCommand $nc -Mode native `
+                -ProfilePath $ProfilePath -SidecarDirectory $SidecarDir -Confirm:$false | Out-Null
+        }
+
+        $raw = Get-Content -Raw -Path $apostropheProfile
+        # The path contains `'` which must be doubled in the single-
+        # quoted PowerShell string literal that dot-sources the sidecar.
+        $raw | Should -Match "O''Brien-completions" -Because 'embedded apostrophes in single-quoted dot-source paths must be doubled'
+
+        # Tokenize the profile -- there must be no parse errors, and
+        # the dot-source string must round-trip back to the original
+        # path (with one apostrophe).
+        $errs = $null
+        $null = [System.Management.Automation.Language.Parser]::ParseFile($apostropheProfile, [ref]$null, [ref]$errs)
+        $errs | Should -BeNullOrEmpty -Because "profile with apostrophe in sidecar path must parse cleanly; got: $($errs -join '; ')"
+    }
 }
 
 Describe 'Remove-PackageCompletionBlock: deletes the sidecar .ps1 alongside the profile block' -Tag 'Light','SidecarCompletion' {
