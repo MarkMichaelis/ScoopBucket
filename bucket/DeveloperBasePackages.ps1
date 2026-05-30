@@ -7,18 +7,6 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 
 $Packages = [Package[]]@(
     [Package]@{
-        Name        = 'Node.js'
-        Installer   = 'choco'
-        Id          = 'nodejs'
-        CliCommands = @('node','npm')
-        Completion  = 'pscompletions'
-        ExpectedCompletions = @{
-            node = @('--help','--version','--eval')
-            npm  = @('install','run','version')
-        }
-    }
-
-    [Package]@{
         Name        = 'dotnet'
         Installer   = 'scoop'
         Id          = 'main/dotnet'
