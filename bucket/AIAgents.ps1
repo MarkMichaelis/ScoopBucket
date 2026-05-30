@@ -28,6 +28,13 @@ $Packages = [Package[]]@(
     # Runtime prerequisites first so MCP-server entries written below
     # actually resolve at agent start-up. DependsOn pulls these in
     # transitively when -Name selects an agent.
+    #
+    # AIAgents is the AUTHORITATIVE completion source for node/npm/npx
+    # across every bundle in this repo. The hand-curated NativeCommandScript
+    # below registers all three CLIs uniformly. Do NOT add a Node.js entry
+    # to any other bundle (e.g. DeveloperBasePackages) -- a duplicate
+    # would write a competing profile block for the same CLIs and the
+    # registration outcome would become order-dependent. See issue #222.
     [Package]@{
         Name        = 'Node.js'
         Installer   = 'choco'
