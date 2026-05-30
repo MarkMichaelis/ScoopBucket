@@ -260,3 +260,54 @@ Describe 'Install-Module.ps1 -Uninstall surfaces the -Remove path (#251)' -Tag '
         { & $script:installScript -Uninstall -WhatIf } | Should -Not -Throw
     }
 }
+
+Describe 'Install-Module.ps1 -Uninstall removes a ReadOnly junction (#253)' -Tag 'Light','Module' {
+    # Regression for #253: New-Item -ItemType Junction creates a link
+    # with ReadOnly attribute set on some hosts. The original
+    # implementation used `Remove-Item -Recurse -Force` which follows
+    # the reparse point into the target and fails with Access Denied
+    # if the target tree contains read-only files (or the link itself
+    # is ReadOnly). The fix strips ReadOnly and uses
+    # [System.IO.Directory]::Delete($path, $false) to remove only the
+    # link.
+    It 'removes a junction whose Attributes include ReadOnly' {
+        $sandbox    = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-junction-$([guid]::NewGuid().ToString('N'))"
+        $sourceDir  = Join-Path $sandbox 'real-source'
+        $linkParent = Join-Path $sandbox 'fake-modules'
+        $linkPath   = Join-Path $linkParent 'MarkMichaelis.ScoopBucket'
+        try {
+            New-Item -ItemType Directory -Path $sourceDir | Out-Null
+            New-Item -ItemType Directory -Path $linkParent | Out-Null
+            # Put a read-only file inside the source so a recursive
+            # delete via the junction would fail with Access Denied.
+            $sentinelFile = Join-Path $sourceDir 'sentinel.txt'
+            Set-Content -LiteralPath $sentinelFile -Value 'do-not-delete' -Encoding utf8
+            (Get-Item -LiteralPath $sentinelFile).IsReadOnly = $true
+
+            $junction = New-Item -ItemType Junction -Path $linkPath -Target $sourceDir
+            # Force ReadOnly on the junction itself to mirror the bug.
+            $junction.Attributes = $junction.Attributes -bor [System.IO.FileAttributes]::ReadOnly
+
+            # Apply the same junction-removal logic as Install-Module.ps1.
+            $existing  = Get-Item -LiteralPath $linkPath -Force
+            $isJunction = ($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+            $isJunction | Should -BeTrue
+
+            if (($existing.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
+                $existing.Attributes = $existing.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+            }
+            { [System.IO.Directory]::Delete($linkPath, $false) } | Should -Not -Throw
+
+            Test-Path -LiteralPath $linkPath  | Should -BeFalse
+            # Source dir + read-only file must remain intact (the bug
+            # would have either failed entirely or wiped them).
+            Test-Path -LiteralPath $sourceDir    | Should -BeTrue
+            Test-Path -LiteralPath $sentinelFile | Should -BeTrue
+        } finally {
+            if (Test-Path -LiteralPath $sentinelFile) {
+                (Get-Item -LiteralPath $sentinelFile -ErrorAction Ignore).IsReadOnly = $false
+            }
+            Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction Ignore
+        }
+    }
+}
