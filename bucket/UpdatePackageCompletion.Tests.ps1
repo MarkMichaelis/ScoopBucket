@@ -141,12 +141,16 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
         $native.Source | Should -Be 'Native'
         $native.Mode   | Should -Be 'native'
 
-        # The block written to the profile must contain the captured
-        # native completion source, wrapped in the standard
-        # Get-Command guard.
+        # v3 (#216): the captured native completion source moved from the
+        # profile (inline OnIdle Action body) to a sidecar
+        # <profile-dir>\completions\<cli>.ps1 that the profile dot-sources.
+        # The profile itself must reference the sidecar and use the v3
+        # sentinel; the payload must live in the sidecar.
         $profileContent = Get-Content -Raw -Encoding UTF8 $script:profilePath
-        $profileContent | Should -Match 'auto-native-completion-source'
-        $profileContent | Should -Match "ScoopBucket:CliCompletion:$($script:onPathCli)-native:BEGIN v2"
+        $profileContent | Should -Match "ScoopBucket:CliCompletion:$($script:onPathCli)-native:BEGIN v3"
+        $sidecar = Join-Path (Split-Path -Parent $script:profilePath) "completions\$($script:onPathCli)-native.ps1"
+        Test-Path $sidecar | Should -BeTrue
+        (Get-Content -Raw -Encoding UTF8 $sidecar) | Should -Match 'auto-native-completion-source'
     }
 
     It "registers Completion='native' packages whose CLI is on PATH" {
@@ -158,8 +162,10 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
         $nativeOnly.Source | Should -Be 'Native'
         $nativeOnly.Mode   | Should -Be 'native'
 
-        $profileContent = Get-Content -Raw -Encoding UTF8 $script:profilePath
-        $profileContent | Should -Match 'pure-native-completion-source'
+        # v3 (#216): payload lives in the sidecar, not the profile.
+        $sidecar = Join-Path (Split-Path -Parent $script:profilePath) "completions\$($script:onPathCli)-nativeonly.ps1"
+        Test-Path $sidecar | Should -BeTrue
+        (Get-Content -Raw -Encoding UTF8 $sidecar) | Should -Match 'pure-native-completion-source'
     }
 
     It "ignores Completion='none' and packages without CliCommands" {
