@@ -72,6 +72,13 @@ function Invoke-PackageUpdate {
     Write-Host "=== Invoke-PackageUpdate: $Bundle ($($ordered.Count) packages) ==="
 
     $states = New-Object System.Collections.Generic.List[object]
+    # Success-stream emission is deferred until after the summary so that
+    # interactive (uncaptured) runs render the [Package] objects as a
+    # single table instead of one repeated, header-per-row mini-table
+    # interleaved with each engine's live progress output. Pipeline
+    # consumers are unaffected -- every [Package] still reaches the
+    # success stream, just batched at the end of the run.
+    $emit = New-Object System.Collections.Generic.List[object]
     $isCi = [bool]$env:CI
 
     foreach ($pkg in $ordered) {
@@ -83,7 +90,7 @@ function Invoke-PackageUpdate {
             $reason = "CISkip: $($pkg.CISkip)"
             Write-Host "[skip] $($pkg.Name) -- $reason"
             $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
-            Write-Output $pkg
+            [void]$emit.Add($pkg)
             continue
         }
 
@@ -111,7 +118,7 @@ function Invoke-PackageUpdate {
                     $reason = 'No update path for CustomInstallScript packages (consider adding PostUpdateScript).'
                     Write-Host "  $reason"
                     $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
-                    Write-Output $pkg
+                    [void]$emit.Add($pkg)
                     continue
                 }
                 $result = @{ State = 'Updated'; Reason = '(PostUpdateScript-only)' }
@@ -158,7 +165,7 @@ function Invoke-PackageUpdate {
         # after a real version bump.
         if ($state -in @('NotInstalled', 'Skipped', 'AlreadyLatest')) {
             $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
-            Write-Output $pkg
+            [void]$emit.Add($pkg)
             continue
         }
 
@@ -202,11 +209,22 @@ function Invoke-PackageUpdate {
         }
 
         $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
-        Write-Output $pkg
+        [void]$emit.Add($pkg)
     }
 
     Write-Host ""
     Write-Host "=== $Bundle update summary ==="
+
+    # Standardized result table. Every engine returns a uniform
+    # @{ State; Reason } record, so the summary needs no per-installer
+    # special-casing: glyph + State, then the chocolatey-style Installer /
+    # Scope / Id / Name columns, then the Reason as inline Detail. Failed
+    # packages render here as red ✗ rows carrying their reason, so an error
+    # is just another row in the same table rather than only a raw
+    # ErrorRecord. Columns are width-aligned with a header; the glyph
+    # keeps the State signal colorblind-safe when color is stripped.
+    $fmt = "  {0} {1,-13} {2,-10} {3,-7} {4,-34} {5}"
+    Write-Host ($fmt -f ' ', 'Status', 'Installer', 'Scope', 'Id', 'Name')
     foreach ($s in $states) {
         $glyph = switch ($s.State) {
             'Updated'       { [char]0x2713 }   # ✓
@@ -224,9 +242,12 @@ function Invoke-PackageUpdate {
             'NotInstalled'  { 'Yellow' }
             default         { $Host.UI.RawUI.ForegroundColor }
         }
-        $line = "  {0} {1,-14} {2,-12} {3}" -f $glyph, $s.State, $s.Pkg.Installer, $s.Pkg.Name
+        $line = $fmt -f $glyph, $s.State, $s.Pkg.Installer, $s.Pkg.Scope, $s.Pkg.Id, $s.Pkg.Name
         if ($s.Reason) { $line += "  -- $($s.Reason)" }
         Write-Host $line -ForegroundColor $color
     }
     Write-Host ""
+
+    # Deferred success-stream emission (see the $emit comment above).
+    foreach ($p in $emit) { Write-Output $p }
 }

@@ -484,6 +484,65 @@ Describe 'Invoke-PackageUpdate pipeline' -Tag 'Light','Module' {
     }
 }
 
+Describe 'Invoke-PackageUpdate standardized summary table (#274)' -Tag 'Light','Module' {
+
+    It 'renders a header row and per-package Status/Installer/Scope/Id/Name' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }
+            Mock Update-PathFromRegistry { }
+            Mock Register-PackageCompletion { }
+            $captured = New-Object System.Collections.Generic.List[object]
+            Mock Write-Host -MockWith {
+                $captured.Add([pscustomobject]@{ Message = $Object; Color = $ForegroundColor })
+            }
+
+            $pkgs = [Package[]]@(
+                [Package]@{ Name='Claude Desktop'; Installer='winget'; Id='Anthropic.Claude'; Scope='user' }
+            )
+            $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion
+
+            $lines = @($captured | ForEach-Object { [string]$_.Message })
+
+            # A header row naming every standardized column must appear.
+            $header = $lines | Where-Object {
+                $_ -match 'Status' -and $_ -match 'Installer' -and
+                $_ -match 'Scope'  -and $_ -match 'Id'        -and $_ -match 'Name'
+            }
+            $header | Should -Not -BeNullOrEmpty
+
+            # The data row must carry Scope and Id (the chocolatey-style
+            # fields) alongside the Name on a single line.
+            $row = $lines | Where-Object {
+                $_ -match 'Anthropic\.Claude' -and $_ -match 'user' -and $_ -match 'Claude Desktop'
+            }
+            $row | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'renders Failed packages as a red, glyph-marked row carrying their reason in the same table' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            Mock Update-WingetPackage    { return @{ State='Failed'; Reason='winget upgrade timed out' } }
+            Mock Update-PathFromRegistry { }
+            $captured = New-Object System.Collections.Generic.List[object]
+            Mock Write-Host -MockWith {
+                $captured.Add([pscustomobject]@{ Message = $Object; Color = $ForegroundColor })
+            }
+
+            $pkgs = [Package[]]@(
+                [Package]@{ Name='Warp'; Installer='winget'; Id='Warp.Warp'; Scope='user' }
+            )
+            $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion -ErrorAction SilentlyContinue
+
+            $failRow = $captured |
+                Where-Object { $_.Message -match 'Warp\.Warp' -and $_.Message -match 'winget upgrade timed out' } |
+                Select-Object -Last 1
+            $failRow         | Should -Not -BeNullOrEmpty
+            $failRow.Color   | Should -Be 'Red'
+            $failRow.Message | Should -Match ([char]0x2717)   # ✗ glyph carries the signal when color is stripped
+        }
+    }
+}
+
 Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
 
     BeforeEach {
