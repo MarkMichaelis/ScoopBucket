@@ -346,6 +346,13 @@ Describe 'Invoke-PackageUpdate pipeline' -Tag 'Light','Module' {
         $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -DryRun -SkipCompletion
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -Times 1 -Exactly -ParameterFilter { $WhatIf }
     }
+
+    It 'engines receive -WhatIf when the cmdlet is called with -WhatIf (folds into DryRun)' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -ParameterFilter { $WhatIf } { return @{ State='Updated'; Reason='(WhatIf)' } }
+        $pkgs = [Package[]]@([Package]@{ Name='A'; Installer='winget'; Id='Foo.A' })
+        $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -WhatIf -SkipCompletion
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -Times 1 -Exactly -ParameterFilter { $WhatIf }
+    }
 }
 
 Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
@@ -404,5 +411,39 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
         $warnings = @()
         Update-Package -Name 'foo' -SkipCompletion -WarningVariable warnings -WarningAction SilentlyContinue
         ($warnings -join "`n") | Should -Match 'bare manifest'
+    }
+
+    It '-WhatIf on Update-Package folds into -DryRun (engines see WhatIf, no real install)' {
+        $fakeBundles = @(
+            [pscustomobject]@{ Bundle='Alpha'; BundlePath='C:\fake\Alpha.ps1'; Packages=@([pscustomobject]@{ Name='a'; Installer='winget'; Id='A.A' }) }
+        )
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages    { return $fakeBundles }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects { return @([Package]@{ Name='a'; Installer='winget'; Id='A.A' }) }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Resolve-BucketPath    { return $null }
+
+        Update-Package -Name 'a' -SkipCompletion -WhatIf
+
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-PackageUpdate -Times 1 -Exactly -ParameterFilter { $DryRun }
+    }
+
+    It 'bucket-wide "*" sweep dispatches bundles in deterministic (sorted) order' {
+        $fakeBundles = @(
+            [pscustomobject]@{ Bundle='Zulu';  BundlePath='C:\fake\Zulu.ps1';  Packages=@([pscustomobject]@{ Name='z'; Installer='winget'; Id='Z.Z' }) }
+            [pscustomobject]@{ Bundle='Alpha'; BundlePath='C:\fake\Alpha.ps1'; Packages=@([pscustomobject]@{ Name='a'; Installer='winget'; Id='A.A' }) }
+            [pscustomobject]@{ Bundle='Mike';  BundlePath='C:\fake\Mike.ps1';  Packages=@([pscustomobject]@{ Name='m'; Installer='winget'; Id='M.M' }) }
+        )
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages       { return $fakeBundles }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects { return @([Package]@{ Name='x'; Installer='winget'; Id='X.X' }) }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Resolve-BucketPath       { return $null }
+
+        $script:dispatched = New-Object System.Collections.Generic.List[string]
+        Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-PackageUpdate {
+            param($Packages, $Bundle)
+            $script:dispatched.Add($Bundle)
+        }
+
+        Update-Package -Name '*' -SkipCompletion
+
+        $script:dispatched -join ',' | Should -Be 'Alpha,Mike,Zulu'
     }
 }

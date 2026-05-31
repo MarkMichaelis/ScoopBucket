@@ -42,6 +42,12 @@ function Invoke-PackageUpdate {
         [switch]$SkipCompletion
     )
 
+    # Fold -WhatIf into -DryRun. The driver advertises
+    # SupportsShouldProcess; without this, `Invoke-PackageUpdate -WhatIf`
+    # would not propagate the safety contract down to the engines
+    # (which key off $DryRun, mapped to engine -WhatIf at dispatch time).
+    if ($WhatIfPreference -and -not $DryRun) { $DryRun = $true }
+
     foreach ($pkg in $Packages) {
         if ($null -eq $pkg) {
             throw "Invoke-PackageUpdate: Packages array contains a null entry."

@@ -59,6 +59,13 @@ function Update-Package {
         [string]$BucketPath
     )
 
+    # Fold -WhatIf into -DryRun. Update-Package advertises
+    # SupportsShouldProcess, so callers reasonably expect `Update-Package
+    # foo -WhatIf` to plan-only. Without this, $WhatIfPreference would
+    # not propagate to the engines (which key off $DryRun, mapped to
+    # their own -WhatIf at dispatch time) and real updates would run.
+    if ($WhatIfPreference -and -not $DryRun) { $DryRun = $true }
+
     $bundleArgs = @{}
     if ($BucketPath) { $bundleArgs['BucketPath'] = $BucketPath }
     $bundles = Get-BundlePackages @bundleArgs
@@ -88,7 +95,13 @@ function Update-Package {
         $expanded.Add($n)
     }
     if ($starSeen) {
-        foreach ($b in $bundleIndex.Values) { $fullBundles.Add($b) }
+        # Hashtable enumeration order is unspecified, so a bucket-wide
+        # `Update-Package *` sweep would log (and dispatch to) bundles
+        # in a non-deterministic order. Sort by bundle name so the
+        # transcript is stable run-to-run — useful when diffing dry-run
+        # outputs across iterations and when downstream tooling parses
+        # the summary table.
+        foreach ($b in ($bundleIndex.Values | Sort-Object Bundle)) { $fullBundles.Add($b) }
     }
 
     foreach ($needed in $expanded) {
