@@ -728,74 +728,65 @@ Describe 'Invoke-AllEnginesUpdate orchestrator' -Tag 'Light','Module' {
     }
 }
 
-Describe 'Update-Package -All dispatcher' -Tag 'Light','Module' {
+Describe 'Update-Package -MachineWide dispatcher (#263)' -Tag 'Light','Module' {
 
     BeforeEach {
         Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate { }
-        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages      { throw 'should not be called under -All' }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages      { throw 'should not be called under -MachineWide' }
     }
 
-    It '-All skips bundle resolution entirely (Get-BundlePackages NOT called)' {
-        Update-Package -All -SkipCompletion
+    It '-MachineWide skips bundle resolution entirely (Get-BundlePackages NOT called)' {
+        Update-Package -MachineWide -SkipCompletion
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages -Times 0 -Exactly
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly
     }
 
-    It '-All -DryRun propagates DryRun to Invoke-AllEnginesUpdate' {
+    It '-MachineWide -DryRun propagates DryRun to Invoke-AllEnginesUpdate' {
         Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -ParameterFilter { $DryRun } { }
-        Update-Package -All -DryRun -SkipCompletion
+        Update-Package -MachineWide -DryRun -SkipCompletion
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly -ParameterFilter { $DryRun }
     }
 
-    It '-Name foo -All errors with parameter-set ambiguity (mutually exclusive)' {
-        { Update-Package -Name 'foo' -All -SkipCompletion } | Should -Throw
+    It '-Name foo -MachineWide errors (mutually exclusive parameter sets)' {
+        { Update-Package -Name 'foo' -MachineWide -SkipCompletion } | Should -Throw
     }
 
-    It '-All -WhatIf folds into -DryRun (orchestrator sees DryRun)' {
+    It '-MachineWide -WhatIf folds into -DryRun (orchestrator sees DryRun)' {
         Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -ParameterFilter { $DryRun } { }
-        Update-Package -All -WhatIf -SkipCompletion
+        Update-Package -MachineWide -WhatIf -SkipCompletion
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly -ParameterFilter { $DryRun }
     }
 }
 
-Describe 'Update-Package -AllInstalled rename (#261)' -Tag 'Light','Module' {
+Describe 'Update-Package legacy names are removed (#263)' -Tag 'Light','Module' {
 
+    # Safety net: if production still has the old parameters (e.g. mid-rename),
+    # mock the orchestrator so an accidental successful bind cannot trigger a
+    # real machine-wide sweep on the developer's box.
     BeforeEach {
         Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate { }
-        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages      { throw 'should not be called under -AllInstalled' }
     }
 
-    It '-AllInstalled is the primary parameter name and dispatches to Invoke-AllEnginesUpdate' {
-        Update-Package -AllInstalled -SkipCompletion
-        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly
-        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages      -Times 0 -Exactly
+    It '-All throws ParameterBindingException (alias removed)' {
+        { Update-Package -All -SkipCompletion -ErrorAction Stop } |
+            Should -Throw -ErrorId 'NamedParameterNotFound,Update-Package'
     }
 
-    It '-All (back-compat alias) still routes to Invoke-AllEnginesUpdate without a warning' {
-        Update-Package -All -SkipCompletion 3>&1 | Out-Null
-        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly
-    }
-
-    It '-Name foo -AllInstalled errors (mutually exclusive parameter sets)' {
-        { Update-Package -Name 'foo' -AllInstalled -SkipCompletion } | Should -Throw
-    }
-
-    It '-AllInstalled -DryRun propagates DryRun to the orchestrator' {
-        Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -ParameterFilter { $DryRun } { }
-        Update-Package -AllInstalled -DryRun -SkipCompletion
-        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly -ParameterFilter { $DryRun }
+    It '-AllInstalled throws ParameterBindingException (old name removed)' {
+        { Update-Package -AllInstalled -SkipCompletion -ErrorAction Stop } |
+            Should -Throw -ErrorId 'NamedParameterNotFound,Update-Package'
     }
 }
 
-Describe 'Update-Package help documents -AllInstalled explicitly (#261)' -Tag 'Light','Module' {
+Describe 'Update-Package help documents -MachineWide explicitly (#263)' -Tag 'Light','Module' {
 
     BeforeAll {
         $script:help = Get-Help Update-Package -Full
     }
 
-    It 'AllInstalled parameter help enumerates all five engines verbatim' {
-        $param = $script:help.parameters.parameter | Where-Object { $_.name -eq 'AllInstalled' }
-        $param | Should -Not -BeNullOrEmpty -Because '-AllInstalled must be the documented parameter name'
+    It 'MachineWide parameter help enumerates all five engines verbatim' {
+        $param = $script:help.parameters.parameter | Where-Object { $_.name -eq 'MachineWide' }
+        $param | Should -Not -BeNullOrEmpty -Because '-MachineWide must be the documented parameter name'
         $text = ($param.description | ForEach-Object { $_.Text }) -join "`n"
         $text | Should -Match 'winget'
         $text | Should -Match 'scoop'
