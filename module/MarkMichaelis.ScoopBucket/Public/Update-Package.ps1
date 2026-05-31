@@ -15,6 +15,13 @@ function Update-Package {
               owner: no metadata to drive a typed update; surface as
               Skipped with a reason.
 
+        Use `-All` (mutually exclusive with `-Name`) to run a machine-wide
+        sweep that bypasses bundle metadata entirely and dispatches each
+        engine's native bulk-upgrade command (scoop update *, winget
+        upgrade --all, choco upgrade all, npm update -g, dotnet tool
+        update -g --all). Engines that aren't installed are skipped; a
+        per-engine failure does not abort the remaining sweeps.
+
         For each resolved package the dispatch goes through
         Invoke-PackageUpdate which:
           - Topologically sorts by DependsOn (does NOT auto-install
@@ -24,13 +31,16 @@ function Update-Package {
           - Refreshes `$env:Path` and re-registers completion when a
             CLI version actually changed.
 
-        Out of scope: machine-wide "upgrade everything on the box"
-        delegation (winget upgrade --all, scoop update *, etc.). That
-        belongs in a separate Update-Machine cmdlet — Update-Package is
-        intentionally scoped to packages this bucket declares.
-
     .PARAMETER Name
         One or more package names, bundle names, or the literal '*'.
+        Mutually exclusive with -All.
+
+    .PARAMETER All
+        Run a machine-wide update sweep across every engine this bucket
+        knows about (scoop, winget, choco, npmGlobal, dotnetTool),
+        independent of bundle metadata. Mutually exclusive with -Name.
+        Completers are NOT auto-refreshed under -All; run
+        `Update-PackageCompletion` manually if a CLI version bumped.
 
     .PARAMETER DryRun
         Plan only — engines receive -WhatIf and do not invoke the CLI.
@@ -49,11 +59,20 @@ function Update-Package {
 
     .EXAMPLE
         Update-Package -Name 'OSBasePackages'
+
+    .EXAMPLE
+        Update-Package -All -DryRun
+        # Plan a machine-wide update across every engine this bucket knows
+        # about (scoop, winget, choco, npmGlobal, dotnetTool). Mutually
+        # exclusive with -Name. Bundle metadata is bypassed entirely --
+        # each engine's native bulk-upgrade command runs against every
+        # package it knows about on the machine.
     #>
-    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    [CmdletBinding(DefaultParameterSetName = 'ByName', SupportsShouldProcess, ConfirmImpact = 'Medium')]
     [OutputType([Package])]
     param(
-        [Parameter(Mandatory, Position = 0)][string[]]$Name,
+        [Parameter(ParameterSetName = 'ByName', Mandatory, Position = 0)][string[]]$Name,
+        [Parameter(ParameterSetName = 'MachineWide', Mandatory)][switch]$All,
         [switch]$DryRun,
         [switch]$SkipCompletion,
         [string]$BucketPath
@@ -65,6 +84,15 @@ function Update-Package {
     # not propagate to the engines (which key off $DryRun, mapped to
     # their own -WhatIf at dispatch time) and real updates would run.
     if ($WhatIfPreference -and -not $DryRun) { $DryRun = $true }
+
+    # Machine-wide sweep: bypass bundle resolution entirely and dispatch
+    # straight to each engine's native bulk-upgrade command. The hint at
+    # the end of the run reminds users to run Update-PackageCompletion
+    # manually since we can't tell which CLIs (if any) version-bumped.
+    if ($PSCmdlet.ParameterSetName -eq 'MachineWide') {
+        Invoke-AllEnginesUpdate -DryRun:$DryRun
+        return
+    }
 
     $bundleArgs = @{}
     if ($BucketPath) { $bundleArgs['BucketPath'] = $BucketPath }
