@@ -121,7 +121,11 @@ function Update-Package {
         [switch]$DryRun,
         [switch]$SkipCompletion,
         [switch]$SkipBucketRefresh,
-        [string]$BucketPath
+        [string]$BucketPath,
+        # Hard cap on per-package winget upgrade time (minutes). Default
+        # 15 minutes; pass 0 to disable. Forwarded to Invoke-PackageUpdate
+        # and only affects the winget engine. See #269.
+        [int]$PackageTimeoutMinutes = 15
     )
 
     # Fold -WhatIf into -DryRun. Update-Package advertises
@@ -303,7 +307,8 @@ function Update-Package {
         Write-Host ""
         Write-Host "Update-Package: dispatching $($entry.Names -join ', ') via $($entry.Bundle)..."
         Invoke-PackageUpdate -Packages $pkgObjects -Bundle $entry.Bundle `
-            -Name @($entry.Names) -DryRun:$DryRun -SkipCompletion:$SkipCompletion
+            -Name @($entry.Names) -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
+            -PackageTimeoutMinutes $PackageTimeoutMinutes
     }
 
     # Dispatch (b): full-bundle update.
@@ -315,7 +320,8 @@ function Update-Package {
         Write-Host ""
         Write-Host "Update-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
         Invoke-PackageUpdate -Packages $pkgObjects -Bundle $b.Bundle `
-            -DryRun:$DryRun -SkipCompletion:$SkipCompletion
+            -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
+            -PackageTimeoutMinutes $PackageTimeoutMinutes
     }
 
     # Dispatch (c): bare manifests — no declarative [Package] metadata,
