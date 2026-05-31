@@ -106,6 +106,7 @@ function Get-Package {
                 Notes       = $p.Notes
                 WingetExtraArgs = @($p.WingetExtraArgs)
                 HasPostInstallScript   = [bool]$p.HasPostInstallScript
+                HasPostUpdateScript    = [bool]$p.HasPostUpdateScript
                 HasCustomInstallScript = [bool]$p.HasCustomInstallScript
                 HasVerifyScript        = [bool]$p.HasVerifyScript
                 HasNativeCommandScript = [bool]$p.HasNativeCommandScript

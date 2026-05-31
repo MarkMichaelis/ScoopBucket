@@ -112,6 +112,7 @@ function global:Invoke-PackageInstall {
             Notes       = `$p.Notes
             WingetExtraArgs = @(`$p.WingetExtraArgs)
             HasPostInstallScript   = [bool]`$p.PostInstallScript
+            HasPostUpdateScript    = [bool]`$p.PostUpdateScript
             HasCustomInstallScript = [bool]`$p.CustomInstallScript
             HasVerifyScript        = [bool]`$p.VerifyScript
             HasNativeCommandScript = [bool]`$p.NativeCommandScript

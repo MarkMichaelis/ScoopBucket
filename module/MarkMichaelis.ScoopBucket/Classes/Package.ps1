@@ -7,7 +7,15 @@
 # silently no-op the way today's @{} lookups can).
 #
 # All scriptblock-typed fields use the `Script` suffix consistently:
-# NativeCommandScript, CustomInstallScript, PostInstallScript, VerifyScript.
+# NativeCommandScript, CustomInstallScript, PostInstallScript, VerifyScript,
+# PostUpdateScript.
+#
+# PostUpdateScript runs at the tail of an Update-Package pipeline (after
+# the engine's upgrade succeeds and PATH is refreshed), mirroring the
+# Install-time role of PostInstallScript. It is also the *only* update
+# hook available to Installer='custom' packages — without it, custom
+# installs surface as Skipped during Update-Package because there is no
+# generic engine upgrade path.
 
 class Package {
     [string]   $Name
@@ -43,6 +51,7 @@ class Package {
     [scriptblock] $CustomInstallScript
     [scriptblock] $CustomUninstallScript
     [scriptblock] $PostInstallScript
+    [scriptblock] $PostUpdateScript
     [scriptblock] $VerifyScript
 
     # Engine-specific extra arguments appended to the install command.
