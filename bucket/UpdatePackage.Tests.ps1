@@ -466,3 +466,294 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
         $pkg.WingetExtraArgs | Should -Be @('--skip-dependencies','--silent')
     }
 }
+
+Describe 'Update-All<engine>Packages sweep engines' -Tag 'Light','Module' {
+
+    Context 'Update-AllWingetPackages' {
+        BeforeAll {
+            $script:Engine = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Update-AllWingetPackages }
+        }
+
+        It 'returns Skipped when winget not on PATH (no invocation)' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return $null } -ParameterFilter { $Name -eq 'winget' }
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget { throw 'should not run' }
+            $r = & $script:Engine
+            $r.State  | Should -Be 'Skipped'
+            $r.Engine | Should -Be 'winget'
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket winget -Times 0 -Exactly
+        }
+
+        It 'with -WhatIf prints the bulk command and does not invoke winget' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return [pscustomobject]@{ Name='winget' } } -ParameterFilter { $Name -eq 'winget' }
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget { throw 'should not run' }
+            $r = & $script:Engine -WhatIf
+            $r.State  | Should -Be 'Updated'
+            $r.Reason | Should -Match 'WhatIf'
+            $r.Engine | Should -Be 'winget'
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket winget -Times 0 -Exactly
+        }
+
+        It 'invokes winget upgrade --all with required flags and returns Updated on exit 0' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return [pscustomobject]@{ Name='winget' } } -ParameterFilter { $Name -eq 'winget' }
+            $script:captured = $null
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget {
+                $script:captured = $args
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+            $r = & $script:Engine
+            $r.State | Should -Be 'Updated'
+            $script:captured[0] | Should -Be 'upgrade'
+            ($script:captured -contains '--all')                         | Should -BeTrue
+            ($script:captured -contains '--include-unknown')             | Should -BeTrue
+            ($script:captured -contains '--silent')                      | Should -BeTrue
+            ($script:captured -contains '--accept-package-agreements')   | Should -BeTrue
+            ($script:captured -contains '--accept-source-agreements')    | Should -BeTrue
+        }
+
+        It 'returns Failed on non-zero exit' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return [pscustomobject]@{ Name='winget' } } -ParameterFilter { $Name -eq 'winget' }
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget { $global:LASTEXITCODE = 7; return 'boom' }
+            $r = & $script:Engine
+            $r.State  | Should -Be 'Failed'
+            $r.Reason | Should -Match '7'
+        }
+    }
+
+    Context 'Update-AllScoopPackages' {
+        BeforeAll {
+            $script:Engine = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Update-AllScoopPackages }
+        }
+
+        It 'returns Skipped when scoop not on PATH' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return $null } -ParameterFilter { $Name -eq 'scoop' }
+            $r = & $script:Engine
+            $r.State  | Should -Be 'Skipped'
+            $r.Engine | Should -Be 'scoop'
+        }
+
+        It 'invokes scoop update * (not bare scoop update which only updates scoop+buckets)' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return [pscustomobject]@{ Name='scoop' } } -ParameterFilter { $Name -eq 'scoop' }
+            $script:captured = $null
+            Mock -ModuleName MarkMichaelis.ScoopBucket scoop {
+                $script:captured = $args
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+            $r = & $script:Engine
+            $r.State | Should -Be 'Updated'
+            $script:captured[0] | Should -Be 'update'
+            $script:captured[1] | Should -Be '*'
+        }
+
+        It 'with -WhatIf prints the bulk command and does not invoke scoop' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return [pscustomobject]@{ Name='scoop' } } -ParameterFilter { $Name -eq 'scoop' }
+            Mock -ModuleName MarkMichaelis.ScoopBucket scoop { throw 'should not run' }
+            $r = & $script:Engine -WhatIf
+            $r.State  | Should -Be 'Updated'
+            $r.Reason | Should -Match 'WhatIf'
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -Times 0 -Exactly
+        }
+    }
+
+    Context 'Update-AllChocoPackages' {
+        BeforeAll {
+            $script:Engine = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Update-AllChocoPackages }
+        }
+
+        It 'returns Skipped when choco not on PATH' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return $null } -ParameterFilter { $Name -eq 'choco' }
+            $r = & $script:Engine
+            $r.State  | Should -Be 'Skipped'
+            $r.Engine | Should -Be 'choco'
+        }
+
+        It 'invokes choco upgrade all -y --no-progress' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return [pscustomobject]@{ Name='choco' } } -ParameterFilter { $Name -eq 'choco' }
+            $script:captured = $null
+            Mock -ModuleName MarkMichaelis.ScoopBucket choco {
+                $script:captured = $args
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+            $r = & $script:Engine
+            $r.State | Should -Be 'Updated'
+            $script:captured[0] | Should -Be 'upgrade'
+            $script:captured[1] | Should -Be 'all'
+            ($script:captured -contains '-y')            | Should -BeTrue
+            ($script:captured -contains '--no-progress') | Should -BeTrue
+        }
+    }
+
+    Context 'Update-AllNpmGlobalPackages' {
+        BeforeAll {
+            $script:Engine = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Update-AllNpmGlobalPackages }
+        }
+
+        It 'returns Skipped when npm.cmd not on PATH' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return $null } -ParameterFilter { $Name -eq 'npm.cmd' }
+            $r = & $script:Engine
+            $r.State  | Should -Be 'Skipped'
+            $r.Engine | Should -Be 'npmGlobal'
+        }
+
+        It 'invokes npm update -g via npm.cmd' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return [pscustomobject]@{ Name='npm.cmd' } } -ParameterFilter { $Name -eq 'npm.cmd' }
+            $script:captured = $null
+            Mock -ModuleName MarkMichaelis.ScoopBucket npm.cmd {
+                $script:captured = $args
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+            $r = & $script:Engine
+            $r.State | Should -Be 'Updated'
+            $script:captured[0] | Should -Be 'update'
+            ($script:captured -contains '-g') | Should -BeTrue
+        }
+    }
+
+    Context 'Update-AllDotnetToolPackages' {
+        BeforeAll {
+            $script:Engine = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Update-AllDotnetToolPackages }
+        }
+
+        It 'returns Skipped when dotnet not on PATH' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return $null } -ParameterFilter { $Name -eq 'dotnet' }
+            $r = & $script:Engine
+            $r.State  | Should -Be 'Skipped'
+            $r.Engine | Should -Be 'dotnetTool'
+        }
+
+        It 'invokes dotnet tool update -g --all on supported SDKs' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return [pscustomobject]@{ Name='dotnet' } } -ParameterFilter { $Name -eq 'dotnet' }
+            $script:allCalls = New-Object System.Collections.Generic.List[object]
+            Mock -ModuleName MarkMichaelis.ScoopBucket dotnet {
+                $script:allCalls.Add(@($args))
+                $global:LASTEXITCODE = 0
+                return 'Tools restored.'
+            }
+            $r = & $script:Engine
+            $r.State | Should -Be 'Updated'
+            # First call should be `dotnet tool update -g --all`.
+            $first = $script:allCalls[0]
+            $first[0] | Should -Be 'tool'
+            $first[1] | Should -Be 'update'
+            ($first -contains '-g')    | Should -BeTrue
+            ($first -contains '--all') | Should -BeTrue
+        }
+
+        It 'falls back to per-tool enumeration when --all is unrecognized' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return [pscustomobject]@{ Name='dotnet' } } -ParameterFilter { $Name -eq 'dotnet' }
+            $script:allCalls = New-Object System.Collections.Generic.List[object]
+            Mock -ModuleName MarkMichaelis.ScoopBucket dotnet {
+                $script:allCalls.Add(@($args))
+                $argList = @($args)
+                # First call with --all: simulate older SDK that rejects the flag.
+                if ($argList -contains '--all') {
+                    $global:LASTEXITCODE = 1
+                    return "Unrecognized option '--all'"
+                }
+                # `dotnet tool list -g` fallback enumeration.
+                if ($argList[0] -eq 'tool' -and $argList[1] -eq 'list') {
+                    $global:LASTEXITCODE = 0
+                    return @(
+                        'Package Id      Version      Commands',
+                        '----------------------------------------',
+                        'foo             1.0.0        foo',
+                        'bar             2.0.0        bar'
+                    )
+                }
+                # Per-tool updates.
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+            $r = & $script:Engine
+            $r.State | Should -Be 'Updated'
+            # Expect: 1 (--all probe) + 1 (list -g) + 2 (foo + bar per-tool) = 4 calls.
+            $script:allCalls.Count | Should -BeGreaterOrEqual 3
+            # Confirm fallback per-tool updates happened.
+            $perTool = $script:allCalls | Where-Object { $_ -contains 'update' -and $_ -notcontains '--all' -and $_ -notcontains 'list' }
+            $perTool.Count | Should -BeGreaterOrEqual 2
+        }
+    }
+}
+
+Describe 'Invoke-AllEnginesUpdate orchestrator' -Tag 'Light','Module' {
+
+    BeforeEach {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-AllScoopPackages      { return @{ State='Updated'; Reason=$null; Engine='scoop' } }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-AllWingetPackages     { return @{ State='Updated'; Reason=$null; Engine='winget' } }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-AllChocoPackages      { return @{ State='Skipped'; Reason='not installed'; Engine='choco' } }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-AllNpmGlobalPackages  { return @{ State='Updated'; Reason=$null; Engine='npmGlobal' } }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-AllDotnetToolPackages { return @{ State='Updated'; Reason=$null; Engine='dotnetTool' } }
+    }
+
+    It 'runs all five engines in scoop->winget->choco->npmGlobal->dotnetTool order' {
+        $script:order = New-Object System.Collections.Generic.List[string]
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-AllScoopPackages      { $script:order.Add('scoop');      return @{ State='Updated'; Reason=$null; Engine='scoop' } }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-AllWingetPackages     { $script:order.Add('winget');     return @{ State='Updated'; Reason=$null; Engine='winget' } }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-AllChocoPackages      { $script:order.Add('choco');      return @{ State='Updated'; Reason=$null; Engine='choco' } }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-AllNpmGlobalPackages  { $script:order.Add('npmGlobal');  return @{ State='Updated'; Reason=$null; Engine='npmGlobal' } }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-AllDotnetToolPackages { $script:order.Add('dotnetTool'); return @{ State='Updated'; Reason=$null; Engine='dotnetTool' } }
+
+        $orch = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Invoke-AllEnginesUpdate }
+        $null = & $orch
+
+        $script:order -join ',' | Should -Be 'scoop,winget,choco,npmGlobal,dotnetTool'
+    }
+
+    It 'does NOT short-circuit when one engine fails' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-AllWingetPackages { return @{ State='Failed'; Reason='boom'; Engine='winget' } }
+        $orch = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Invoke-AllEnginesUpdate }
+        $null = & $orch
+        # All five engines must still run despite winget failure.
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-AllScoopPackages      -Times 1 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-AllWingetPackages     -Times 1 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-AllChocoPackages      -Times 1 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-AllNpmGlobalPackages  -Times 1 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-AllDotnetToolPackages -Times 1 -Exactly
+    }
+
+    It 'propagates -DryRun to each engine as -WhatIf' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-AllScoopPackages -ParameterFilter { $WhatIf } { return @{ State='Updated'; Reason='(WhatIf)'; Engine='scoop' } }
+        $orch = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Invoke-AllEnginesUpdate }
+        $null = & $orch -DryRun
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-AllScoopPackages -Times 1 -Exactly -ParameterFilter { $WhatIf }
+    }
+
+    It 'prints the completer-refresh hint at the end' {
+        $orch = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Invoke-AllEnginesUpdate }
+        $out = & $orch 6>&1 | Out-String
+        $out | Should -Match 'Update-PackageCompletion'
+    }
+}
+
+Describe 'Update-Package -All dispatcher' -Tag 'Light','Module' {
+
+    BeforeEach {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate { }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages      { throw 'should not be called under -All' }
+    }
+
+    It '-All skips bundle resolution entirely (Get-BundlePackages NOT called)' {
+        Update-Package -All -SkipCompletion
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages -Times 0 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly
+    }
+
+    It '-All -DryRun propagates DryRun to Invoke-AllEnginesUpdate' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -ParameterFilter { $DryRun } { }
+        Update-Package -All -DryRun -SkipCompletion
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly -ParameterFilter { $DryRun }
+    }
+
+    It '-Name foo -All errors with parameter-set ambiguity (mutually exclusive)' {
+        { Update-Package -Name 'foo' -All -SkipCompletion } | Should -Throw
+    }
+
+    It '-All -WhatIf folds into -DryRun (orchestrator sees DryRun)' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -ParameterFilter { $DryRun } { }
+        Update-Package -All -WhatIf -SkipCompletion
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly -ParameterFilter { $DryRun }
+    }
+}
