@@ -39,7 +39,12 @@ function Invoke-PackageUpdate {
         [string[]]$Name,
         [string[]]$Skip,
         [switch]$DryRun,
-        [switch]$SkipCompletion
+        [switch]$SkipCompletion,
+        # Per-package winget timeout in minutes (0 disables). Forwarded
+        # to Update-WingetPackage only; other engines are unaffected.
+        # See #269 for the Warp.Warp Squirrel-installer hang that motivates
+        # this knob.
+        [int]$PackageTimeoutMinutes = 15
     )
 
     # Fold -WhatIf into -DryRun. The driver advertises
@@ -112,7 +117,7 @@ function Invoke-PackageUpdate {
                 $result = @{ State = 'Updated'; Reason = '(PostUpdateScript-only)' }
             } else {
                 $result = switch ($pkg.Installer) {
-                    'winget'      { Update-WingetPackage     -Package $pkg -WhatIf:$DryRun }
+                    'winget'      { Update-WingetPackage     -Package $pkg -WhatIf:$DryRun -TimeoutMinutes $PackageTimeoutMinutes }
                     'scoop'       { Update-ScoopPackage      -Package $pkg -WhatIf:$DryRun }
                     'choco'       { Update-ChocoPackage      -Package $pkg -WhatIf:$DryRun }
                     'npmGlobal'   { Update-NpmGlobalPackage  -Package $pkg -WhatIf:$DryRun }

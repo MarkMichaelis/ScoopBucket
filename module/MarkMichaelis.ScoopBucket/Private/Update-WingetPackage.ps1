@@ -14,7 +14,13 @@ function Update-WingetPackage {
     [OutputType([hashtable])]
     param(
         [Parameter(Mandatory)][object]$Package,
-        [switch]$WhatIf
+        [switch]$WhatIf,
+        # Per-call hard cap on winget runtime. Set to 0 to disable (the
+        # legacy behavior). Default 15 minutes matches Invoke-WithTimeout
+        # in .github/scripts/Test-Installs.ps1 and is enough headroom for
+        # large MSI installers without leaving a Squirrel-style hang
+        # blocking the rest of the sweep. See #269.
+        [int]$TimeoutMinutes = 15
     )
 
     $id = $Package.Id
@@ -52,8 +58,16 @@ function Update-WingetPackage {
     }
 
     Write-Host "  winget $($upgradeArgs -join ' ')"
-    & winget @upgradeArgs
-    $exit = $LASTEXITCODE
+    if ($TimeoutMinutes -gt 0) {
+        $r = Invoke-WingetWithTimeout -Arguments $upgradeArgs -TimeoutSeconds ($TimeoutMinutes * 60)
+        if ($r.TimedOut) {
+            return @{ State = 'Failed'; Reason = "winget upgrade --id $id timed out after $TimeoutMinutes minute(s) and was killed (see #269)." }
+        }
+        $exit = $r.ExitCode
+    } else {
+        & winget @upgradeArgs
+        $exit = $LASTEXITCODE
+    }
     if ($exit -eq 0) {
         return @{ State = 'Updated'; Reason = $null }
     }
