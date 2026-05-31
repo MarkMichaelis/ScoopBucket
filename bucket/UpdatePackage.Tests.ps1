@@ -311,6 +311,22 @@ Describe 'Invoke-PackageUpdate pipeline' -Tag 'Light','Module' {
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Register-PackageCompletion -Times 0 -Exactly
     }
 
+    It 'AlreadyLatest short-circuits PATH refresh and PostUpdateScript' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage {
+            return @{ State='AlreadyLatest'; Reason='same' }
+        }
+        $script:hookRan = $false
+        $pkgs = [Package[]]@(
+            [Package]@{
+                Name='A'; Installer='winget'; Id='Foo.A'
+                PostUpdateScript = { $script:hookRan = $true }
+            }
+        )
+        $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion
+        $script:hookRan | Should -BeFalse
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-PathFromRegistry -Times 0 -Exactly
+    }
+
     It 'DOES re-register completion when engine reports Updated' {
         $pkgs = [Package[]]@(
             [Package]@{
@@ -356,5 +372,37 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
         Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages { return @() }
         Mock -ModuleName MarkMichaelis.ScoopBucket Resolve-BucketPath { return $null }
         { Update-Package -Name 'nope-no-such-thing' -SkipCompletion } | Should -Throw '*nope-no-such-thing*'
+    }
+
+    It 'cross-dedups: a per-package match in the same bundle as a "*" sweep dispatches the bundle once' {
+        $fakeBundles = @(
+            [pscustomobject]@{ Bundle='Alpha'; BundlePath='C:\fake\Alpha.ps1'; Packages=@([pscustomobject]@{ Name='a'; Installer='winget'; Id='A.A' }) }
+            [pscustomobject]@{ Bundle='Beta';  BundlePath='C:\fake\Beta.ps1';  Packages=@([pscustomobject]@{ Name='b'; Installer='scoop'; Id='main/b' }) }
+        )
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages    { return $fakeBundles }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects { return @([Package]@{ Name='dummy'; Installer='winget'; Id='X' }) }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Resolve-BucketPath    { return $null }
+
+        # '*' AND 'a' (which lives inside the Alpha bundle): full-bundle
+        # sweep should subsume the per-package entry, so total dispatch
+        # count is 2 (Alpha + Beta), not 3.
+        Update-Package -Name '*','a' -SkipCompletion
+
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-PackageUpdate -Times 2 -Exactly
+    }
+
+    It 'bare manifest names emit a Warning instead of silently being skipped' {
+        $fakeBundles = @()
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages { return $fakeBundles }
+        # Pretend the bucket directory exists and contains 'foo.json'
+        # but no declarative bundle declares 'foo'.
+        $tmpBucket = Join-Path $TestDrive 'bucket'
+        New-Item -ItemType Directory -Force -Path $tmpBucket | Out-Null
+        Set-Content -Path (Join-Path $tmpBucket 'foo.json') -Value '{}'
+        Mock -ModuleName MarkMichaelis.ScoopBucket Resolve-BucketPath { return $tmpBucket }
+
+        $warnings = @()
+        Update-Package -Name 'foo' -SkipCompletion -WarningVariable warnings -WarningAction SilentlyContinue
+        ($warnings -join "`n") | Should -Match 'bare manifest'
     }
 }

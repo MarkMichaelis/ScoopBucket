@@ -139,9 +139,13 @@ function Invoke-PackageUpdate {
             continue
         }
 
-        # NotInstalled / Skipped short-circuit: no PATH refresh, no
-        # PostUpdate hook, no completion re-register.
-        if ($state -in @('NotInstalled', 'Skipped')) {
+        # NotInstalled / Skipped / AlreadyLatest short-circuit: no PATH
+        # refresh, no PostUpdate hook, no completion re-register. The
+        # registered completer is by definition still current for
+        # AlreadyLatest, and running PostUpdateScript on a no-op upgrade
+        # would surprise bundle authors who only intend the hook to fire
+        # after a real version bump.
+        if ($state -in @('NotInstalled', 'Skipped', 'AlreadyLatest')) {
             $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
             Write-Output $pkg
             continue
@@ -170,9 +174,9 @@ function Invoke-PackageUpdate {
             }
         }
 
-        # Re-register completion only when we actually upgraded — for
-        # AlreadyLatest the registered completer is by definition still
-        # current, and re-running NativeCommandScript would be wasted work.
+        # Re-register completion only when we actually upgraded — note
+        # the AlreadyLatest / NotInstalled paths already short-circuited
+        # above, so reaching here means $state -eq 'Updated'.
         if ($state -eq 'Updated' -and -not $SkipCompletion -and -not $DryRun -and
             $pkg.Completion -ne 'none' -and $pkg.CliCommands.Count -gt 0) {
             foreach ($cli in $pkg.CliCommands) {

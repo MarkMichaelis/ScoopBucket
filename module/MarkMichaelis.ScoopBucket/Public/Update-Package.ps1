@@ -146,6 +146,21 @@ function Update-Package {
         $fullBundles = $dedup
     }
 
+    # Cross-dedup: when a bundle appears in both $fullBundles (full sweep
+    # or explicit bundle-name match) AND $byBundle (an individual package
+    # within that same bundle was also named), the full-bundle dispatch
+    # subsumes the per-name dispatch. Drop the $byBundle entry so we don't
+    # update the same package twice in the same Update-Package call.
+    if ($fullBundles.Count -gt 0 -and $byBundle.Count -gt 0) {
+        $fullPaths = [System.Collections.Generic.HashSet[string]]::new(
+            [string[]]@($fullBundles | ForEach-Object { $_.BundlePath }),
+            [System.StringComparer]::OrdinalIgnoreCase
+        )
+        foreach ($key in @($byBundle.Keys)) {
+            if ($fullPaths.Contains($key)) { [void]$byBundle.Remove($key) }
+        }
+    }
+
     # Dispatch (a): selective per-bundle Name filter.
     foreach ($entry in $byBundle.Values) {
         $pkgObjects = @(Get-BundlePackageObjects -BundlePath $entry.BundlePath)
@@ -171,9 +186,12 @@ function Update-Package {
             -DryRun:$DryRun -SkipCompletion:$SkipCompletion
     }
 
-    # Dispatch (c): bare manifests — no metadata, no engine.
+    # Dispatch (c): bare manifests — no declarative [Package] metadata,
+    # so no engine routing is possible. Surface as a Warning (the
+    # documented "Skipped with a reason" outcome) instead of a quiet
+    # Write-Host, so it survives -InformationAction SilentlyContinue
+    # and shows up in CI logs.
     foreach ($n in $manifestNames) {
-        Write-Host ""
-        Write-Host "Update-Package: '$n' is a bare manifest (no declarative [Package] match); no update metadata."
+        Write-Warning "Update-Package: '$n' is a bare manifest with no declarative [Package] match; skipped because Update-Package requires declarative metadata to drive an engine update. Use 'scoop update $n' directly if needed."
     }
 }
