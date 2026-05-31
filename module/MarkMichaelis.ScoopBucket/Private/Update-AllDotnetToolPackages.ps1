@@ -31,7 +31,10 @@ function Update-AllDotnetToolPackages {
     }
 
     # Fallback: --all unsupported on this SDK. Enumerate + per-tool update.
-    if ($joined -match "Unrecognized option|Unknown option|--all") {
+    # Match only on explicit "unknown/unrecognized option" diagnostics --
+    # NOT the literal "--all" token (which would falsely trigger fallback
+    # for any unrelated error whose message happens to echo our argv).
+    if ($joined -match '(?i)unrecognized option|unknown option|unrecognized command') {
         Write-Host "  dotnet tool update --all unsupported on this SDK; falling back to per-tool enumeration."
         $listOut = & dotnet tool list -g 2>&1
         $listExit = $LASTEXITCODE

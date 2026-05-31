@@ -89,7 +89,7 @@ function Update-Package {
     # straight to each engine's native bulk-upgrade command. The hint at
     # the end of the run reminds users to run Update-PackageCompletion
     # manually since we can't tell which CLIs (if any) version-bumped.
-    if ($PSCmdlet.ParameterSetName -eq 'MachineWide') {
+    if ($All) {
         Invoke-AllEnginesUpdate -DryRun:$DryRun
         return
     }
