@@ -81,6 +81,13 @@ class Package {
 
     [string]   $Notes = ''
 
+    # Per-package override for the winget upgrade timeout (minutes).
+    # 0 (default) means "use the global default passed by the caller";
+    # set this on heavy installers that legitimately need longer than
+    # the default 5-minute cap (e.g. Visual Studio, Office 365). Only
+    # consumed by Update-WingetPackage. See #269, #271.
+    [int]      $UpdateTimeoutMinutes = 0
+
     # Cross-field invariants the type system can't express. Called by
     # Invoke-PackageInstall before any installer runs so schema errors
     # fail fast.

@@ -304,33 +304,26 @@ $script:ScoopTimeoutSec    = 2400  # 40 minutes — scoop (covers VS installs)
 function Invoke-WithTimeout {
     <#
     .SYNOPSIS
-        Runs an external command with a timeout.  Returns a hashtable with
-        ExitCode, Output, and TimedOut.
+        Runs an external command (cmd /c string form) with a timeout.
+        Returns a hashtable with ExitCode, Output, and TimedOut.
+
+    .DESCRIPTION
+        Thin adapter that wraps the module's array-form
+        `Invoke-WithTimeout` (Private/Invoke-WithTimeout.ps1) so this
+        script can keep its historical `-Command "winget install foo"`
+        string-form ergonomics while sharing one implementation. The
+        module copy handles the Start-Process + WaitForExit + kill core.
+        See #271.
     #>
     param(
         [string]$Command,
         [int]$TimeoutSeconds = $script:DefaultTimeoutSec
     )
-    $stdOutFile = [System.IO.Path]::GetTempFileName()
-    $stdErrFile = [System.IO.Path]::GetTempFileName()
-    try {
-        $proc = Start-Process cmd -ArgumentList "/c $Command" `
-            -NoNewWindow -PassThru `
-            -RedirectStandardOutput $stdOutFile `
-            -RedirectStandardError  $stdErrFile
-        $finished = $proc.WaitForExit($TimeoutSeconds * 1000)
-        if (-not $finished) {
-            # Kill the process tree
-            try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch { }
-            $partialOut = if (Test-Path $stdOutFile) { Get-Content $stdOutFile -Raw } else { '' }
-            return @{ ExitCode = -1; Output = "$partialOut`n[TIMEOUT after ${TimeoutSeconds}s]"; TimedOut = $true }
-        }
-        $out = if (Test-Path $stdOutFile) { Get-Content $stdOutFile -Raw } else { '' }
-        $err = if (Test-Path $stdErrFile) { Get-Content $stdErrFile -Raw } else { '' }
-        return @{ ExitCode = $proc.ExitCode; Output = "$out`n$err".Trim(); TimedOut = $false }
-    } finally {
-        Remove-Item $stdOutFile, $stdErrFile -ErrorAction SilentlyContinue
-    }
+    & (Get-Module MarkMichaelis.ScoopBucket) {
+        param($Cmd, $Sec)
+        Invoke-WithTimeout -FilePath 'cmd' -Arguments @('/c', $Cmd) `
+            -TimeoutSeconds $Sec -CaptureOutput
+    } $Command $TimeoutSeconds
 }
 
 function Test-IsTransientWingetFailure {

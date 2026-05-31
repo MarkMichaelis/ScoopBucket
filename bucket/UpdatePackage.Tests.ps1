@@ -86,16 +86,16 @@ Describe 'Update engine dispatchers' -Tag 'Light','Module' {
             $r.Reason | Should -Match '7'
         }
 
-        It 'returns Failed with "timed out" when Invoke-WingetWithTimeout reports timeout (#269)' {
+        It 'returns Failed with "timed out" when Invoke-WithTimeout reports timeout (#269)' {
             # Update-WingetPackage normally calls winget directly via `&`,
             # but with a non-zero timeout it must route through
-            # Invoke-WingetWithTimeout so a hang on one app does not block
+            # Invoke-WithTimeout so a hang on one app does not block
             # the rest of the bucket-scoped sweep.
             Mock -ModuleName MarkMichaelis.ScoopBucket winget {
                 if ($args[0] -eq 'list') { $global:LASTEXITCODE = 0; return 'row' }
-                throw 'should not be called when timeout is in effect; route through Invoke-WingetWithTimeout'
+                throw 'should not be called when timeout is in effect; route through Invoke-WithTimeout'
             }
-            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-WingetWithTimeout {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-WithTimeout {
                 return @{ ExitCode = -1; TimedOut = $true; DurationSeconds = 900 }
             }
             $pkg = [Package]@{ Name='Warp'; Installer='winget'; Id='Warp.Warp' }
@@ -105,10 +105,10 @@ Describe 'Update engine dispatchers' -Tag 'Light','Module' {
             $r.Reason | Should -Match '15'
         }
 
-        It 'threads the upgrade args through Invoke-WingetWithTimeout when timeout is enabled (#269)' {
+        It 'threads the upgrade args through Invoke-WithTimeout when timeout is enabled (#269)' {
             $script:passed = $null
-            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-WingetWithTimeout {
-                $script:passed = @{ Args = $Arguments; TimeoutSeconds = $TimeoutSeconds }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-WithTimeout {
+                $script:passed = @{ FilePath = $FilePath; Args = $Arguments; TimeoutSeconds = $TimeoutSeconds }
                 return @{ ExitCode = 0; TimedOut = $false }
             }
             Mock -ModuleName MarkMichaelis.ScoopBucket winget {
@@ -118,14 +118,33 @@ Describe 'Update engine dispatchers' -Tag 'Light','Module' {
             $pkg = [Package]@{ Name='Warp'; Installer='winget'; Id='Warp.Warp'; Scope='user' }
             $r = & $script:Engine -Package $pkg -TimeoutMinutes 7
             $r.State                       | Should -Be 'Updated'
+            $script:passed.FilePath        | Should -Be 'winget'
             $script:passed.TimeoutSeconds  | Should -Be (7 * 60)
             $script:passed.Args[0]         | Should -Be 'upgrade'
             ($script:passed.Args -contains 'Warp.Warp') | Should -BeTrue
         }
 
+        It '[Package].UpdateTimeoutMinutes overrides the caller default per-package (#271)' {
+            $script:passed = $null
+            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-WithTimeout {
+                $script:passed = @{ TimeoutSeconds = $TimeoutSeconds }
+                return @{ ExitCode = 0; TimedOut = $false }
+            }
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget {
+                if ($args[0] -eq 'list') { $global:LASTEXITCODE = 0; return 'row' }
+                $global:LASTEXITCODE = 0; return ''
+            }
+            $pkg = [Package]@{ Name='VS'; Installer='winget'; Id='Microsoft.VisualStudio'; UpdateTimeoutMinutes=30 }
+            # Caller default is 5; the per-package override bumps it to
+            # 30 -- the helper sees 30*60 = 1800s.
+            $r = & $script:Engine -Package $pkg -TimeoutMinutes 5
+            $r.State                      | Should -Be 'Updated'
+            $script:passed.TimeoutSeconds | Should -Be (30 * 60)
+        }
+
         It 'with -TimeoutMinutes 0 calls winget directly (timeout disabled, #269)' {
             $script:captured = $null
-            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-WingetWithTimeout {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-WithTimeout {
                 throw 'should not be called when timeout is disabled'
             }
             Mock -ModuleName MarkMichaelis.ScoopBucket winget {
@@ -137,7 +156,7 @@ Describe 'Update engine dispatchers' -Tag 'Light','Module' {
             $r = & $script:Engine -Package $pkg -TimeoutMinutes 0
             $r.State            | Should -Be 'Updated'
             $script:captured[0] | Should -Be 'upgrade'
-            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-WingetWithTimeout -Times 0 -Exactly
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-WithTimeout -Times 0 -Exactly
         }
     }
 
@@ -719,7 +738,7 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
             $script:capturedTimeout | Should -Be 7
         }
 
-        It 'default -PackageTimeoutMinutes is 15' {
+        It 'default -PackageTimeoutMinutes is 5' {
             $fakeBundles = @(
                 [pscustomobject]@{ Bundle='Alpha'; BundlePath='C:\fake\Alpha.ps1'; Packages=@(
                     [pscustomobject]@{ Name='a'; Installer='winget'; Id='A.A' }
@@ -735,7 +754,7 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
 
             Update-Package -Name 'a' -SkipCompletion
 
-            $script:capturedTimeout | Should -Be 15
+            $script:capturedTimeout | Should -Be 5
         }
     }
 }

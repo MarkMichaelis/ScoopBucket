@@ -123,9 +123,12 @@ function Update-Package {
         [switch]$SkipBucketRefresh,
         [string]$BucketPath,
         # Hard cap on per-package winget upgrade time (minutes). Default
-        # 15 minutes; pass 0 to disable. Forwarded to Invoke-PackageUpdate
-        # and only affects the winget engine. See #269.
-        [int]$PackageTimeoutMinutes = 15
+        # 5 minutes (vast majority of winget upgrades finish in <60s).
+        # Pass 0 to disable. Forwarded to Invoke-PackageUpdate and only
+        # affects the winget engine. Heavy installers can opt into a
+        # longer per-package cap via [Package].UpdateTimeoutMinutes in
+        # the bundle. See #269, #271.
+        [int]$PackageTimeoutMinutes = 5
     )
 
     # Fold -WhatIf into -DryRun. Update-Package advertises

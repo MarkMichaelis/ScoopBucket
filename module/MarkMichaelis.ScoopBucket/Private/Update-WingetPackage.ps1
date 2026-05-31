@@ -16,11 +16,12 @@ function Update-WingetPackage {
         [Parameter(Mandatory)][object]$Package,
         [switch]$WhatIf,
         # Per-call hard cap on winget runtime. Set to 0 to disable (the
-        # legacy behavior). Default 15 minutes matches Invoke-WithTimeout
-        # in .github/scripts/Test-Installs.ps1 and is enough headroom for
-        # large MSI installers without leaving a Squirrel-style hang
-        # blocking the rest of the sweep. See #269.
-        [int]$TimeoutMinutes = 15
+        # legacy behavior). Default 5 minutes covers the vast majority
+        # of winget upgrades, which complete in <60s after download.
+        # Heavy installers (Visual Studio, Office, large SDKs) can opt
+        # into a longer per-package cap via Package.UpdateTimeoutMinutes
+        # in their bundle declaration. See #269, #271.
+        [int]$TimeoutMinutes = 5
     )
 
     $id = $Package.Id
@@ -58,10 +59,18 @@ function Update-WingetPackage {
     }
 
     Write-Host "  winget $($upgradeArgs -join ' ')"
-    if ($TimeoutMinutes -gt 0) {
-        $r = Invoke-WingetWithTimeout -Arguments $upgradeArgs -TimeoutSeconds ($TimeoutMinutes * 60)
+    # Per-package override: a bundle can declare UpdateTimeoutMinutes
+    # on a single [Package] (e.g. Visual Studio, Office) to grant it
+    # more headroom than the global default. 0 = use caller's default.
+    $effectiveTimeout = if ($Package.UpdateTimeoutMinutes -and $Package.UpdateTimeoutMinutes -gt 0) {
+        [int]$Package.UpdateTimeoutMinutes
+    } else {
+        $TimeoutMinutes
+    }
+    if ($effectiveTimeout -gt 0) {
+        $r = Invoke-WithTimeout -FilePath 'winget' -Arguments $upgradeArgs -TimeoutSeconds ($effectiveTimeout * 60)
         if ($r.TimedOut) {
-            return @{ State = 'Failed'; Reason = "winget upgrade --id $id timed out after $TimeoutMinutes minute(s) and was killed (see #269)." }
+            return @{ State = 'Failed'; Reason = "winget upgrade --id $id timed out after $effectiveTimeout minute(s) and was killed (see #269)." }
         }
         $exit = $r.ExitCode
     } else {
