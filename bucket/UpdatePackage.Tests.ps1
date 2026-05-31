@@ -130,6 +130,51 @@ Describe 'Update engine dispatchers' -Tag 'Light','Module' {
         }
     }
 
+    Context 'Update-ScoopBucket' {
+        BeforeAll {
+            $script:Engine = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Update-ScoopBucket }
+        }
+
+        It 'invokes "scoop update" with no app arguments and returns Refreshed' {
+            $script:captured = $null
+            Mock -ModuleName MarkMichaelis.ScoopBucket scoop {
+                $script:captured = $args
+                $global:LASTEXITCODE = 0
+                return 'Updating Scoop...'
+            }
+            $r = & $script:Engine
+            $r.State            | Should -Be 'Refreshed'
+            $script:captured.Count | Should -Be 1
+            $script:captured[0] | Should -Be 'update'
+        }
+
+        It 'returns Skipped when scoop CLI is not on PATH' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return $null } -ParameterFilter { $Name -eq 'scoop' }
+            $r = & $script:Engine
+            $r.State  | Should -Be 'Skipped'
+            $r.Reason | Should -Match 'scoop'
+        }
+
+        It 'returns Failed when scoop update exits non-zero' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket scoop {
+                $global:LASTEXITCODE = 1
+                return 'oops'
+            }
+            $r = & $script:Engine
+            $r.State  | Should -Be 'Failed'
+            $r.Reason | Should -Match '1'
+        }
+
+        It 'honors -WhatIf without invoking scoop' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket scoop {
+                throw 'should not be called under -WhatIf'
+            }
+            $r = & $script:Engine -WhatIf
+            $r.State | Should -Be 'Refreshed'
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -Times 0 -Exactly
+        }
+    }
+
     Context 'Update-ChocoPackage' {
         BeforeAll {
             $script:Engine = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Update-ChocoPackage }
@@ -464,6 +509,125 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
         }
         $pkg = & $helper -Metadata $meta
         $pkg.WingetExtraArgs | Should -Be @('--skip-dependencies','--silent')
+    }
+
+    Context 'auto bucket refresh (#267)' {
+        BeforeEach {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-PackageUpdate { }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Update-ScoopBucket { return @{ State = 'Refreshed'; Reason = $null } }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Resolve-BucketPath { return $null }
+        }
+
+        It 'refreshes scoop buckets exactly once when the dispatch plan contains a scoop package' {
+            $fakeBundles = @(
+                [pscustomobject]@{ Bundle='S';  BundlePath='C:\fake\S.ps1'; Packages=@(
+                    [pscustomobject]@{ Name='s1'; Installer='scoop'; Id='main/s1' },
+                    [pscustomobject]@{ Name='s2'; Installer='scoop'; Id='main/s2' }
+                )}
+            )
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages       { return $fakeBundles }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects {
+                return @(
+                    [Package]@{ Name='s1'; Installer='scoop'; Id='main/s1' },
+                    [Package]@{ Name='s2'; Installer='scoop'; Id='main/s2' }
+                )
+            }
+
+            Update-Package -Name 'S' -SkipCompletion
+
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-ScoopBucket -Times 1 -Exactly
+        }
+
+        It 'does NOT refresh when the dispatch plan has no scoop packages' {
+            $fakeBundles = @(
+                [pscustomobject]@{ Bundle='W'; BundlePath='C:\fake\W.ps1'; Packages=@(
+                    [pscustomobject]@{ Name='w'; Installer='winget'; Id='W.W' }
+                )}
+            )
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages       { return $fakeBundles }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects {
+                return @([Package]@{ Name='w'; Installer='winget'; Id='W.W' })
+            }
+
+            Update-Package -Name 'w' -SkipCompletion
+
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-ScoopBucket -Times 0 -Exactly
+        }
+
+        It 'does NOT refresh under -DryRun' {
+            $fakeBundles = @(
+                [pscustomobject]@{ Bundle='S'; BundlePath='C:\fake\S.ps1'; Packages=@(
+                    [pscustomobject]@{ Name='s1'; Installer='scoop'; Id='main/s1' }
+                )}
+            )
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages       { return $fakeBundles }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects {
+                return @([Package]@{ Name='s1'; Installer='scoop'; Id='main/s1' })
+            }
+
+            Update-Package -Name 's1' -SkipCompletion -DryRun
+
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-ScoopBucket -Times 0 -Exactly
+        }
+
+        It 'does NOT refresh when -SkipBucketRefresh is set' {
+            $fakeBundles = @(
+                [pscustomobject]@{ Bundle='S'; BundlePath='C:\fake\S.ps1'; Packages=@(
+                    [pscustomobject]@{ Name='s1'; Installer='scoop'; Id='main/s1' }
+                )}
+            )
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages       { return $fakeBundles }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects {
+                return @([Package]@{ Name='s1'; Installer='scoop'; Id='main/s1' })
+            }
+
+            Update-Package -Name 's1' -SkipCompletion -SkipBucketRefresh
+
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-ScoopBucket -Times 0 -Exactly
+        }
+
+        It 'continues dispatch and warns when bucket refresh fails' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Update-ScoopBucket {
+                return @{ State = 'Failed'; Reason = 'scoop update exited with 1.' }
+            }
+            $fakeBundles = @(
+                [pscustomobject]@{ Bundle='S'; BundlePath='C:\fake\S.ps1'; Packages=@(
+                    [pscustomobject]@{ Name='s1'; Installer='scoop'; Id='main/s1' }
+                )}
+            )
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages       { return $fakeBundles }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects {
+                return @([Package]@{ Name='s1'; Installer='scoop'; Id='main/s1' })
+            }
+
+            $warnings = @()
+            Update-Package -Name 's1' -SkipCompletion -WarningVariable warnings -WarningAction SilentlyContinue
+
+            ($warnings -join "`n") | Should -Match 'bucket refresh'
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-PackageUpdate -Times 1 -Exactly
+        }
+
+        It 'refreshes exactly once across multiple bundles with scoop packages' {
+            $fakeBundles = @(
+                [pscustomobject]@{ Bundle='A'; BundlePath='C:\fake\A.ps1'; Packages=@(
+                    [pscustomobject]@{ Name='a'; Installer='scoop'; Id='main/a' }
+                )}
+                [pscustomobject]@{ Bundle='B'; BundlePath='C:\fake\B.ps1'; Packages=@(
+                    [pscustomobject]@{ Name='b'; Installer='scoop'; Id='main/b' }
+                )}
+            )
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages       { return $fakeBundles }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects {
+                param($BundlePath)
+                if ($BundlePath -like '*A.ps1') { return @([Package]@{ Name='a'; Installer='scoop'; Id='main/a' }) }
+                else                            { return @([Package]@{ Name='b'; Installer='scoop'; Id='main/b' }) }
+            }
+
+            Update-Package -Name '*' -SkipCompletion
+
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-ScoopBucket -Times 1 -Exactly
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-PackageUpdate -Times 2 -Exactly
+        }
     }
 }
 

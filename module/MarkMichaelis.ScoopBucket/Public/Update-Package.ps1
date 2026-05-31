@@ -45,6 +45,12 @@ function Update-Package {
           - Refreshes `$env:Path` and re-registers completion when a
             CLI version actually changed.
 
+        Before any per-app scoop update runs in bucket-scoped mode, the
+        scoop bucket clones under ~/scoop/buckets/<name> are refreshed
+        once (`scoop update` with no args) so that per-app updates see
+        the latest manifests rather than a stale local mirror. See #267.
+        Suppress with -SkipBucketRefresh.
+
     .PARAMETER Name
         One or more package names, bundle names, or the literal '*'.
         Operates ONLY on packages declared in this bucket's bundles.
@@ -77,6 +83,14 @@ function Update-Package {
     .PARAMETER SkipCompletion
         Don't re-register completion blocks after a successful update.
 
+    .PARAMETER SkipBucketRefresh
+        Suppress the automatic ``scoop update`` (bucket refresh) that
+        Update-Package runs once per invocation when the dispatch plan
+        contains a scoop-engine package. Useful when callers know the
+        local bucket clones are already current and want to shave the
+        few-seconds refresh cost, or when running offline. Has no
+        effect under -DryRun or -MachineWide (which bypass it already).
+
     .PARAMETER BucketPath
         Override the auto-detected bucket directory.
 
@@ -106,6 +120,7 @@ function Update-Package {
         [switch]$MachineWide,
         [switch]$DryRun,
         [switch]$SkipCompletion,
+        [switch]$SkipBucketRefresh,
         [string]$BucketPath
     )
 
@@ -230,6 +245,51 @@ function Update-Package {
         )
         foreach ($key in @($byBundle.Keys)) {
             if ($fullPaths.Contains($key)) { [void]$byBundle.Remove($key) }
+        }
+    }
+
+    # Auto bucket refresh (#267). When the dispatch plan contains any
+    # scoop-engine package, refresh scoop's bucket clones ONCE before the
+    # per-app updates. Without this, a stale per-bucket clone under
+    # ~/scoop/buckets/<name> serves the previous manifest version, and a
+    # per-app `scoop update <app>` can fail (e.g. the 404 in #265 that
+    # persisted across user `Update-Package` runs because the local
+    # bucket clone hadn't fast-forwarded). Gated:
+    #   * Skipped under -DryRun (refresh has no plan/apply distinction;
+    #     a dry run shouldn't have engine side effects).
+    #   * Skipped under -SkipBucketRefresh (escape hatch).
+    #   * Skipped when no scoop packages are in scope.
+    # A failed refresh does not abort dispatch -- we surface a warning
+    # and continue; per-app updates may still succeed if they happen to
+    # already have the latest manifest cached.
+    if (-not $DryRun -and -not $SkipBucketRefresh) {
+        $scoopInScope = $false
+        foreach ($entry in $byBundle.Values) {
+            $pkgObjects = @(Get-BundlePackageObjects -BundlePath $entry.BundlePath)
+            if ($pkgObjects.Count -eq 0) {
+                $b = $bundles | Where-Object BundlePath -eq $entry.BundlePath | Select-Object -First 1
+                $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
+            }
+            if ($pkgObjects | Where-Object { $_.Installer -eq 'scoop' -and ($entry.Names -contains $_.Name) } | Select-Object -First 1) {
+                $scoopInScope = $true; break
+            }
+        }
+        if (-not $scoopInScope) {
+            foreach ($b in $fullBundles) {
+                $pkgObjects = @(Get-BundlePackageObjects -BundlePath $b.BundlePath)
+                if ($pkgObjects.Count -eq 0) {
+                    $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
+                }
+                if ($pkgObjects | Where-Object Installer -eq 'scoop' | Select-Object -First 1) {
+                    $scoopInScope = $true; break
+                }
+            }
+        }
+        if ($scoopInScope) {
+            $refresh = Update-ScoopBucket
+            if ($refresh.State -eq 'Failed') {
+                Write-Warning "Update-Package: scoop bucket refresh failed ($($refresh.Reason)); per-app updates may use stale manifests."
+            }
         }
     }
 
