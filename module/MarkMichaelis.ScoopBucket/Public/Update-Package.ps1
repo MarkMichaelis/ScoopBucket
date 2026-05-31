@@ -3,7 +3,7 @@ function Update-Package {
     .SYNOPSIS
         Update packages declared by this bucket (default), or update every
         installed package on the machine across all supported engines
-        (-AllInstalled).
+        (-MachineWide).
 
     .DESCRIPTION
         Two operating modes:
@@ -20,14 +20,14 @@ function Update-Package {
 
            This mode operates ONLY on packages declared in this bucket's
            bundles. To update every installed package on the machine
-           regardless of source, use -AllInstalled.
+           regardless of source, use -MachineWide.
 
-        2) Machine-wide (-AllInstalled, mutually exclusive with -Name).
+        2) Machine-wide (-MachineWide, mutually exclusive with -Name).
            Sweeps every package manager this module knows about — winget,
            scoop, chocolatey, npm (global), and dotnet tools — and runs
-           that engine's bulk-upgrade command. This updates EVERY installed
+           that engine's bulk-upgrade command. **This updates EVERY installed
            package the engine knows about on the local machine, INCLUDING
-           packages that were NOT installed by this bucket. Bundle metadata
+           packages that were NOT installed by this bucket.** Bundle metadata
            is bypassed entirely; DependsOn, PostInstallScript,
            PostUpdateScript, and CISkip have no effect in this mode.
            Tab-completers are not refreshed automatically — run
@@ -35,8 +35,6 @@ function Update-Package {
            completers. Engines that aren't installed on the machine are
            skipped silently with a Skipped row in the summary; a per-engine
            failure does not abort the remaining sweeps.
-
-           `-All` is preserved as a back-compat alias of `-AllInstalled`.
 
         For each resolved package in bucket-scoped mode the dispatch goes
         through Invoke-PackageUpdate which:
@@ -50,16 +48,15 @@ function Update-Package {
     .PARAMETER Name
         One or more package names, bundle names, or the literal '*'.
         Operates ONLY on packages declared in this bucket's bundles.
-        Mutually exclusive with -AllInstalled. To update every installed
-        package on the machine regardless of source, use -AllInstalled.
+        Mutually exclusive with -MachineWide. To update every installed
+        package on the machine regardless of source, use **-MachineWide**.
 
-    .PARAMETER AllInstalled
+    .PARAMETER MachineWide
         Run a machine-wide update sweep across every engine this module
         knows about, independent of bundle metadata. This updates EVERY
         installed package the engine knows about on the local machine,
-        including packages that were NOT installed by this bucket.
-        Mutually exclusive with -Name. `-All` is accepted as a back-compat
-        alias.
+        INCLUDING packages that were NOT installed by this bucket.
+        Mutually exclusive with -Name.
 
         The five engine commands invoked (in order: scoop, winget, choco,
         npmGlobal, dotnetTool) are:
@@ -71,7 +68,7 @@ function Update-Package {
 
         An engine that is not installed on the machine is skipped silently
         with a Skipped row in the summary. Completers are NOT auto-refreshed
-        under -AllInstalled; run `Update-PackageCompletion` manually if a
+        under -MachineWide; run `Update-PackageCompletion` manually if a
         CLI version bumped.
 
     .PARAMETER DryRun
@@ -93,24 +90,20 @@ function Update-Package {
         Update-Package -Name 'OSBasePackages'
 
     .EXAMPLE
-        Update-Package -AllInstalled -DryRun
+        Update-Package -MachineWide -DryRun
         # Plan a machine-wide update across every engine this module knows
         # about (winget, scoop, chocolatey, npm global, dotnet tools).
         # Mutually exclusive with -Name. Bundle metadata is bypassed --
         # each engine's native bulk-upgrade command runs against every
         # package it knows about on the machine, INCLUDING packages NOT
         # installed by this bucket.
-
-    .EXAMPLE
-        Update-Package -All           # alias for -AllInstalled (back-compat)
     #>
     [CmdletBinding(DefaultParameterSetName = 'ByName', SupportsShouldProcess, ConfirmImpact = 'Medium')]
     [OutputType([Package])]
     param(
         [Parameter(ParameterSetName = 'ByName', Mandatory, Position = 0)][string[]]$Name,
         [Parameter(ParameterSetName = 'MachineWide', Mandatory)]
-        [Alias('All')]
-        [switch]$AllInstalled,
+        [switch]$MachineWide,
         [switch]$DryRun,
         [switch]$SkipCompletion,
         [string]$BucketPath
@@ -127,7 +120,7 @@ function Update-Package {
     # straight to each engine's native bulk-upgrade command. The hint at
     # the end of the run reminds users to run Update-PackageCompletion
     # manually since we can't tell which CLIs (if any) version-bumped.
-    if ($AllInstalled) {
+    if ($MachineWide) {
         Invoke-AllEnginesUpdate -DryRun:$DryRun
         return
     }
