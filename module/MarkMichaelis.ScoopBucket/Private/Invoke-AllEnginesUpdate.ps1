@@ -1,4 +1,4 @@
-# Orchestrator for `Update-Package -All`: runs the five per-engine bulk
+# Orchestrator for `Update-Package -MachineWide`: runs the five per-engine bulk
 # sweeps in a deterministic order and prints a one-row-per-engine summary
 # table using the same glyph scheme as Invoke-PackageUpdate.
 #
@@ -57,5 +57,5 @@ function Invoke-AllEnginesUpdate {
     }
 
     Write-Host ""
-    Write-Host "Note: completers were not auto-refreshed for -AllInstalled. Run Update-PackageCompletion if a CLI version bumped." -ForegroundColor DarkGray
+    Write-Host "Note: completers were not auto-refreshed for -MachineWide. Run Update-PackageCompletion if a CLI version bumped." -ForegroundColor DarkGray
 }
