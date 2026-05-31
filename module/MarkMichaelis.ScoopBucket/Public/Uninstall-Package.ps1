@@ -212,6 +212,12 @@ function ConvertTo-PackageFromMetadata {
         Companions  = if ($Metadata.PSObject.Properties['Companions']) { @($Metadata.Companions) } else { @() }
         CISkip      = if ($Metadata.PSObject.Properties['CISkip']) { [string]$Metadata.CISkip } else { '' }
         Notes       = if ($Metadata.PSObject.Properties['Notes']) { [string]$Metadata.Notes } else { '' }
+        # WingetExtraArgs must round-trip through the metadata-only
+        # fallback or winget upgrade/uninstall commands lose declared
+        # extras like --skip-dependencies (the very reason a bundle
+        # bothered to set the field). Get-BundlePackages emits this
+        # field in the probe projection; copy it back here.
+        WingetExtraArgs = if ($Metadata.PSObject.Properties['WingetExtraArgs']) { @($Metadata.WingetExtraArgs) } else { @() }
     }
     # Completion's ExpectedCompletions invariant only matters at install
     # time; reconstruct enough to satisfy Validate() for non-'none' modes.

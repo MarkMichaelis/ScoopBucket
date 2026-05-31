@@ -180,8 +180,8 @@ Describe 'Update engine dispatchers' -Tag 'Light','Module' {
             $script:Engine = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Update-NpmGlobalPackage }
         }
 
-        It 'returns Failed when npm not on PATH' {
-            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return $null } -ParameterFilter { $Name -in @('npm','npm.cmd') }
+        It 'returns Failed when npm.cmd not on PATH' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return $null } -ParameterFilter { $Name -eq 'npm.cmd' }
             $pkg = [Package]@{ Name='claude-code'; Installer='npmGlobal'; Id='@anthropic-ai/claude-code' }
             $r = & $script:Engine -Package $pkg
             $r.State  | Should -Be 'Failed'
@@ -445,5 +445,24 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
         Update-Package -Name '*' -SkipCompletion
 
         $script:dispatched -join ',' | Should -Be 'Alpha,Mike,Zulu'
+    }
+
+    It 'ConvertTo-PackageFromMetadata round-trips WingetExtraArgs' {
+        # When Get-BundlePackageObjects can't dot-source the bundle in-
+        # process, Update-Package falls back to reconstructing [Package]
+        # objects from the JSON-deserialized metadata via
+        # ConvertTo-PackageFromMetadata. That helper used to drop the
+        # WingetExtraArgs field, so a bundle declaring
+        # `WingetExtraArgs=@('--skip-dependencies')` would silently lose
+        # the flag on the update / uninstall path. Regression test.
+        $helper = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command ConvertTo-PackageFromMetadata }
+        $meta = [pscustomobject]@{
+            Name='X'; Installer='winget'; Id='Foo.X'; Source=''; Scope='global'
+            CliCommands=@(); Completion='none'; DependsOn=@(); Companions=@()
+            CISkip=''; Notes=''
+            WingetExtraArgs=@('--skip-dependencies','--silent')
+        }
+        $pkg = & $helper -Metadata $meta
+        $pkg.WingetExtraArgs | Should -Be @('--skip-dependencies','--silent')
     }
 }
