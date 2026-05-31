@@ -38,7 +38,10 @@ function Update-DotnetToolPackage {
     Write-Host "  dotnet $($updateArgs -join ' ')"
     $out = & dotnet @updateArgs 2>&1
     $exit = $LASTEXITCODE
-    $joined = ($out -join "`n")
+    # Wrap in @(...) so a single-string $out stays an array of one for
+    # the -join below (defensive — dotnet typically emits multiple
+    # lines, but a one-line success/error path is possible).
+    $joined = (@($out) -join "`n")
     if ($exit -eq 0) {
         # `dotnet tool update` returns 0 + a message like
         # "Tool 'xyz' was reinstalled with the latest stable version
