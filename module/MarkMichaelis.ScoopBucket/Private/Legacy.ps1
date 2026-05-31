@@ -204,7 +204,13 @@ function Get-InstallArgs {
 }
 
 function scoop {
-    [InstallArgs]$scoopArgs = Get-InstallArgs @args
+    # No [InstallArgs] type constraint here on purpose: the class is
+    # defined in a dot-sourced Private file (not via ScriptsToProcess),
+    # so a second runtime copy of the type in the same session would
+    # trip a "Cannot convert InstallArgs to InstallArgs" type-identity
+    # mismatch. See issue #255. `choco` is intentionally untyped for
+    # the same reason.
+    $scoopArgs = Get-InstallArgs @args
     $localArgs = $scoopArgs.OriginalArgs
     $cmd = $scoopArgs.Action
     $options = $scoopArgs.Options
