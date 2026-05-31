@@ -24,9 +24,11 @@
     FunctionsToExport = @(
         'Install-Package',
         'Uninstall-Package',
+        'Update-Package',
         'Get-Package',
         'Invoke-PackageInstall',
         'Invoke-PackageUninstall',
+        'Invoke-PackageUpdate',
         'Update-PackageCompletion',
         'Import-PackageCompletion',
         'Add-MachinePath',

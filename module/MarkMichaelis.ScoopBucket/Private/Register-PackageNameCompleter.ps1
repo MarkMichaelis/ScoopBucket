@@ -44,5 +44,5 @@ function Register-PackageNameCompleter {
         }
     }
 
-    Register-ArgumentCompleter -CommandName 'Install-Package','Get-Package' -ParameterName 'Name' -ScriptBlock $scriptBlock
+    Register-ArgumentCompleter -CommandName 'Install-Package','Get-Package','Update-Package','Uninstall-Package' -ParameterName 'Name' -ScriptBlock $scriptBlock
 }
