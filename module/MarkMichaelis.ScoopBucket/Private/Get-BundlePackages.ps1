@@ -111,6 +111,7 @@ function global:Invoke-PackageInstall {
             CISkip      = `$p.CISkip
             Notes       = `$p.Notes
             WingetExtraArgs = @(`$p.WingetExtraArgs)
+            UpdateTimeoutMinutes = [int]`$p.UpdateTimeoutMinutes
             HasPostInstallScript   = [bool]`$p.PostInstallScript
             HasPostUpdateScript    = [bool]`$p.PostUpdateScript
             HasCustomInstallScript = [bool]`$p.CustomInstallScript

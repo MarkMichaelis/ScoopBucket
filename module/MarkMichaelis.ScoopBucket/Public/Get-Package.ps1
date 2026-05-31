@@ -105,6 +105,7 @@ function Get-Package {
                 CISkip      = $p.CISkip
                 Notes       = $p.Notes
                 WingetExtraArgs = @($p.WingetExtraArgs)
+                UpdateTimeoutMinutes = [int]$p.UpdateTimeoutMinutes
                 HasPostInstallScript   = [bool]$p.HasPostInstallScript
                 HasPostUpdateScript    = [bool]$p.HasPostUpdateScript
                 HasCustomInstallScript = [bool]$p.HasCustomInstallScript

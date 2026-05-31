@@ -42,9 +42,9 @@ function Invoke-PackageUpdate {
         [switch]$SkipCompletion,
         # Per-package winget timeout in minutes (0 disables). Forwarded
         # to Update-WingetPackage only; other engines are unaffected.
-        # See #269 for the Warp.Warp Squirrel-installer hang that motivates
-        # this knob.
-        [int]$PackageTimeoutMinutes = 15
+        # Default 5 minutes; bundles can override per-package via
+        # Package.UpdateTimeoutMinutes. See #269, #271.
+        [int]$PackageTimeoutMinutes = 5
     )
 
     # Fold -WhatIf into -DryRun. The driver advertises

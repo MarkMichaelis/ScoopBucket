@@ -32,6 +32,9 @@ function ConvertTo-PackageFromMetadata {
         # bothered to set the field). Get-BundlePackages emits this
         # field in the probe projection; copy it back here.
         WingetExtraArgs = if ($Metadata.PSObject.Properties['WingetExtraArgs']) { @($Metadata.WingetExtraArgs) } else { @() }
+        # UpdateTimeoutMinutes must also round-trip so per-package
+        # overrides survive the metadata-only fallback path (#271).
+        UpdateTimeoutMinutes = if ($Metadata.PSObject.Properties['UpdateTimeoutMinutes']) { [int]$Metadata.UpdateTimeoutMinutes } else { 0 }
     }
     # Completion's ExpectedCompletions invariant only matters at install
     # time; reconstruct enough to satisfy Validate() for non-'none' modes.
