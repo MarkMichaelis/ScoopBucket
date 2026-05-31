@@ -49,7 +49,13 @@ function Update-DotnetToolPackage {
         }
         return @{ State = 'Updated'; Reason = $null }
     }
-    if ($joined -match '(?im)is not installed|could not be found') {
+    # Only classify as NotInstalled when dotnet explicitly says the
+    # *tool* isn't installed locally. The earlier "could not be found"
+    # match was ambiguous: it also fires for feed-resolution failures
+    # (e.g. NU1101 "Unable to find package 'foo'"), which are real
+    # update failures that should NOT short-circuit as NotInstalled.
+    if ($joined -match '(?im)tool\s+''?[^'']+''?\s+is not installed' -or
+        $joined -match '(?im)A tool with the package Id\s+''?[^'']+''?\s+could not be found') {
         return @{ State = 'NotInstalled'; Reason = 'dotnet tool reported not installed.' }
     }
     return @{ State = 'Failed'; Reason = "dotnet tool update -g $id exited with $exit. Output: $($joined.Trim())" }
