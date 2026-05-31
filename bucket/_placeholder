@@ -1,0 +1,16 @@
+# Do not delete.
+#
+# This file is referenced by no-op scoop manifests that wrap installs handled
+# elsewhere (e.g., Microsoft Copilot, which ships with Windows 11; GitHub
+# Copilot CLI, which is wrapped to winget). Scoop manifests require a `url`
+# field even when the install is performed entirely by `installer.script`.
+#
+# Find current references with:
+#   grep -l 'bucket/_placeholder' bucket/*.json
+#
+# A previous attempt to remove the analogous root-level `blank` file (commit
+# 577d2c2) broke `scoop update` for 14 manifests with a 404. See #265.
+# The bucket/ManifestUrlSelfReferences.Tests.ps1 Pester test guards against
+# this regression by asserting every self-referencing `url` resolves to a
+# file checked into this repo.
+
