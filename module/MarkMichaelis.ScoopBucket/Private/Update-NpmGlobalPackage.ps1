@@ -19,9 +19,13 @@ function Update-NpmGlobalPackage {
         return @{ State = 'Failed'; Reason = "npmGlobal: Id is empty for '$($Package.Name)'." }
     }
 
-    if (-not (Get-Command npm -ErrorAction SilentlyContinue) -and
-        -not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
-        return @{ State = 'Failed'; Reason = "npm not on PATH. Install Node.js first (DependsOn='Node.js')." }
+    # Invocation hard-codes `npm.cmd` (not bare `npm`) to dodge the
+    # `npm.ps1` arg-mangling bug fixed in #249, so the presence probe
+    # checks for `npm.cmd` specifically — keeping probe and invocation
+    # aligned. Node.js installs ship both `npm.cmd` and `npm.ps1`
+    # together, so this is not a portability regression.
+    if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+        return @{ State = 'Failed'; Reason = "npm.cmd not on PATH. Install Node.js first (DependsOn='Node.js')." }
     }
 
     if (-not $WhatIf) {
