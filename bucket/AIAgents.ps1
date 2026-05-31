@@ -129,6 +129,16 @@ Register-ArgumentCompleter -Native -CommandName npx -ScriptBlock {
         # and --disable-interactivity keeps winget itself non-interactive
         # so headless / CI runs do not stall on prompts.
         WingetExtraArgs = @('--silent', '--disable-interactivity')
+        # Warp's Squirrel installer has been observed to stall after the
+        # download phase on real-world updates (issues #269, #272). The
+        # 5-minute default sweep timeout (from Update-Package's
+        # -PackageTimeoutMinutes) was killing the install before it could
+        # finish on slower links / large deltas. Bump *this* package's
+        # ceiling to 20 minutes -- still bounded, but generous enough that
+        # a healthy download + Squirrel apply completes without being
+        # killed. Other packages are unaffected; the global default stays
+        # at 5 minutes.
+        UpdateTimeoutMinutes = 20
         # Two surfaces from a single binary:
         #   * `warp` — launches the Warp terminal UI (GUI) when run bare,
         #              or the embedded Oz CLI when run with subcommands.

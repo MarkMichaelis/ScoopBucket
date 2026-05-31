@@ -1092,3 +1092,48 @@ Describe 'Update-Package help documents -MachineWide explicitly (#263)' -Tag 'Li
         $desc | Should -Match 'not installed by this bucket'
     }
 }
+
+
+Describe 'Update-Package sweep continues past failed packages (#272)' -Tag 'Light','Module' {
+
+    It 'continues dispatching remaining bundles when an earlier package fails, even with $ErrorActionPreference=Stop' {
+        # Use REAL Invoke-PackageUpdate so that -ErrorAction Continue bound by
+        # the dispatch call is honored exactly as it is in production. Mocking
+        # Invoke-PackageUpdate directly does not faithfully reproduce
+        # common-parameter binding through Pester's mock wrapper.
+        $fakeBundles = @(
+            [pscustomobject]@{ Bundle='Alpha'; BundlePath='C:\fake\Alpha.ps1'; Packages=@([pscustomobject]@{ Name='a'; Installer='winget'; Id='A.A' }) }
+            [pscustomobject]@{ Bundle='Beta';  BundlePath='C:\fake\Beta.ps1';  Packages=@([pscustomobject]@{ Name='b'; Installer='winget'; Id='B.B' }) }
+            [pscustomobject]@{ Bundle='Gamma'; BundlePath='C:\fake\Gamma.ps1'; Packages=@([pscustomobject]@{ Name='c'; Installer='winget'; Id='C.C' }) }
+        )
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages { return $fakeBundles }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects -ParameterFilter { $BundlePath -eq 'C:\fake\Alpha.ps1' } { return @([Package]@{ Name='a'; Installer='winget'; Id='A.A' }) }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects -ParameterFilter { $BundlePath -eq 'C:\fake\Beta.ps1'  } { return @([Package]@{ Name='b'; Installer='winget'; Id='B.B' }) }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects -ParameterFilter { $BundlePath -eq 'C:\fake\Gamma.ps1' } { return @([Package]@{ Name='c'; Installer='winget'; Id='C.C' }) }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Resolve-BucketPath { return $null }
+        # Simulate the Warp-style failure: first bundle's package fails (e.g., timeout).
+        # The other two should still execute despite caller's ErrorActionPreference=Stop.
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -ParameterFilter { $Package.Id -eq 'A.A' } {
+            return @{ State='Failed'; Reason='winget upgrade --id A.A timed out (simulated for #272)' }
+        }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -ParameterFilter { $Package.Id -ne 'A.A' } {
+            return @{ State='Updated'; Reason='ok' }
+        }
+
+        $prior = $ErrorActionPreference
+        try {
+            # Reproduce user's setup: ErrorActionPreference=Stop in the session
+            # (common in modern PowerShell profiles). The dispatcher must still
+            # complete its sweep even though Invoke-PackageUpdate would emit
+            # a non-terminating error for the failed package.
+            $ErrorActionPreference = 'Stop'
+            Update-Package -Name '*' -SkipCompletion 2>$null
+        } finally {
+            $ErrorActionPreference = $prior
+        }
+
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -Times 1 -Exactly -ParameterFilter { $Package.Id -eq 'A.A' }
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -Times 1 -Exactly -ParameterFilter { $Package.Id -eq 'B.B' }
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -Times 1 -Exactly -ParameterFilter { $Package.Id -eq 'C.C' }
+    }
+}
