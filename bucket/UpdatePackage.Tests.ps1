@@ -757,3 +757,55 @@ Describe 'Update-Package -All dispatcher' -Tag 'Light','Module' {
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly -ParameterFilter { $DryRun }
     }
 }
+
+Describe 'Update-Package -AllInstalled rename (#261)' -Tag 'Light','Module' {
+
+    BeforeEach {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate { }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages      { throw 'should not be called under -AllInstalled' }
+    }
+
+    It '-AllInstalled is the primary parameter name and dispatches to Invoke-AllEnginesUpdate' {
+        Update-Package -AllInstalled -SkipCompletion
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages      -Times 0 -Exactly
+    }
+
+    It '-All (back-compat alias) still routes to Invoke-AllEnginesUpdate without a warning' {
+        Update-Package -All -SkipCompletion 3>&1 | Out-Null
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly
+    }
+
+    It '-Name foo -AllInstalled errors (mutually exclusive parameter sets)' {
+        { Update-Package -Name 'foo' -AllInstalled -SkipCompletion } | Should -Throw
+    }
+
+    It '-AllInstalled -DryRun propagates DryRun to the orchestrator' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -ParameterFilter { $DryRun } { }
+        Update-Package -AllInstalled -DryRun -SkipCompletion
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly -ParameterFilter { $DryRun }
+    }
+}
+
+Describe 'Update-Package help documents -AllInstalled explicitly (#261)' -Tag 'Light','Module' {
+
+    BeforeAll {
+        $script:help = Get-Help Update-Package -Full
+    }
+
+    It 'AllInstalled parameter help enumerates all five engines verbatim' {
+        $param = $script:help.parameters.parameter | Where-Object { $_.name -eq 'AllInstalled' }
+        $param | Should -Not -BeNullOrEmpty -Because '-AllInstalled must be the documented parameter name'
+        $text = ($param.description | ForEach-Object { $_.Text }) -join "`n"
+        $text | Should -Match 'winget'
+        $text | Should -Match 'scoop'
+        $text | Should -Match 'choco'      # matches both "choco" and "chocolatey"
+        $text | Should -Match 'npm'
+        $text | Should -Match 'dotnet'
+    }
+
+    It 'DESCRIPTION explicitly warns that machine-wide sweep covers packages NOT installed by this bucket' {
+        $desc = ($script:help.description | ForEach-Object { $_.Text }) -join "`n"
+        $desc | Should -Match 'not installed by this bucket'
+    }
+}
