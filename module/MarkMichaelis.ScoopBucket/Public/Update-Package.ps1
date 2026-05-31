@@ -300,6 +300,12 @@ function Update-Package {
         }
     }
 
+    # Track per-bundle errors across both dispatch loops so the sweep
+    # cannot be aborted by a caller that runs with $ErrorActionPreference='Stop'
+    # (which would otherwise upgrade Invoke-PackageUpdate's non-terminating
+    # WriteError into a terminating error at the call site). See issue #272.
+    $pkgErrors = [System.Collections.Generic.List[object]]::new()
+
     # Dispatch (a): selective per-bundle Name filter.
     foreach ($entry in $byBundle.Values) {
         $pkgObjects = @(Get-BundlePackageObjects -BundlePath $entry.BundlePath)
@@ -311,7 +317,8 @@ function Update-Package {
         Write-Host "Update-Package: dispatching $($entry.Names -join ', ') via $($entry.Bundle)..."
         Invoke-PackageUpdate -Packages $pkgObjects -Bundle $entry.Bundle `
             -Name @($entry.Names) -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
-            -PackageTimeoutMinutes $PackageTimeoutMinutes
+            -PackageTimeoutMinutes $PackageTimeoutMinutes `
+            -ErrorAction Continue -ErrorVariable +pkgErrors
     }
 
     # Dispatch (b): full-bundle update.
@@ -324,7 +331,8 @@ function Update-Package {
         Write-Host "Update-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
         Invoke-PackageUpdate -Packages $pkgObjects -Bundle $b.Bundle `
             -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
-            -PackageTimeoutMinutes $PackageTimeoutMinutes
+            -PackageTimeoutMinutes $PackageTimeoutMinutes `
+            -ErrorAction Continue -ErrorVariable +pkgErrors
     }
 
     # Dispatch (c): bare manifests — no declarative [Package] metadata,
@@ -334,5 +342,9 @@ function Update-Package {
     # and shows up in CI logs.
     foreach ($n in $manifestNames) {
         Write-Warning "Update-Package: '$n' is a bare manifest with no declarative [Package] match; skipped because Update-Package requires declarative metadata to drive an engine update. Use 'scoop update $n' directly if needed."
+    }
+
+    if ($pkgErrors.Count -gt 0) {
+        Write-Warning "Update-Package: $($pkgErrors.Count) package update(s) failed; the sweep continued past each failure. See errors above for details."
     }
 }
