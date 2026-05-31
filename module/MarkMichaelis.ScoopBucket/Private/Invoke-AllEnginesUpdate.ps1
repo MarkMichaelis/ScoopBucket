@@ -57,5 +57,5 @@ function Invoke-AllEnginesUpdate {
     }
 
     Write-Host ""
-    Write-Host "Note: completers were not auto-refreshed for -All. Run Update-PackageCompletion if a CLI version bumped." -ForegroundColor DarkGray
+    Write-Host "Note: completers were not auto-refreshed for -AllInstalled. Run Update-PackageCompletion if a CLI version bumped." -ForegroundColor DarkGray
 }
