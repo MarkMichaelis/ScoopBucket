@@ -3,6 +3,20 @@ Write-Host 'Installing and configuring PowerShell...'
 $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
 if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
 
+# Remove the Microsoft Store / MSIX build of PowerShell 7 so the first-party
+# MSI build (C:\Program Files\PowerShell\7) is the resolved `pwsh` and its
+# AllUsersAllHosts profile is admin-writable (#281). Only relevant when this
+# script runs under PowerShell 7+ (the PowerShellCore install path); skipped
+# under Windows PowerShell 5.1 (the PowerShellWindows path). Best-effort:
+# Remove-StorePwsh warns instead of throwing when the Store build is absent.
+if ($IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
+    try {
+        Remove-StorePwsh -Confirm:$false | Out-Null
+    } catch {
+        Write-Warning "Skipping Store PowerShell removal: $($_.Exception.Message)"
+    }
+}
+
 Update-Help -ErrorAction Ignore
 if((Get-PSRepository PSGallery).InstallationPolicy -ne 'Trusted') {
     Set-PSRepository -Name PSGallery -InstallationPolicy 'Trusted'

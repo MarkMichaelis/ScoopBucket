@@ -31,6 +31,7 @@
         'Invoke-PackageUpdate',
         'Update-PackageCompletion',
         'Import-PackageCompletion',
+        'Remove-StorePwsh',
         'Add-MachinePath',
         'Update-PathFromRegistry',
         'Test-IsElevated',
