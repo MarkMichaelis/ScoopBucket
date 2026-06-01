@@ -23,22 +23,22 @@ function Invoke-PackageUpdate {
           7. Re-register completion (CLI version bumps can introduce new
              completion definitions).
 
-        Output streams mirror Invoke-PackageInstall:
-          - success stream: each Updated / AlreadyLatest / NotInstalled /
-            Skipped Package emits via Write-Output ([Package]).
-          - error stream: each Failed package writes a structured
-            ErrorRecord (FullyQualifiedErrorId='PackageUpdateFailed').
-          - host stream: per-package log lines and the per-bundle summary
-            table (✓ Updated, ↺ AlreadyLatest, ✗ Failed, → Skipped/NotInstalled).
+        Output streams:
+          - success stream: one PackageUpdateResult per package (Updated /
+            AlreadyLatest / NotInstalled / Skipped / Failed / SelfManaged /
+            NoAutoUpdateSupport). A format.ps1xml view renders Status as a
+            colored glyph for display; the property stays a plain string.
+          - error stream: each Failed package also writes a structured
+            ErrorRecord (FullyQualifiedErrorId='PackageUpdateFailed') so
+            -ErrorVariable / $? / -ErrorAction Stop keep working.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
-    [OutputType([Package])]
+    [OutputType([PackageUpdateResult])]
     param(
         [Parameter(Mandatory)][object[]]$Packages,
         [Parameter(Mandatory)][string]$Bundle,
         [string[]]$Name,
         [string[]]$Skip,
-        [switch]$DryRun,
         [switch]$SkipCompletion,
         # Per-package winget timeout in minutes (0 disables). Forwarded
         # to Update-WingetPackage only; other engines are unaffected.
@@ -47,11 +47,10 @@ function Invoke-PackageUpdate {
         [int]$PackageTimeoutMinutes = 5
     )
 
-    # Fold -WhatIf into -DryRun. The driver advertises
-    # SupportsShouldProcess; without this, `Invoke-PackageUpdate -WhatIf`
-    # would not propagate the safety contract down to the engines
-    # (which key off $DryRun, mapped to engine -WhatIf at dispatch time).
-    if ($WhatIfPreference -and -not $DryRun) { $DryRun = $true }
+    # The driver advertises SupportsShouldProcess, so -WhatIf flips
+    # $WhatIfPreference in this scope (and is inherited by callees). Engines
+    # key off -WhatIf, so thread this boolean through dispatch.
+    $isWhatIf = [bool]$WhatIfPreference
 
     foreach ($pkg in $Packages) {
         if ($null -eq $pkg) {
@@ -73,14 +72,31 @@ function Invoke-PackageUpdate {
     $states = New-Object System.Collections.Generic.List[object]
     $total  = $ordered.Count
     $idx    = 0
-    # Success-stream emission is deferred until after the summary so that
-    # interactive (uncaptured) runs render the [Package] objects as a
-    # single table instead of one repeated, header-per-row mini-table
+    $isCi   = [bool]$env:CI
+
+    # Record a per-package outcome. Emission of the PackageUpdateResult
+    # objects is deferred until after the run so interactive (uncaptured)
+    # runs render a single table instead of one header-per-row mini-table
     # interleaved with each engine's live progress output. Pipeline
-    # consumers are unaffected -- every [Package] still reaches the
-    # success stream, just batched at the end of the run.
-    $emit = New-Object System.Collections.Generic.List[object]
-    $isCi = [bool]$env:CI
+    # consumers are unaffected.
+    $addState = {
+        param($p, $st, $rs, $err)
+        $states.Add([pscustomobject]@{ Pkg = $p; State = $st; Reason = $rs; Err = $err })
+    }
+
+    # Build + write the standard Failed ErrorRecord, and record the state
+    # carrying that same ErrorRecord so the emitted result's .Error is
+    # populated.
+    $failPackage = {
+        param($p, $rs)
+        $errRec = [System.Management.Automation.ErrorRecord]::new(
+            [System.Exception]::new("$($p.Name): $rs"),
+            'PackageUpdateFailed',
+            [System.Management.Automation.ErrorCategory]::NotSpecified,
+            $p)
+        & $addState $p 'Failed' $rs $errRec
+        $PSCmdlet.WriteError($errRec)
+    }
 
     foreach ($pkg in $ordered) {
         $state  = 'Pending'
@@ -92,8 +108,7 @@ function Invoke-PackageUpdate {
             $state  = 'Skipped'
             $reason = "CISkip: $($pkg.CISkip)"
             Write-UpdateStatus "[skip] $($pkg.Name) -- $reason" -PercentComplete $pct
-            $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
-            [void]$emit.Add($pkg)
+            & $addState $pkg $state $reason $null
             continue
         }
 
@@ -114,81 +129,91 @@ function Invoke-PackageUpdate {
         try {
             if ($pkg.Installer -eq 'custom' -or $pkg.CustomInstallScript) {
                 # Custom installs have no generic engine upgrade path.
-                # The only hook is PostUpdateScript; without it we skip.
-                if (-not $pkg.PostUpdateScript) {
-                    $state  = 'Skipped'
-                    $reason = 'No update path for CustomInstallScript packages (consider adding PostUpdateScript).'
-                    Write-UpdateStatus "  $($pkg.Name): $reason" -PercentComplete $pct
-                    $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
-                    [void]$emit.Add($pkg)
-                    continue
+                # UpdateMode declares how (or whether) to update them. Each
+                # arm produces a uniform $result; terminal no-op states
+                # (SelfManaged / NoAutoUpdateSupport) are routed through the
+                # short-circuit list below (continue inside a PowerShell
+                # switch would only exit the switch, not the foreach).
+                switch ($pkg.UpdateMode) {
+                    'SelfManaged' {
+                        # Updates itself / managed externally -- intentional no-op.
+                        $result = @{ State = 'SelfManaged'; Reason = $null }
+                    }
+                    'NoAutoUpdateSupport' {
+                        # Explicitly no mechanism this tool can drive.
+                        $result = @{ State = 'NoAutoUpdateSupport'; Reason = $null }
+                    }
+                    'Reinstall' {
+                        if (-not $pkg.CustomInstallScript) {
+                            # Metadata-only fallback path lost the scriptblock.
+                            $result = @{ State = 'NoAutoUpdateSupport'; Reason = 'Reinstall requested but CustomInstallScript is unavailable on this path.' }
+                        } elseif ($isWhatIf) {
+                            $result = @{ State = 'Updated'; Reason = '(WhatIf)' }
+                        } else {
+                            [void](& $pkg.CustomInstallScript $pkg)
+                            if ($pkg.VerifyScript) {
+                                $ok = & $pkg.VerifyScript $pkg
+                                if (-not $ok) {
+                                    throw 'VerifyScript reported the package is not present after reinstall.'
+                                }
+                            }
+                            $result = @{ State = 'Updated'; Reason = '(Reinstall)' }
+                        }
+                    }
+                    default {
+                        # 'Auto': PostUpdateScript is the only hook; without
+                        # it there is genuinely nothing to drive.
+                        if (-not $pkg.PostUpdateScript) {
+                            $result = @{ State = 'NoAutoUpdateSupport'; Reason = $null }
+                        } else {
+                            $result = @{ State = 'Updated'; Reason = '(PostUpdateScript-only)' }
+                        }
+                    }
                 }
-                $result = @{ State = 'Updated'; Reason = '(PostUpdateScript-only)' }
             } else {
                 $result = switch ($pkg.Installer) {
-                    'winget'      { Update-WingetPackage     -Package $pkg -WhatIf:$DryRun -TimeoutMinutes $PackageTimeoutMinutes }
-                    'scoop'       { Update-ScoopPackage      -Package $pkg -WhatIf:$DryRun }
-                    'choco'       { Update-ChocoPackage      -Package $pkg -WhatIf:$DryRun }
-                    'npmGlobal'   { Update-NpmGlobalPackage  -Package $pkg -WhatIf:$DryRun }
-                    'dotnetTool'  { Update-DotnetToolPackage -Package $pkg -WhatIf:$DryRun }
+                    'winget'      { Update-WingetPackage     -Package $pkg -WhatIf:$isWhatIf -TimeoutMinutes $PackageTimeoutMinutes }
+                    'scoop'       { Update-ScoopPackage      -Package $pkg -WhatIf:$isWhatIf }
+                    'choco'       { Update-ChocoPackage      -Package $pkg -WhatIf:$isWhatIf }
+                    'npmGlobal'   { Update-NpmGlobalPackage  -Package $pkg -WhatIf:$isWhatIf }
+                    'dotnetTool'  { Update-DotnetToolPackage -Package $pkg -WhatIf:$isWhatIf }
                     default       { throw "Invoke-PackageUpdate: unknown Installer '$($pkg.Installer)' for '$($pkg.Name)'." }
                 }
             }
             $state  = $result.State
             $reason = $result.Reason
         } catch {
-            $reason = "Update threw: $($_.Exception.Message)"
-            $states.Add([pscustomobject]@{ Pkg = $pkg; State = 'Failed'; Reason = $reason })
-            $PSCmdlet.WriteError(
-                [System.Management.Automation.ErrorRecord]::new(
-                    [System.Exception]::new("$($pkg.Name): $reason"),
-                    'PackageUpdateFailed',
-                    [System.Management.Automation.ErrorCategory]::NotSpecified,
-                    $pkg))
+            & $failPackage $pkg "Update threw: $($_.Exception.Message)"
             continue
         }
 
         if ($state -eq 'Failed') {
-            $states.Add([pscustomobject]@{ Pkg = $pkg; State = 'Failed'; Reason = $reason })
-            $PSCmdlet.WriteError(
-                [System.Management.Automation.ErrorRecord]::new(
-                    [System.Exception]::new("$($pkg.Name): $reason"),
-                    'PackageUpdateFailed',
-                    [System.Management.Automation.ErrorCategory]::NotSpecified,
-                    $pkg))
+            & $failPackage $pkg $reason
             continue
         }
 
-        # NotInstalled / Skipped / AlreadyLatest short-circuit: no PATH
-        # refresh, no PostUpdate hook, no completion re-register. The
-        # registered completer is by definition still current for
-        # AlreadyLatest, and running PostUpdateScript on a no-op upgrade
-        # would surprise bundle authors who only intend the hook to fire
-        # after a real version bump.
-        if ($state -in @('NotInstalled', 'Skipped', 'AlreadyLatest')) {
-            $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
-            [void]$emit.Add($pkg)
+        # NotInstalled / Skipped / AlreadyLatest / SelfManaged /
+        # NoAutoUpdateSupport short-circuit: no PATH refresh, no PostUpdate
+        # hook, no completion re-register. The registered completer is by
+        # definition still current for AlreadyLatest, and running
+        # PostUpdateScript on a no-op upgrade would surprise bundle authors
+        # who only intend the hook to fire after a real version bump.
+        if ($state -in @('NotInstalled', 'Skipped', 'AlreadyLatest', 'SelfManaged', 'NoAutoUpdateSupport')) {
+            & $addState $pkg $state $reason $null
             continue
         }
 
-        if (-not $DryRun) { Update-PathFromRegistry }
+        if (-not $isWhatIf) { Update-PathFromRegistry }
 
         if ($pkg.PostUpdateScript) {
-            if ($DryRun) {
-                Write-UpdateStatus "  [DryRun] PostUpdateScript ($($pkg.Name))" -PercentComplete $pct
+            if ($isWhatIf) {
+                Write-UpdateStatus "  [WhatIf] PostUpdateScript ($($pkg.Name))" -PercentComplete $pct
             } else {
                 try {
                     [void](& $pkg.PostUpdateScript $pkg 2>$null)
                     Update-PathFromRegistry
                 } catch {
-                    $reason = "PostUpdateScript threw: $($_.Exception.Message)"
-                    $states.Add([pscustomobject]@{ Pkg = $pkg; State = 'Failed'; Reason = $reason })
-                    $PSCmdlet.WriteError(
-                        [System.Management.Automation.ErrorRecord]::new(
-                            [System.Exception]::new("$($pkg.Name): $reason"),
-                            'PackageUpdateFailed',
-                            [System.Management.Automation.ErrorCategory]::NotSpecified,
-                            $pkg))
+                    & $failPackage $pkg "PostUpdateScript threw: $($_.Exception.Message)"
                     continue
                 }
             }
@@ -197,7 +222,7 @@ function Invoke-PackageUpdate {
         # Re-register completion only when we actually upgraded — note
         # the AlreadyLatest / NotInstalled paths already short-circuited
         # above, so reaching here means $state -eq 'Updated'.
-        if ($state -eq 'Updated' -and -not $SkipCompletion -and -not $DryRun -and
+        if ($state -eq 'Updated' -and -not $SkipCompletion -and -not $isWhatIf -and
             $pkg.Completion -ne 'none' -and $pkg.CliCommands.Count -gt 0) {
             foreach ($cli in $pkg.CliCommands) {
                 $registerArgs = @{ Cli = $cli; Mode = $pkg.Completion }
@@ -210,50 +235,27 @@ function Invoke-PackageUpdate {
             }
         }
 
-        $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
-        [void]$emit.Add($pkg)
+        & $addState $pkg $state $reason $null
     }
 
-    # Tear down the transient progress line before the persistent summary
-    # table so the two don't fight over the host's rendering.
+    # Tear down the transient progress line before emitting results so the
+    # two don't fight over the host's rendering.
     Write-UpdateStatus -Completed
 
-    Write-Host ""
-    Write-Host "=== $Bundle update summary ==="
-
-    # Standardized result table. Every engine returns a uniform
-    # @{ State; Reason } record, so the summary needs no per-installer
-    # special-casing: glyph + State, then the chocolatey-style Installer /
-    # Scope / Id / Name columns, then the Reason as inline Detail. Failed
-    # packages render here as red ✗ rows carrying their reason, so an error
-    # is just another row in the same table rather than only a raw
-    # ErrorRecord. Columns are width-aligned with a header; the glyph
-    # keeps the State signal colorblind-safe when color is stripped.
-    $fmt = "  {0} {1,-13} {2,-10} {3,-7} {4,-34} {5}"
-    Write-Host ($fmt -f ' ', 'Status', 'Installer', 'Scope', 'Id', 'Name')
+    # Emit one PackageUpdateResult per package on the success stream. The
+    # format.ps1xml view renders Status as a colored glyph for interactive
+    # display; piped/exported consumers see the plain Status string and the
+    # structured .Error ErrorRecord on failures.
     foreach ($s in $states) {
-        $glyph = switch ($s.State) {
-            'Updated'       { [char]0x2713 }   # ✓
-            'AlreadyLatest' { [char]0x21BA }   # ↺
-            'Failed'        { [char]0x2717 }   # ✗
-            'Skipped'       { [char]0x2192 }   # →
-            'NotInstalled'  { [char]0x2192 }   # →
-            default         { ' ' }
+        [PackageUpdateResult]@{
+            Status    = $s.State
+            Name      = $s.Pkg.Name
+            Installer = $s.Pkg.Installer
+            Scope     = $s.Pkg.Scope
+            Id        = $s.Pkg.Id
+            Bundle    = $Bundle
+            Reason    = $s.Reason
+            Error     = $s.Err
         }
-        $color = switch ($s.State) {
-            'Updated'       { 'Green' }
-            'AlreadyLatest' { 'DarkGreen' }
-            'Failed'        { 'Red' }
-            'Skipped'       { 'Yellow' }
-            'NotInstalled'  { 'Yellow' }
-            default         { $Host.UI.RawUI.ForegroundColor }
-        }
-        $line = $fmt -f $glyph, $s.State, $s.Pkg.Installer, $s.Pkg.Scope, $s.Pkg.Id, $s.Pkg.Name
-        if ($s.Reason) { $line += "  -- $($s.Reason)" }
-        Write-Host $line -ForegroundColor $color
     }
-    Write-Host ""
-
-    # Deferred success-stream emission (see the $emit comment above).
-    foreach ($p in $emit) { Write-Output $p }
 }

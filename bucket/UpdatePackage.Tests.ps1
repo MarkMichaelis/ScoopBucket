@@ -469,14 +469,7 @@ Describe 'Invoke-PackageUpdate pipeline' -Tag 'Light','Module' {
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Register-PackageCompletion -Times 2 -Exactly
     }
 
-    It 'engines receive -WhatIf when -DryRun is set' {
-        Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -ParameterFilter { $WhatIf } { return @{ State='Updated'; Reason='(WhatIf)' } }
-        $pkgs = [Package[]]@([Package]@{ Name='A'; Installer='winget'; Id='Foo.A' })
-        $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -DryRun -SkipCompletion
-        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -Times 1 -Exactly -ParameterFilter { $WhatIf }
-    }
-
-    It 'engines receive -WhatIf when the cmdlet is called with -WhatIf (folds into DryRun)' {
+    It 'engines receive -WhatIf when the cmdlet is called with -WhatIf' {
         Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -ParameterFilter { $WhatIf } { return @{ State='Updated'; Reason='(WhatIf)' } }
         $pkgs = [Package[]]@([Package]@{ Name='A'; Installer='winget'; Id='Foo.A' })
         $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -WhatIf -SkipCompletion
@@ -484,68 +477,60 @@ Describe 'Invoke-PackageUpdate pipeline' -Tag 'Light','Module' {
     }
 }
 
-Describe 'Invoke-PackageUpdate standardized summary table (#274)' -Tag 'Light','Module' {
+Describe 'Invoke-PackageUpdate emits PackageUpdateResult objects (#274, #276)' -Tag 'Light','Module' {
 
-    It 'renders a header row and per-package Status/Installer/Scope/Id/Name' {
+    It 'emits one PackageUpdateResult per package carrying Status/Installer/Scope/Id/Name' {
         InModuleScope MarkMichaelis.ScoopBucket {
             Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }
             Mock Update-PathFromRegistry { }
             Mock Register-PackageCompletion { }
-            $captured = New-Object System.Collections.Generic.List[object]
-            Mock Write-Host -MockWith {
-                $captured.Add([pscustomobject]@{ Message = $Object; Color = $ForegroundColor })
-            }
 
             $pkgs = [Package[]]@(
                 [Package]@{ Name='Claude Desktop'; Installer='winget'; Id='Anthropic.Claude'; Scope='user' }
             )
-            $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion
+            $result = @(Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion)
 
-            $lines = @($captured | ForEach-Object { [string]$_.Message })
-
-            # A header row naming every standardized column must appear.
-            $header = $lines | Where-Object {
-                $_ -match 'Status' -and $_ -match 'Installer' -and
-                $_ -match 'Scope'  -and $_ -match 'Id'        -and $_ -match 'Name'
-            }
-            $header | Should -Not -BeNullOrEmpty
-
-            # The data row must carry Scope and Id (the chocolatey-style
-            # fields) alongside the Name on a single line.
-            $row = $lines | Where-Object {
-                $_ -match 'Anthropic\.Claude' -and $_ -match 'user' -and $_ -match 'Claude Desktop'
-            }
-            $row | Should -Not -BeNullOrEmpty
+            $result.Count               | Should -Be 1
+            $result[0].GetType().Name   | Should -Be 'PackageUpdateResult'
+            $result[0].Status           | Should -Be 'Updated'
+            $result[0].Installer        | Should -Be 'winget'
+            $result[0].Scope            | Should -Be 'user'
+            $result[0].Id               | Should -Be 'Anthropic.Claude'
+            $result[0].Name             | Should -Be 'Claude Desktop'
+            $result[0].Bundle           | Should -Be 'Test'
+            # Status is a plain string, programmatically filterable.
+            ($result | Where-Object Status -eq 'Updated').Count | Should -Be 1
         }
     }
 
-    It 'renders Failed packages as a red, glyph-marked row carrying their reason in the same table' {
+    It 'emits a Failed PackageUpdateResult carrying Reason and a populated Error, plus an error-stream record' {
         InModuleScope MarkMichaelis.ScoopBucket {
             Mock Update-WingetPackage    { return @{ State='Failed'; Reason='winget upgrade timed out' } }
             Mock Update-PathFromRegistry { }
-            $captured = New-Object System.Collections.Generic.List[object]
-            Mock Write-Host -MockWith {
-                $captured.Add([pscustomobject]@{ Message = $Object; Color = $ForegroundColor })
-            }
 
             $pkgs = [Package[]]@(
                 [Package]@{ Name='Warp'; Installer='winget'; Id='Warp.Warp'; Scope='user' }
             )
-            $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion -ErrorAction SilentlyContinue
+            $result = @(Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion `
+                -ErrorAction SilentlyContinue -ErrorVariable ev)
 
-            $failRow = $captured |
-                Where-Object { $_.Message -match 'Warp\.Warp' -and $_.Message -match 'winget upgrade timed out' } |
-                Select-Object -Last 1
-            $failRow         | Should -Not -BeNullOrEmpty
-            $failRow.Color   | Should -Be 'Red'
-            $failRow.Message | Should -Match ([char]0x2717)   # ✗ glyph carries the signal when color is stripped
+            $failed = $result | Where-Object Status -eq 'Failed'
+            $failed                       | Should -Not -BeNullOrEmpty
+            $failed.Name                  | Should -Be 'Warp'
+            $failed.Reason                | Should -Match 'winget upgrade timed out'
+            # The structured error is available on the object for inspection.
+            $failed.Error                 | Should -Not -BeNullOrEmpty
+            $failed.Error.GetType().Name  | Should -Be 'ErrorRecord'
+            # AND the error stream still carries a PackageUpdateFailed record.
+            ($ev | Where-Object { $_.FullyQualifiedErrorId -like 'PackageUpdateFailed*' }) |
+                Should -Not -BeNullOrEmpty
         }
     }
 }
 
 Describe 'Quiet-by-default update output (#276)' -Tag 'Light','Module' {
 
-    It 'emits no Write-Host chatter other than the summary table by default' {
+    It 'emits PackageUpdateResult objects and no Write-Host chatter by default' {
         InModuleScope MarkMichaelis.ScoopBucket {
             Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }
             Mock Update-PathFromRegistry { }
@@ -558,17 +543,17 @@ Describe 'Quiet-by-default update output (#276)' -Tag 'Light','Module' {
             $pkgs = [Package[]]@(
                 [Package]@{ Name='Claude Desktop'; Installer='winget'; Id='Anthropic.Claude'; Scope='user' }
             )
-            $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion
+            $result = @(Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion)
 
+            # The result object is the sole output channel.
+            $result.Count    | Should -Be 1
+            $result[0].Status | Should -Be 'Updated'
+
+            # No Write-Host chatter reaches the host at all -- not a summary
+            # table, not the section header, not the per-package progress line.
             $lines = @($captured | ForEach-Object { [string]$_.Message })
-
-            # The summary table header is still printed on the host.
-            ($lines | Where-Object { $_ -match 'Status' -and $_ -match 'Installer' }) |
-                Should -Not -BeNullOrEmpty
-
-            # None of the transient chatter (section header, per-package
-            # progress line) may reach the host stream.
             ($lines | Where-Object { $_ -match 'Invoke-PackageUpdate:' }) | Should -BeNullOrEmpty
+            ($lines | Where-Object { $_ -match 'update summary' })        | Should -BeNullOrEmpty
             ($lines | Where-Object { $_ -match 'Updating Claude Desktop' }) | Should -BeNullOrEmpty
         }
     }
@@ -735,7 +720,7 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
         ($warnings -join "`n") | Should -Match 'bare manifest'
     }
 
-    It '-WhatIf on Update-Package folds into -DryRun (engines see WhatIf, no real install)' {
+    It '-WhatIf on Update-Package propagates to engines (no real install)' {
         $fakeBundles = @(
             [pscustomobject]@{ Bundle='Alpha'; BundlePath='C:\fake\Alpha.ps1'; Packages=@([pscustomobject]@{ Name='a'; Installer='winget'; Id='A.A' }) }
         )
@@ -745,7 +730,7 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
 
         Update-Package -Name 'a' -SkipCompletion -WhatIf
 
-        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-PackageUpdate -Times 1 -Exactly -ParameterFilter { $DryRun }
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-PackageUpdate -Times 1 -Exactly -ParameterFilter { $WhatIf }
     }
 
     It 'bucket-wide "*" sweep dispatches bundles in deterministic (sorted) order' {
@@ -831,7 +816,7 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
             Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-ScoopBucket -Times 0 -Exactly
         }
 
-        It 'does NOT refresh under -DryRun' {
+        It 'does NOT refresh under -WhatIf' {
             $fakeBundles = @(
                 [pscustomobject]@{ Bundle='S'; BundlePath='C:\fake\S.ps1'; Packages=@(
                     [pscustomobject]@{ Name='s1'; Installer='scoop'; Id='main/s1' }
@@ -842,7 +827,7 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
                 return @([Package]@{ Name='s1'; Installer='scoop'; Id='main/s1' })
             }
 
-            Update-Package -Name 's1' -SkipCompletion -DryRun
+            Update-Package -Name 's1' -SkipCompletion -WhatIf
 
             Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-ScoopBucket -Times 0 -Exactly
         }
@@ -952,7 +937,7 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
     }
 }
 
-Describe 'Update-Package -PassThru pipeline emission (#276)' -Tag 'Light','Module' {
+Describe 'Update-Package pipeline emission (#276)' -Tag 'Light','Module' {
 
     BeforeEach {
         $fakeBundles = @(
@@ -963,23 +948,19 @@ Describe 'Update-Package -PassThru pipeline emission (#276)' -Tag 'Light','Modul
         Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages       { return $fakeBundles }
         Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects { return @([Package]@{ Name='a'; Installer='winget'; Id='A.A'; Scope='user' }) }
         Mock -ModuleName MarkMichaelis.ScoopBucket Resolve-BucketPath       { return $null }
-        # Stand in for the real engine sweep: emit a [Package] result object
-        # on the success stream exactly like Invoke-PackageUpdate does.
+        # Stand in for the real engine sweep: emit a PackageUpdateResult on
+        # the success stream exactly like Invoke-PackageUpdate does.
         Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-PackageUpdate {
-            [Package]@{ Name='a'; Installer='winget'; Id='A.A'; Scope='user' }
+            [PackageUpdateResult]@{ Status='Updated'; Name='a'; Installer='winget'; Id='A.A'; Scope='user'; Bundle='Alpha' }
         }
     }
 
-    It 'does NOT emit [Package] objects on the pipeline by default' {
-        $out = Update-Package -Name 'a' -SkipCompletion -DryRun
-        $out | Should -BeNullOrEmpty
-    }
-
-    It 're-emits the [Package] objects when -PassThru is set' {
-        $out = @(Update-Package -Name 'a' -SkipCompletion -DryRun -PassThru)
-        $out.Count | Should -Be 1
-        $out[0]    | Should -BeOfType ([Package])
-        $out[0].Id | Should -Be 'A.A'
+    It 'emits the PackageUpdateResult objects on the pipeline' {
+        $out = @(Update-Package -Name 'a' -SkipCompletion -WhatIf)
+        $out.Count                | Should -Be 1
+        $out[0].GetType().Name    | Should -Be 'PackageUpdateResult'
+        $out[0].Status            | Should -Be 'Updated'
+        $out[0].Id                | Should -Be 'A.A'
     }
 }
 
@@ -1257,20 +1238,14 @@ Describe 'Update-Package -MachineWide dispatcher (#263)' -Tag 'Light','Module' {
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly
     }
 
-    It '-MachineWide -DryRun propagates DryRun to Invoke-AllEnginesUpdate' {
+    It '-MachineWide -WhatIf propagates DryRun to Invoke-AllEnginesUpdate' {
         Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -ParameterFilter { $DryRun } { }
-        Update-Package -MachineWide -DryRun -SkipCompletion
+        Update-Package -MachineWide -WhatIf -SkipCompletion
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly -ParameterFilter { $DryRun }
     }
 
     It '-Name foo -MachineWide errors (mutually exclusive parameter sets)' {
         { Update-Package -Name 'foo' -MachineWide -SkipCompletion } | Should -Throw
-    }
-
-    It '-MachineWide -WhatIf folds into -DryRun (orchestrator sees DryRun)' {
-        Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -ParameterFilter { $DryRun } { }
-        Update-Package -MachineWide -WhatIf -SkipCompletion
-        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-AllEnginesUpdate -Times 1 -Exactly -ParameterFilter { $DryRun }
     }
 }
 

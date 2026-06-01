@@ -35,6 +35,10 @@ function ConvertTo-PackageFromMetadata {
         # UpdateTimeoutMinutes must also round-trip so per-package
         # overrides survive the metadata-only fallback path (#271).
         UpdateTimeoutMinutes = if ($Metadata.PSObject.Properties['UpdateTimeoutMinutes']) { [int]$Metadata.UpdateTimeoutMinutes } else { 0 }
+        # UpdateMode must round-trip so a custom package's update strategy
+        # (Reinstall / SelfManaged / NoAutoUpdateSupport) survives the
+        # metadata-only fallback path and is classified correctly (#276).
+        UpdateMode  = if ($Metadata.PSObject.Properties['UpdateMode'] -and $Metadata.UpdateMode) { [string]$Metadata.UpdateMode } else { 'Auto' }
     }
     # Completion's ExpectedCompletions invariant only matters at install
     # time; reconstruct enough to satisfy Validate() for non-'none' modes.
