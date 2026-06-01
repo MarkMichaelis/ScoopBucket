@@ -184,6 +184,7 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
         Name        = 'Readwise Reader'
         Installer   = 'custom'
         Notes       = 'Sideloaded MSIX; not in winget or Microsoft Store.'
+        UpdateMode  = 'Reinstall'  # re-run the idempotent download-latest MSIX install; VerifyScript gates it.
         CustomInstallScript = {
             $tmp = Join-Path $env:TEMP 'ReadwiseReader.msix'
             Invoke-WebRequest -Uri 'https://readwise.io/read/download_latest/desktop/windows' -OutFile $tmp

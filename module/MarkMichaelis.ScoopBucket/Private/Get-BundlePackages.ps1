@@ -112,6 +112,7 @@ function global:Invoke-PackageInstall {
             Notes       = `$p.Notes
             WingetExtraArgs = @(`$p.WingetExtraArgs)
             UpdateTimeoutMinutes = [int]`$p.UpdateTimeoutMinutes
+            UpdateMode  = `$p.UpdateMode
             HasPostInstallScript   = [bool]`$p.PostInstallScript
             HasPostUpdateScript    = [bool]`$p.PostUpdateScript
             HasCustomInstallScript = [bool]`$p.CustomInstallScript
@@ -156,7 +157,7 @@ try {
         } catch {
             Write-Verbose "Get-BundlePackages: $bundleName probe threw: $($_.Exception.Message)"
         } finally {
-            Remove-Item -Path $tmp -ErrorAction Ignore
+            Remove-Item -Path $tmp -ErrorAction Ignore -WhatIf:$false
         }
 
         if ($captured -and $captured.Packages) {

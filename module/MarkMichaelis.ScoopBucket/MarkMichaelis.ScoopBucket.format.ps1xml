@@ -61,5 +61,90 @@
         </TableRowEntries>
       </TableControl>
     </View>
+    <View>
+      <Name>PackageUpdateResult</Name>
+      <ViewSelectedBy>
+        <TypeName>PackageUpdateResult</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader>
+            <Label>Status</Label>
+            <Width>21</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Installer</Label>
+            <Width>11</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Scope</Label>
+            <Width>8</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Id</Label>
+            <Width>34</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Name</Label>
+            <Width>26</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Reason</Label>
+          </TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem>
+                <ScriptBlock>
+                  # Render Status as a colorblind-safe glyph + label, colored
+                  # via $PSStyle when the host supports it. The underlying
+                  # .Status property stays a plain string for filtering/export.
+                  $map = @{
+                    Updated             = @('+', 'Updated')
+                    AlreadyLatest       = @('=', 'AlreadyLatest')
+                    Skipped             = @('>', 'Skipped')
+                    Failed              = @('x', 'Failed')
+                    NotInstalled        = @('!', 'NotInstalled')
+                    SelfManaged         = @('@', 'SelfManaged')
+                    NoAutoUpdateSupport = @('-', 'NoAutoUpdate')
+                  }
+                  $g, $label = if ($map.ContainsKey($_.Status)) { $map[$_.Status] } else { @('?', $_.Status) }
+                  $text = '{0} {1}' -f $g, $label
+                  $style = $null
+                  if ($null -ne $PSStyle -and $PSStyle.OutputRendering -ne 'PlainText') {
+                    switch ($_.Status) {
+                      'Updated'             { $style = $PSStyle.Foreground.Green }
+                      'AlreadyLatest'       { $style = $PSStyle.Foreground.BrightBlack }
+                      'Skipped'             { $style = $PSStyle.Foreground.Yellow }
+                      'Failed'              { $style = $PSStyle.Foreground.Red }
+                      'NotInstalled'        { $style = $PSStyle.Foreground.Red }
+                      'SelfManaged'         { $style = $PSStyle.Foreground.Cyan }
+                      'NoAutoUpdateSupport' { $style = $PSStyle.Foreground.BrightBlack }
+                    }
+                  }
+                  if ($style) { "$style$text$($PSStyle.Reset)" } else { $text }
+                </ScriptBlock>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>Installer</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>Scope</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>Id</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>Name</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>Reason</PropertyName>
+              </TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
   </ViewDefinitions>
 </Configuration>

@@ -88,6 +88,20 @@ class Package {
     # consumed by Update-WingetPackage. See #269, #271.
     [int]      $UpdateTimeoutMinutes = 0
 
+    # How Update-Package should try to update this package. Only meaningful
+    # for Installer='custom' (engine packages are always 'Auto'):
+    #   Auto                - engine update for engine installers; for
+    #                         custom, run PostUpdateScript if present, else
+    #                         report NoAutoUpdateSupport.
+    #   Reinstall           - re-run the (idempotent) CustomInstallScript as
+    #                         the update path, gated by VerifyScript.
+    #   SelfManaged         - the package updates itself / is managed
+    #                         externally (e.g. a hosted Office web add-in or
+    #                         a self-updating client); nothing to do.
+    #   NoAutoUpdateSupport - there is no mechanism this tool can drive.
+    [ValidateSet('Auto', 'Reinstall', 'SelfManaged', 'NoAutoUpdateSupport')]
+    [string]   $UpdateMode = 'Auto'
+
     # Cross-field invariants the type system can't express. Called by
     # Invoke-PackageInstall before any installer runs so schema errors
     # fail fast.
@@ -163,6 +177,12 @@ class Package {
 
         if ($this.Companions -contains $this.Name) {
             throw "Package '$($this.Name)': Companions cannot reference itself."
+        }
+
+        # UpdateMode beyond the default 'Auto' only makes sense for custom
+        # installs; engine packages always update through their engine.
+        if ($this.UpdateMode -ne 'Auto' -and $this.Installer -ne 'custom') {
+            throw "Package '$($this.Name)': UpdateMode='$($this.UpdateMode)' is only valid when Installer='custom' (got '$($this.Installer)')."
         }
     }
 

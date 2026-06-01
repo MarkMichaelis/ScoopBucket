@@ -35,6 +35,7 @@ $Packages = [Package[]]@(
         DependsOn   = @('Microsoft 365 Apps for Enterprise')
         CliCommands = @('winword','excel','outlook','powerpnt','onenote','msaccess','mspub')
         Completion  = 'native'
+        UpdateMode  = 'Reinstall'  # Idempotently regenerates the .cmd shims against the current Office16 binaries; VerifyScript gates it.
         Notes       = 'Office GUI apps have no PowerShell completer and no PSCompletions catalog entry. Switches are documented in the Microsoft Office command-line switches reference (support.microsoft.com/en-us/office/command-line-switches-for-microsoft-office-products-079164cd-4ef5-4178-b235-441737deb3a6) and stable across Office versions. Each shim runs the underlying Office16 binary detached so the terminal returns immediately.'
         ExpectedCompletions = @{
             winword  = @('/safe','/q','/n','/x')
@@ -185,6 +186,7 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
         Name        = 'Claude for Excel'
         Installer   = 'custom'
         DependsOn   = @('Microsoft 365 Apps for Enterprise')
+        UpdateMode  = 'SelfManaged'  # Hosted Office web add-in (AppSource); Microsoft serves updates server-side -- nothing to drive locally.
         Notes       = 'Office Web Add-in distributed exclusively via Microsoft AppSource (asset id WA200010001). No winget/choco/msstore path exists; install requires a one-time browser click. Detection scans HKCU\Software\Microsoft\Office\16.0\WEF\* for the Anthropic publisher.'
         CustomInstallScript = {
             param($pkg)
@@ -273,6 +275,7 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
         Installer   = 'custom'
         CliCommands = @('onedrive')
         Completion  = 'native'
+        UpdateMode  = 'SelfManaged'  # OneDrive auto-updates its own client; the install script only seeds the machine-wide binary.
         Notes       = 'Replaces the Windows-default per-user OneDrive with a machine-wide install via OneDriveSetup.exe /allusers /silent. /allusers requires admin; the per-user uninstall is best-effort. Shim at ~\scoop\shims\onedrive.cmd resolves to C:\Program Files\Microsoft OneDrive\OneDrive.exe. Switches per support.microsoft.com OneDrive command-line reference (flat switches, no subcommands).'
         ExpectedCompletions = @{
             onedrive = @('/addaccount','/background','/reset','/resetauthstate','/shutdown','/signout','/configure_business:')
