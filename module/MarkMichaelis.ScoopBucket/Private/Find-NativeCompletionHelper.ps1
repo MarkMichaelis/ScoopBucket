@@ -38,16 +38,14 @@ function Invoke-CompletionProbe {
         Run a single `<cli> <args>` completion probe with a hard timeout.
 
     .DESCRIPTION
-        Executes the probe via `cmd.exe /d /s /c` (so PATH resolution covers
-        .exe, .cmd and .bat alike) under a .NET Process with a bounded wait. The
-        CLI token is quoted and `/d` disables any AutoRun side effects, so a CLI
-        path containing spaces and stray cmd metacharacters are handled safely.
-        If the process does not exit within $TimeoutMs it -- and its whole child
-        tree (e.g. a `wsl` that blocks waiting for a distro) -- is force-killed.
-        stdout is captured; stderr is drained to avoid a full-pipe deadlock and
-        discarded. Always returns a PSCustomObject with `Output` (the captured
-        stdout, or $null when the probe timed out or errored) and `TimedOut`
-        (a boolean the caller uses to short-circuit further probes).
+        Runs the probe as `cmd.exe /d /s /c "<cli> <args>"` so PATH resolution
+        covers .exe, .cmd and .bat alike, delegating the timeout and child-tree
+        kill to the module's single Invoke-WithTimeout helper (rather than a
+        second bespoke wrapper). `/d` skips AutoRun, `/s` keeps the quoted CLI
+        token intact, and quoting $Cli handles a resolved path with spaces and
+        stray cmd metacharacters. Always returns a PSCustomObject with `Output`
+        (captured stdout/stderr, or $null when the probe timed out) and
+        `TimedOut` (a boolean the caller uses to short-circuit further probes).
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -57,35 +55,15 @@ function Invoke-CompletionProbe {
         [int]$TimeoutMs = 5000
     )
 
-    $psi = [System.Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = $env:ComSpec
-    # /d  -- skip AutoRun commands; /s -- strip only the outer quote pair so the
-    # quoted CLI token survives. Quoting $Cli handles spaces in a resolved path
-    # and keeps cmd metacharacters from breaking out of the command.
-    $psi.Arguments = "/d /s /c `"`"$Cli`" $ArgumentLine`""
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
+    $timeoutSeconds = [math]::Max(1, [int][math]::Ceiling($TimeoutMs / 1000.0))
+    $result = Invoke-WithTimeout -FilePath $env:ComSpec `
+        -Arguments @('/d', '/s', '/c', "`"$Cli`" $ArgumentLine") `
+        -TimeoutSeconds $timeoutSeconds -CaptureOutput
 
-    $proc = $null
-    try {
-        $proc = [System.Diagnostics.Process]::Start($psi)
-        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
-        $stderrTask = $proc.StandardError.ReadToEndAsync()
-        if (-not $proc.WaitForExit($TimeoutMs)) {
-            try { $proc.Kill($true) } catch { }
-            return [pscustomobject]@{ Output = $null; TimedOut = $true }
-        }
-        # Null-coalesce: a killed/empty stream returns $null from the task.
-        $null = $stderrTask.GetAwaiter().GetResult()
-        return [pscustomobject]@{ Output = $stdoutTask.GetAwaiter().GetResult(); TimedOut = $false }
-    } catch {
-        if ($proc -and -not $proc.HasExited) { try { $proc.Kill($true) } catch { } }
-        return [pscustomobject]@{ Output = $null; TimedOut = $false }
-    } finally {
-        if ($proc) { $proc.Dispose() }
+    if ($result.TimedOut) {
+        return [pscustomobject]@{ Output = $null; TimedOut = $true }
     }
+    return [pscustomobject]@{ Output = $result.Output; TimedOut = $false }
 }
 
 function Find-NativeCompletionHelper {

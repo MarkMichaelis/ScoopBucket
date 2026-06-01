@@ -58,7 +58,11 @@ function Invoke-WithTimeout {
         $proc = Start-Process @spArgs
         $finished = $proc.WaitForExit($TimeoutSeconds * 1000)
         if (-not $finished) {
-            try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch { }
+            # Kill the whole child tree (Process.Kill($true)) so a hung wrapper
+            # such as `cmd /c <cli>` cannot orphan a blocking child (e.g. a wsl
+            # that waits on a distro). Fall back to Stop-Process if unavailable.
+            try { $proc.Kill($true) }
+            catch { try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch { } }
             $partial = if ($CaptureOutput -and (Test-Path $stdOut)) { Get-Content $stdOut -Raw } else { '' }
             return @{
                 ExitCode        = -1
