@@ -56,6 +56,12 @@ function Invoke-CompletionProbe {
     )
 
     $timeoutSeconds = [math]::Max(1, [int][math]::Ceiling($TimeoutMs / 1000.0))
+    # The /c payload is `"<cli>" <args>`: only the CLI token is quoted (so a
+    # resolved path with spaces is safe), while $ArgumentLine stays unquoted so
+    # cmd parses each probe word as a separate argument. cmd's `/s` strips the
+    # outer quote pair only when the payload BOTH starts and ends with a quote;
+    # here it ends with an argument word, so nothing is stripped and the args
+    # reach the CLI intact (verified against an argument-echoing shim).
     $result = Invoke-WithTimeout -FilePath $env:ComSpec `
         -Arguments @('/d', '/s', '/c', "`"$Cli`" $ArgumentLine") `
         -TimeoutSeconds $timeoutSeconds -CaptureOutput
