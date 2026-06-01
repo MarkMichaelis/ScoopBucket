@@ -636,6 +636,13 @@ function Resolve-CliCompletionSource {
         $native = $null
         try { $native = & $NativeCommand 2>$null | Out-String } catch { }
         if ($native -and $native.Trim()) {
+            # Self-healing (#278): if the CLI now ships a genuine native
+            # completion helper, adopt it over a hand-curated fallback and
+            # advise (low priority) that the curated block can be removed.
+            # No-op (output unchanged, no warning) when no helper is detected
+            # or the supplied command already IS the native helper (e.g. gh).
+            $healed = Resolve-SelfHealingCompleter -Cli $Cli -FallbackOutput $native
+            $native = $healed.Output
             $guarded = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n$native}"
             # NativePayload (v3, #216): raw native completer text preserved
             # so callers can persist it to a sidecar `.ps1`. Sidecar files
