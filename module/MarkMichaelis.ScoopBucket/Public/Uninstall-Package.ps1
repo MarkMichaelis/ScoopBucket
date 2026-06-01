@@ -19,9 +19,9 @@ function Uninstall-Package {
         probe, dispatches to the engine, and strips the sentinel
         completion block — unless -KeepCompletion).
 
-        Returns one PSCustomObject per package with:
-          Bundle, Name, Installer, Id, Scope, State, Reason
-        where State ∈ Uninstalled | NotInstalled | Failed | Skipped.
+        Emits one [PackageResult] per package (Operation='Uninstall') on
+        the success stream, rendered by the format.ps1xml view; Status ∈
+        Uninstalled | NotInstalled | Failed | Skipped.
 
     .PARAMETER Name
         One or more package or bundle names.
@@ -46,7 +46,7 @@ function Uninstall-Package {
         Uninstall-Package -Name 'OSBasePackages' -DryRun
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
-    [OutputType([object[]])]
+    [OutputType([PackageResult])]
     param(
         [Parameter(Mandatory, Position = 0)][string[]]$Name,
         [switch]$DryRun,
@@ -139,11 +139,11 @@ function Uninstall-Package {
         throw "Uninstall-Package: no bundle declares a package named '$needed' and no '$needed.json' manifest was found in the bucket."
     }
 
-    $allRecords = New-Object System.Collections.Generic.List[object]
-
     # Build a [Package[]] for each touched bundle. We dot-source the
     # bundle in-process so CustomUninstallScript scriptblocks survive
     # (Get-BundlePackages serializes via JSON and drops scriptblocks).
+    # Invoke-PackageUninstall emits PackageResult objects straight onto the
+    # pipeline, so they all render through the single shared format view.
     foreach ($entry in $byBundle.Values) {
         $pkgObjects = @(Get-BundlePackageObjects -BundlePath $entry.BundlePath)
         if ($pkgObjects.Count -eq 0) {
@@ -153,11 +153,10 @@ function Uninstall-Package {
             $b = $bundles | Where-Object BundlePath -eq $entry.BundlePath | Select-Object -First 1
             $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
         }
-        Write-Host ""
-        Write-Host "Uninstall-Package: dispatching $($entry.Names -join ', ') via $($entry.Bundle)..."
-        $records = Invoke-PackageUninstall -Packages $pkgObjects -Bundle $entry.Bundle `
-            -Name @($entry.Names) -DryRun:$DryRun -KeepCompletion:$KeepCompletion -SkipCompletion:$SkipCompletion
-        foreach ($r in @($records)) { $allRecords.Add($r) }
+        Write-UpdateStatus -Activity 'Uninstall-Package' "Uninstall-Package: dispatching $($entry.Names -join ', ') via $($entry.Bundle)..."
+        Invoke-PackageUninstall -Packages $pkgObjects -Bundle $entry.Bundle `
+            -Name @($entry.Names) -DryRun:$DryRun -KeepCompletion:$KeepCompletion -SkipCompletion:$SkipCompletion `
+            -ErrorAction Continue
     }
 
     foreach ($b in $fullBundles) {
@@ -165,26 +164,24 @@ function Uninstall-Package {
         if ($pkgObjects.Count -eq 0) {
             $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
         }
-        Write-Host ""
-        Write-Host "Uninstall-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
-        $records = Invoke-PackageUninstall -Packages $pkgObjects -Bundle $b.Bundle `
-            -DryRun:$DryRun -KeepCompletion:$KeepCompletion -SkipCompletion:$SkipCompletion
-        foreach ($r in @($records)) { $allRecords.Add($r) }
+        Write-UpdateStatus -Activity 'Uninstall-Package' "Uninstall-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
+        Invoke-PackageUninstall -Packages $pkgObjects -Bundle $b.Bundle `
+            -DryRun:$DryRun -KeepCompletion:$KeepCompletion -SkipCompletion:$SkipCompletion `
+            -ErrorAction Continue
     }
 
     foreach ($n in $manifestNames) {
-        Write-Host ""
-        Write-Host "Uninstall-Package: '$n' is a bare manifest (no declarative [Package] match); no uninstall metadata."
-        $allRecords.Add([pscustomobject]@{
-            Bundle    = $null
+        Write-UpdateStatus -Activity 'Uninstall-Package' "Uninstall-Package: '$n' is a bare manifest (no declarative [Package] match); no uninstall metadata."
+        [PackageResult]@{
+            Operation = 'Uninstall'
+            Status    = 'Skipped'
             Name      = $n
             Installer = $null
             Id        = $n
             Scope     = $null
-            State     = 'Skipped'
+            Bundle    = $null
             Reason    = 'Bare manifest; no Package metadata to drive uninstall.'
-        })
+            Error     = $null
+        }
     }
-
-    return ,$allRecords.ToArray()
 }

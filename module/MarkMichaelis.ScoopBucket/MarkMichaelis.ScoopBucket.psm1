@@ -16,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 # can also reference [Package] (ScriptsToProcess only loads it into the
 # caller scope).
 . (Join-Path $PSScriptRoot 'Classes\Package.ps1')
-. (Join-Path $PSScriptRoot 'Classes\PackageUpdateResult.ps1')
+. (Join-Path $PSScriptRoot 'Classes\PackageResult.ps1')
 
 foreach ($dir in @('Private', 'Public')) {
     $folder = Join-Path $PSScriptRoot $dir

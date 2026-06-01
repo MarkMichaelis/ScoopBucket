@@ -62,9 +62,9 @@
       </TableControl>
     </View>
     <View>
-      <Name>PackageUpdateResult</Name>
+      <Name>PackageResult</Name>
       <ViewSelectedBy>
-        <TypeName>PackageUpdateResult</TypeName>
+        <TypeName>PackageResult</TypeName>
       </ViewSelectedBy>
       <TableControl>
         <TableHeaders>
@@ -102,7 +102,10 @@
                   # .Status property stays a plain string for filtering/export.
                   $map = @{
                     Updated             = @('+', 'Updated')
+                    Installed           = @('+', 'Installed')
+                    Uninstalled         = @('-', 'Uninstalled')
                     AlreadyLatest       = @('=', 'AlreadyLatest')
+                    AlreadyInstalled    = @('=', 'AlreadyInstalled')
                     Skipped             = @('>', 'Skipped')
                     Failed              = @('x', 'Failed')
                     NotInstalled        = @('!', 'NotInstalled')
@@ -115,7 +118,10 @@
                   if ($null -ne $PSStyle -and $PSStyle.OutputRendering -ne 'PlainText') {
                     switch ($_.Status) {
                       'Updated'             { $style = $PSStyle.Foreground.Green }
+                      'Installed'           { $style = $PSStyle.Foreground.Green }
+                      'Uninstalled'         { $style = $PSStyle.Foreground.Green }
                       'AlreadyLatest'       { $style = $PSStyle.Foreground.BrightBlack }
+                      'AlreadyInstalled'    { $style = $PSStyle.Foreground.BrightBlack }
                       'Skipped'             { $style = $PSStyle.Foreground.Yellow }
                       'Failed'              { $style = $PSStyle.Foreground.Red }
                       'NotInstalled'        { $style = $PSStyle.Foreground.Red }

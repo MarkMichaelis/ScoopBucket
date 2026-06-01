@@ -1,21 +1,27 @@
-# Result descriptor emitted by Update-Package / Invoke-PackageUpdate.
+# Result descriptor emitted by Install-Package / Update-Package /
+# Uninstall-Package (and their Invoke-Package* drivers).
 #
-# Update-Package emits one PackageUpdateResult per package on the success
-# stream. A custom format.ps1xml view (selected by this type name) renders
-# the Status as a colorblind-safe glyph + color FOR DISPLAY ONLY -- the
-# underlying Status stays a plain string so consumers can filter / export:
+# Each driver emits one PackageResult per package on the success stream. A
+# custom format.ps1xml view (selected by this type name) renders the Status as
+# a colorblind-safe glyph + color FOR DISPLAY ONLY -- the underlying Status
+# stays a plain string so consumers can filter / export:
 #
-#   Update-Package '*' | Where-Object Status -eq 'Failed'
-#   Update-Package '*' | Export-Csv results.csv
+#   Update-Package '*'  | Where-Object Status -eq 'Failed'
+#   Install-Package Foo | Export-Csv results.csv
 #
 # Failures are first-class data here (Status='Failed', Reason=<message>,
 # Error=<ErrorRecord>) AND are still written to the error stream by the
 # emitter, so -ErrorVariable / $? / -ErrorAction Stop keep working.
 
-class PackageUpdateResult {
-    # Outcome of the update attempt. One of:
-    #   Updated, AlreadyLatest, Skipped, Failed, NotInstalled,
-    #   SelfManaged, NoAutoUpdateSupport.
+class PackageResult {
+    # Which verb produced this result: Install, Update, or Uninstall.
+    [string] $Operation
+
+    # Outcome of the attempt. The vocabulary is a superset across verbs:
+    #   Update:    Updated, AlreadyLatest, Skipped, Failed, NotInstalled,
+    #              SelfManaged, NoAutoUpdateSupport
+    #   Install:   Installed, AlreadyInstalled, Skipped, Failed
+    #   Uninstall: Uninstalled, NotInstalled, Skipped, Failed
     [string] $Status
 
     [string] $Name

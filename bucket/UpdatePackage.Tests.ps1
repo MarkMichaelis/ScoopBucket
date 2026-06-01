@@ -477,9 +477,9 @@ Describe 'Invoke-PackageUpdate pipeline' -Tag 'Light','Module' {
     }
 }
 
-Describe 'Invoke-PackageUpdate emits PackageUpdateResult objects (#274, #276)' -Tag 'Light','Module' {
+Describe 'Invoke-PackageUpdate emits PackageResult objects (#274, #276)' -Tag 'Light','Module' {
 
-    It 'emits one PackageUpdateResult per package carrying Status/Installer/Scope/Id/Name' {
+    It 'emits one PackageResult per package carrying Status/Installer/Scope/Id/Name' {
         InModuleScope MarkMichaelis.ScoopBucket {
             Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }
             Mock Update-PathFromRegistry { }
@@ -491,7 +491,8 @@ Describe 'Invoke-PackageUpdate emits PackageUpdateResult objects (#274, #276)' -
             $result = @(Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion)
 
             $result.Count               | Should -Be 1
-            $result[0].GetType().Name   | Should -Be 'PackageUpdateResult'
+            $result[0].GetType().Name   | Should -Be 'PackageResult'
+            $result[0].Operation        | Should -Be 'Update'
             $result[0].Status           | Should -Be 'Updated'
             $result[0].Installer        | Should -Be 'winget'
             $result[0].Scope            | Should -Be 'user'
@@ -503,7 +504,7 @@ Describe 'Invoke-PackageUpdate emits PackageUpdateResult objects (#274, #276)' -
         }
     }
 
-    It 'emits a Failed PackageUpdateResult carrying Reason and a populated Error, plus an error-stream record' {
+    It 'emits a Failed PackageResult carrying Reason and a populated Error, plus an error-stream record' {
         InModuleScope MarkMichaelis.ScoopBucket {
             Mock Update-WingetPackage    { return @{ State='Failed'; Reason='winget upgrade timed out' } }
             Mock Update-PathFromRegistry { }
@@ -565,7 +566,7 @@ Describe 'Invoke-PackageUpdate emits PackageUpdateResult objects (#274, #276)' -
 
 Describe 'Quiet-by-default update output (#276)' -Tag 'Light','Module' {
 
-    It 'emits PackageUpdateResult objects and no Write-Host chatter by default' {
+    It 'emits PackageResult objects and no Write-Host chatter by default' {
         InModuleScope MarkMichaelis.ScoopBucket {
             Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }
             Mock Update-PathFromRegistry { }
@@ -983,17 +984,17 @@ Describe 'Update-Package pipeline emission (#276)' -Tag 'Light','Module' {
         Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages       { return $fakeBundles }
         Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects { return @([Package]@{ Name='a'; Installer='winget'; Id='A.A'; Scope='user' }) }
         Mock -ModuleName MarkMichaelis.ScoopBucket Resolve-BucketPath       { return $null }
-        # Stand in for the real engine sweep: emit a PackageUpdateResult on
+        # Stand in for the real engine sweep: emit a PackageResult on
         # the success stream exactly like Invoke-PackageUpdate does.
         Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-PackageUpdate {
-            [PackageUpdateResult]@{ Status='Updated'; Name='a'; Installer='winget'; Id='A.A'; Scope='user'; Bundle='Alpha' }
+            [PackageResult]@{ Operation='Update'; Status='Updated'; Name='a'; Installer='winget'; Id='A.A'; Scope='user'; Bundle='Alpha' }
         }
     }
 
-    It 'emits the PackageUpdateResult objects on the pipeline' {
+    It 'emits the PackageResult objects on the pipeline' {
         $out = @(Update-Package -Name 'a' -SkipCompletion -WhatIf)
         $out.Count                | Should -Be 1
-        $out[0].GetType().Name    | Should -Be 'PackageUpdateResult'
+        $out[0].GetType().Name    | Should -Be 'PackageResult'
         $out[0].Status            | Should -Be 'Updated'
         $out[0].Id                | Should -Be 'A.A'
     }

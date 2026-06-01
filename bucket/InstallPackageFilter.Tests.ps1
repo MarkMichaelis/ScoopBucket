@@ -59,23 +59,22 @@ AfterAll {
 
 Describe 'Install-Package -Name filter' -Tag 'Light', 'Module' {
     It 'dispatches only the requested package when no DependsOn closure' {
-        $output = Install-Package -Name 'charlie' -DryRun -SkipCompletion -BucketPath $script:tmpBucket *>&1 |
-            Out-String
+        $result = @(Install-Package -Name 'charlie' -DryRun -SkipCompletion -BucketPath $script:tmpBucket)
 
-        $output | Should -Match '=== Invoke-PackageInstall: TestBundle \(1 packages\) ==='
-        $output | Should -Match '\[install\] \[winget\] charlie'
-        $output | Should -Not -Match '\[install\] \[winget\] alpha'
-        $output | Should -Not -Match '\[install\] \[winget\] bravo'
+        $result.Count      | Should -Be 1
+        $result.Operation  | Should -Be 'Install'
+        $result.Name       | Should -Be 'charlie'
     }
 
     It 'dispatches the requested package plus its transitive DependsOn closure' {
-        $output = Install-Package -Name 'bravo' -DryRun -SkipCompletion -BucketPath $script:tmpBucket *>&1 |
-            Out-String
+        $result = @(Install-Package -Name 'bravo' -DryRun -SkipCompletion -BucketPath $script:tmpBucket)
 
-        $output | Should -Match '=== Invoke-PackageInstall: TestBundle \(2 packages\) ==='
-        $output | Should -Match '\[install\] \[winget\] alpha'
-        $output | Should -Match '\[install\] \[winget\] bravo'
-        $output | Should -Not -Match '\[install\] \[winget\] charlie'
+        $result.Count | Should -Be 2
+        $result.Name  | Should -Contain 'alpha'
+        $result.Name  | Should -Contain 'bravo'
+        $result.Name  | Should -Not -Contain 'charlie'
+        # DependsOn target installs before its dependent.
+        ([array]::IndexOf($result.Name, 'alpha')) | Should -BeLessThan ([array]::IndexOf($result.Name, 'bravo'))
     }
 }
 
@@ -85,14 +84,13 @@ Describe 'Install-Package <BundleName> dispatch' -Tag 'Light', 'Module' {
     # that bundle — no -Name filter, full $Packages collection.
 
     It 'installs every package in the bundle when given the bundle name' {
-        $output = Install-Package -Name 'TestBundle' -DryRun -SkipCompletion -BucketPath $script:tmpBucket *>&1 |
-            Out-String
+        $result = @(Install-Package -Name 'TestBundle' -DryRun -SkipCompletion -BucketPath $script:tmpBucket)
 
-        $output | Should -Match "dispatching bundle 'TestBundle' \(all packages\)"
-        $output | Should -Match '=== Invoke-PackageInstall: TestBundle \(3 packages\) ==='
-        $output | Should -Match '\[install\] \[winget\] alpha'
-        $output | Should -Match '\[install\] \[winget\] bravo'
-        $output | Should -Match '\[install\] \[winget\] charlie'
+        $result.Count | Should -Be 3
+        $result.Name  | Should -Contain 'alpha'
+        $result.Name  | Should -Contain 'bravo'
+        $result.Name  | Should -Contain 'charlie'
+        ($result.Operation | Select-Object -Unique) | Should -Be 'Install'
     }
 }
 
@@ -124,7 +122,10 @@ Describe 'Install-Package <BareManifest> fallback' -Tag 'Light', 'Module' {
     }
 
     It 'logs scoop-install dispatch under -DryRun without invoking scoop' {
-        $output = Install-Package -Name 'BareManifestPkg' -DryRun -SkipCompletion -BucketPath $script:tmpBucket *>&1 |
+        # The bare-manifest path emits no PackageResult (there is no
+        # declarative metadata); its progress lines are routed through
+        # Write-UpdateStatus, so capture the mirrored -Verbose stream.
+        $output = Install-Package -Name 'BareManifestPkg' -DryRun -SkipCompletion -BucketPath $script:tmpBucket -Verbose 4>&1 |
             Out-String
         $output | Should -Match "dispatching manifest 'BareManifestPkg' via scoop install"
         $output | Should -Match '\[DryRun\] scoop install BareManifestPkg'
@@ -185,17 +186,16 @@ Invoke-PackageInstall -Packages `$Packages -Bundle 'CompInstallBundle'
     }
 
     It 'pulls the companion CLI into the plan when the desktop owner is requested, owner first' {
-        $output = Install-Package -Name 'Owner' -DryRun -SkipCompletion -BucketPath $script:tmpBucket3 *>&1 |
-            Out-String
+        $result = @(Install-Package -Name 'Owner' -DryRun -SkipCompletion -BucketPath $script:tmpBucket3)
 
-        $output | Should -Match '=== Invoke-PackageInstall: CompInstallBundle \(2 packages\) ==='
-        $output | Should -Match '\[install\] \[winget\] Owner'
-        $output | Should -Match '\[install\] \[winget\] OwnerCli'
+        $result.Count | Should -Be 2
+        $result.Name  | Should -Contain 'Owner'
+        $result.Name  | Should -Contain 'OwnerCli'
         # Owner must come BEFORE companion (install order: owner first).
-        $ownerIdx = $output.IndexOf('[install] [winget] Owner')
-        $cliIdx   = $output.IndexOf('[install] [winget] OwnerCli')
-        $ownerIdx | Should -BeGreaterThan -1
+        $ownerIdx = [array]::IndexOf($result.Name, 'Owner')
+        $cliIdx   = [array]::IndexOf($result.Name, 'OwnerCli')
+        $ownerIdx | Should -BeGreaterOrEqual 0
         $ownerIdx | Should -BeLessThan $cliIdx
-        $output | Should -Not -Match '\[install\] \[winget\] Unrelated'
+        $result.Name | Should -Not -Contain 'Unrelated'
     }
 }

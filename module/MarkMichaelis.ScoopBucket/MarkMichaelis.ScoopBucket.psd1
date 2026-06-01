@@ -17,7 +17,7 @@
     Description       = 'Declarative package manifests, install dispatcher, and tab-completion verification for the MarkMichaelis Scoop bucket. Provides the [Package] class, Invoke-PackageInstall, and the cross-bundle Install-Package / Get-Package helpers (which deliberately shadow the rarely-used PackageManagement cmdlets of the same name).'
     PowerShellVersion = '7.0'
 
-    ScriptsToProcess  = @('Classes\Package.ps1', 'Classes\PackageUpdateResult.ps1')
+    ScriptsToProcess  = @('Classes\Package.ps1', 'Classes\PackageResult.ps1')
 
     FormatsToProcess  = @('MarkMichaelis.ScoopBucket.format.ps1xml')
 

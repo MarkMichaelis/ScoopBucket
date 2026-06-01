@@ -6,7 +6,8 @@
     Light test for Invoke-PackageInstall's summary output: each row must
     be color-coded *and* glyph-marked by State so Failed rows can't be
     mistaken for success (color alone isn't colorblind-safe, so the
-    glyph carries the same signal).
+    glyph carries the same signal). The hand-rendered Write-Host table
+    was retired in favour of the shared PackageResult format view.
 #>
 
 BeforeAll {
@@ -14,18 +15,10 @@ BeforeAll {
     Import-Module $script:moduleManifest -Force
 }
 
-Describe 'Invoke-PackageInstall summary coloring' -Tag 'Light','Module' {
+Describe 'Invoke-PackageInstall result emission' -Tag 'Light','Module' {
 
-    It 'writes Failed rows in Red (with ✗ glyph) and Installed rows in Green (with ✓ glyph)' {
-        InModuleScope MarkMichaelis.ScoopBucket {
-            $captured = New-Object System.Collections.Generic.List[object]
-            Mock Write-Host -MockWith {
-                $captured.Add([pscustomobject]@{
-                    Message = $Object
-                    Color   = $ForegroundColor
-                })
-            }
-
+    It 'emits a Green Installed PackageResult and a Red Failed PackageResult (glyph + color)' {
+        $rendered = InModuleScope MarkMichaelis.ScoopBucket {
             # Two packages: one that succeeds (custom installer returns
             # success), one that fails (custom installer throws).
             $pkgs = @(
@@ -35,22 +28,50 @@ Describe 'Invoke-PackageInstall summary coloring' -Tag 'Light','Module' {
                             CustomInstallScript = { throw 'simulated failure' } }
             )
 
-            # BadPkg writes to the error stream now; silence it so the
-            # mock doesn't get confused but the summary still renders.
-            $null = Invoke-PackageInstall -Bundle 'Test' -Packages $pkgs `
-                -ErrorAction SilentlyContinue
+            # BadPkg writes a structured ErrorRecord to the error stream;
+            # silence it so the test focuses on the success-stream objects.
+            $results = @(Invoke-PackageInstall -Bundle 'Test' -Packages $pkgs `
+                -ErrorAction SilentlyContinue)
 
-            $summaryLines = @($captured | Where-Object { $_.Message -match '^\s{2}\S' -and $_.Color })
-            $goodLine = $summaryLines | Where-Object Message -match 'GoodPkg' | Select-Object -Last 1
-            $badLine  = $summaryLines | Where-Object Message -match 'BadPkg'  | Select-Object -Last 1
+            $results.Count | Should -Be 2
+            ($results | ForEach-Object { $_.GetType().Name } | Select-Object -Unique) | Should -Be 'PackageResult'
 
-            $goodLine | Should -Not -BeNullOrEmpty
-            $badLine  | Should -Not -BeNullOrEmpty
-            $goodLine.Color   | Should -Be 'Green'
-            $badLine.Color    | Should -Be 'Red'
-            # Glyph carries the signal even when color is stripped.
-            $goodLine.Message | Should -Match ([char]0x2713)   # ✓
-            $badLine.Message  | Should -Match ([char]0x2717)   # ✗
+            $good = $results | Where-Object Name -eq 'GoodPkg'
+            $bad  = $results | Where-Object Name -eq 'BadPkg'
+
+            $good.Operation | Should -Be 'Install'
+            $good.Status    | Should -Be 'Installed'
+            $bad.Operation  | Should -Be 'Install'
+            $bad.Status     | Should -Be 'Failed'
+            $bad.Reason     | Should -Match 'simulated failure'
+            $bad.Error      | Should -Not -BeNullOrEmpty
+            $bad.Error.FullyQualifiedErrorId | Should -Match 'PackageInstallFailed'
+
+            # Render the objects through the format view (color on) so the
+            # glyph + ANSI color can be asserted end-to-end.
+            $prev = $PSStyle.OutputRendering
+            $PSStyle.OutputRendering = 'Ansi'
+            try {
+                ($results | Out-String -Width 200)
+            } finally {
+                $PSStyle.OutputRendering = $prev
+            }
         }
+
+        $goodLine = ($rendered -split "`n" | Where-Object { $_ -match 'GoodPkg' } | Select-Object -First 1)
+        $badLine  = ($rendered -split "`n" | Where-Object { $_ -match 'BadPkg'  } | Select-Object -First 1)
+
+        $goodLine | Should -Not -BeNullOrEmpty
+        $badLine  | Should -Not -BeNullOrEmpty
+
+        # Glyph carries the signal even when color is stripped.
+        $goodLine | Should -Match ([regex]::Escape('+ Installed'))
+        $badLine  | Should -Match ([regex]::Escape('x Failed'))
+
+        # Color reinforces it: green for Installed, red for Failed.
+        $green = $PSStyle.Foreground.Green
+        $red   = $PSStyle.Foreground.Red
+        $goodLine | Should -Match ([regex]::Escape($green))
+        $badLine  | Should -Match ([regex]::Escape($red))
     }
 }

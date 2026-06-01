@@ -110,7 +110,7 @@ function Update-Package {
         # installed by this bucket.
     #>
     [CmdletBinding(DefaultParameterSetName = 'ByName', SupportsShouldProcess, ConfirmImpact = 'Medium')]
-    [OutputType([PackageUpdateResult])]
+    [OutputType([PackageResult])]
     param(
         [Parameter(ParameterSetName = 'ByName', Mandatory, Position = 0)][string[]]$Name,
         [Parameter(ParameterSetName = 'MachineWide', Mandatory)]
