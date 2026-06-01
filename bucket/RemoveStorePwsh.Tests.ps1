@@ -77,12 +77,15 @@ Describe 'De-Store PowerShell helpers' -Tag 'Light' {
                 Mock Remove-AppxPackage { }
                 Mock Test-Path { $true } -ParameterFilter { $LiteralPath -like '*PowerShell\7\pwsh.exe' }
                 Mock Add-MachinePath { }
+                Mock Remove-StorePwshPathEntry { }
                 Mock Get-Command { $true } -ParameterFilter { $Name -eq 'Get-AppxPackage' }
 
                 $result = Remove-StorePwsh -Confirm:$false
 
                 Should -Invoke Remove-AppxPackage -Times 1 -Exactly `
                     -Because 'the sealed Store build must be removed'
+                Should -Invoke Remove-StorePwshPathEntry -Times 2 -Exactly `
+                    -Because 'both Machine and User PATH scopes are scrubbed (via the mockable helper, never the real env)'
                 $result.Removed | Should -BeTrue
             }
         }
@@ -92,11 +95,13 @@ Describe 'De-Store PowerShell helpers' -Tag 'Light' {
                 Mock Get-AppxPackage { $null }
                 Mock Remove-AppxPackage { }
                 Mock Test-Path { $true } -ParameterFilter { $LiteralPath -like '*PowerShell\7\pwsh.exe' }
+                Mock Remove-StorePwshPathEntry { }
                 Mock Get-Command { $true } -ParameterFilter { $Name -eq 'Get-AppxPackage' }
 
                 $result = Remove-StorePwsh -Confirm:$false
 
                 Should -Invoke Remove-AppxPackage -Times 0 -Exactly
+                Should -Invoke Remove-StorePwshPathEntry -Times 0 -Exactly
                 $result.StoreBuildFound | Should -BeFalse
                 $result.Removed | Should -BeFalse
             }
