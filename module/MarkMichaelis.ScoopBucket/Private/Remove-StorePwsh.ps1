@@ -27,8 +27,9 @@ function Remove-StorePwshFromPathString {
     )
     if (-not $PathValue) { return $PathValue }
     $kept = foreach ($segment in ($PathValue -split ';')) {
-        if (-not $segment) { continue }
-        if ($segment -match '(?i)\\WindowsApps\\Microsoft\.PowerShell_') { continue }
+        $trimmed = $segment.Trim()
+        if (-not $trimmed) { continue }
+        if ($trimmed -match '(?i)\\WindowsApps\\Microsoft\.PowerShell_') { continue }
         $segment
     }
     , ($kept -join ';') | Select-Object -First 1
@@ -172,7 +173,10 @@ function Remove-StorePwsh {
     Remove-StorePwshPathEntry -Scope 'Machine'
     Remove-StorePwshPathEntry -Scope 'User'
 
-    try { Add-MachinePath -Path (Split-Path -Parent $msiPwsh) -Confirm:$false } catch { }
+    $msiDir = Split-Path -Parent $msiPwsh
+    if ($PSCmdlet.ShouldProcess($msiDir, 'Ensure on Machine PATH')) {
+        try { Add-MachinePath -Path $msiDir -Confirm:$false } catch { }
+    }
 
     return $result
 }
