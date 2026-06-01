@@ -40,5 +40,27 @@ Function Install-Chocolatey {
     }
 
     Import-ChocolateyModule
+
+    # choco tab-completion via Chocolatey's own chocolateyProfile.psm1 (#278).
+    # Importing that module registers choco's Register-ArgumentCompleter. There
+    # is no `choco completion powershell` subcommand -- the completer ships with
+    # Chocolatey itself. Import it for the current session and add an idempotent
+    # import to the CurrentUserAllHosts profile so it loads in every host.
+    # Best-effort.
+    try {
+        $chocoProfileModule = Join-Path $env:ChocolateyInstall 'helpers\chocolateyProfile.psm1'
+        if (Test-Path $chocoProfileModule) {
+            Import-Module $chocoProfileModule -ErrorAction Stop
+            $allHostsProfile = $PROFILE.CurrentUserAllHosts
+            if (-not (Test-Path $allHostsProfile)) {
+                New-Item -ItemType File -Path $allHostsProfile -Force | Out-Null
+            }
+            if (-not (Select-String -Path $allHostsProfile -Pattern 'chocolateyProfile\.psm1' -Quiet)) {
+                Add-Content -Path $allHostsProfile -Value 'Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"'
+            }
+        }
+    } catch {
+        Write-Warning "Skipping choco tab-completion activation: $($_.Exception.Message)"
+    }
 }
 Install-Chocolatey

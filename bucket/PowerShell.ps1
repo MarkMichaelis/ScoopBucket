@@ -40,5 +40,89 @@ if (Get-Command git -ErrorAction Ignore) {
     Write-Warning 'git not found; skipping windows-terminal-copilot-skill install.'
 }
 
+# ----------------------------------------------------------------------------
+# Native PowerShell tab-completion for the PowerShell hosts and wsl (#278).
+#
+# Neither `pwsh`, `powershell`, nor `wsl` ships a `<cli> completion powershell`
+# subcommand, so each gets a hand-curated completer covering its documented
+# top-level switches. Registration flows through Register-CliCompletion's
+# self-healing path (Resolve-SelfHealingCompleter): if any of these CLIs later
+# gains a real native helper, it is adopted automatically and a low-priority
+# advisory notes this block can be removed. Best-effort -- silently skipped when
+# the AllUsersAllHosts profile is not writable (e.g. not elevated), matching gh.
+# ----------------------------------------------------------------------------
+function New-StaticNativeCompleter {
+    # Build a scriptblock that emits a hand-curated `Register-ArgumentCompleter
+    # -Native` here-string for $Cli over a fixed $Switches list. Returned as a
+    # closure so Register-CliCompletion captures the rendered text verbatim.
+    param([string]$Cli, [string[]]$Switches)
+    $switchLiteral = ($Switches | ForEach-Object { "'$_'" }) -join ','
+    $completerText = @"
+Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @($switchLiteral) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+    return { $completerText }.GetNewClosure()
+}
+
+$pwshSwitches = @(
+    '-File', '-Command', '-EncodedCommand', '-ConfigurationName', '-CustomPipeName',
+    '-ExecutionPolicy', '-InputFormat', '-OutputFormat', '-Login', '-MTA', '-STA',
+    '-NoExit', '-NoLogo', '-NoProfile', '-NoProfileLoadTime', '-NonInteractive',
+    '-SettingsFile', '-Version', '-WindowStyle', '-WorkingDirectory', '-Help'
+)
+try {
+    Register-CliCompletion -Cli pwsh -NativeCommand (New-StaticNativeCompleter -Cli pwsh -Switches $pwshSwitches) -Force -Confirm:$false -ErrorAction Stop | Out-Null
+} catch {
+    Write-Warning "Skipping pwsh tab-completion registration: $($_.Exception.Message)"
+}
+
+$powershellSwitches = @(
+    '-File', '-Command', '-EncodedCommand', '-ConfigurationName', '-ExecutionPolicy',
+    '-InputFormat', '-OutputFormat', '-Mta', '-Sta', '-NoExit', '-NoLogo', '-NoProfile',
+    '-NonInteractive', '-PSConsoleFile', '-Version', '-WindowStyle', '-Help'
+)
+try {
+    Register-CliCompletion -Cli powershell -NativeCommand (New-StaticNativeCompleter -Cli powershell -Switches $powershellSwitches) -Force -Confirm:$false -ErrorAction Stop | Out-Null
+} catch {
+    Write-Warning "Skipping powershell tab-completion registration: $($_.Exception.Message)"
+}
+
+$wslSwitches = @(
+    '--install', '--list', '-l', '--set-default', '-s', '--set-version',
+    '--set-default-version', '--shutdown', '--terminate', '-t', '--unregister',
+    '--import', '--export', '--distribution', '-d', '--user', '-u', '--exec', '-e',
+    '--status', '--update', '--help'
+)
+try {
+    Register-CliCompletion -Cli wsl -NativeCommand (New-StaticNativeCompleter -Cli wsl -Switches $wslSwitches) -Force -Confirm:$false -ErrorAction Stop | Out-Null
+} catch {
+    Write-Warning "Skipping wsl tab-completion registration: $($_.Exception.Message)"
+}
+
+# scoop tab-completion via the upstream `scoop-completion` module (#278). scoop
+# has no `scoop completion powershell` subcommand; its completer is shipped as a
+# PowerShell module installed through scoop itself. Install (best-effort) and
+# add an idempotent import to the CurrentUserAllHosts profile so it loads in
+# every host.
+try {
+    if (-not (Get-Module -ListAvailable -Name scoop-completion)) {
+        scoop install scoop-completion
+    }
+    $allHostsProfile = $PROFILE.CurrentUserAllHosts
+    if (-not (Test-Path $allHostsProfile)) {
+        New-Item -ItemType File -Path $allHostsProfile -Force | Out-Null
+    }
+    if (-not (Select-String -Path $allHostsProfile -Pattern 'Import-Module\s+scoop-completion' -Quiet)) {
+        Add-Content -Path $allHostsProfile -Value 'Import-Module scoop-completion'
+    }
+} catch {
+    Write-Warning "Skipping scoop-completion activation: $($_.Exception.Message)"
+}
+
+
 
 

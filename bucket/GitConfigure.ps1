@@ -66,6 +66,16 @@ Function GitConfigure {
         Write-Warning "Skipping gh tab-completion registration: $($_.Exception.Message)"
     }
 
+    # gk (GitKraken CLI) native tab completion. gk is cobra-based and emits a
+    # real PowerShell completer via `gk completion powershell` (positional
+    # shell arg -- note NOT the gh-style `-s powershell`). Co-located with the
+    # GitKraken.cli install above. Best-effort, same as gh.
+    try {
+        Register-CliCompletion -Cli gk -NativeCommand { gk completion powershell 2>$null } -Force -Confirm:$false -ErrorAction Stop | Out-Null
+    } catch {
+        Write-Warning "Skipping gk tab-completion registration: $($_.Exception.Message)"
+    }
+
     # TODO: Check if already configured.
     # TODO: Remove hard coding if the information.
     if (-not (git config --global user.name)) {
