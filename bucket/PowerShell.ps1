@@ -123,7 +123,7 @@ try {
         New-Item -ItemType File -Path $allHostsProfile -Force | Out-Null
     }
     if (-not (Select-String -Path $allHostsProfile -Pattern 'Import-Module\s+scoop-completion' -Quiet)) {
-        Add-Content -Path $allHostsProfile -Value 'Import-Module scoop-completion'
+        Add-Content -Path $allHostsProfile -Value 'Import-Module scoop-completion -ErrorAction SilentlyContinue'
     }
 } catch {
     Write-Warning "Skipping scoop-completion activation: $($_.Exception.Message)"

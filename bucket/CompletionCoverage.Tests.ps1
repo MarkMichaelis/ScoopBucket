@@ -7,11 +7,16 @@
 # Procedurally-installed CLIs (winget/choco/scoop install lines, JSON
 # manifests) bypass Package.Validate's "CliCommands => Completion" check, so a
 # new CLI can ship with no tab-completion and nothing notices -- which is how
-# pwsh/powershell slipped through. CompletionCoverage.psd1 is the source of
-# truth for those CLIs; this test enforces it in both directions:
+# pwsh/powershell slipped through. CompletionCoverage.psd1 is a *manually
+# maintained* catalog of those CLIs; this test does NOT auto-discover new
+# install lines or manifests. It enforces the catalog in both directions:
 #
 #   * every catalog entry has a real backing registration in its Script, and
 #   * every `Register-CliCompletion -Cli <x>` across bucket/*.ps1 is catalogued.
+#
+# So a CLI added without a catalog entry is only caught once it is either
+# catalogued or wired via Register-CliCompletion; keeping the catalog current
+# when adding a new install vector is a manual step.
 #
 # Tagged 'Light' -- pure static source analysis, no installed CLIs required.
 # ----------------------------------------------------------------------------
