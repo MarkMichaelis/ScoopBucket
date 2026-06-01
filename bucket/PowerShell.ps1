@@ -1,5 +1,5 @@
 
-Write-Host 'Installing and configuring PowerShell...'
+Write-Verbose 'Installing and configuring PowerShell...'
 $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
 if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
 
