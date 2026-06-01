@@ -526,7 +526,7 @@ Describe 'Invoke-PackageUpdate emits PackageUpdateResult objects (#274, #276)' -
                 Should -Not -BeNullOrEmpty
         }
     }
-    It 'fails one invalid package but continues updating the rest of the batch (#280)' {
+    It 'fails one invalid package but continues updating the rest of the batch (#276)' {
         InModuleScope MarkMichaelis.ScoopBucket {
             Mock Update-ChocoPackage     { return @{ State='Updated'; Reason=$null } }
             Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }

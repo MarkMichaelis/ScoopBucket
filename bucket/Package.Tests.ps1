@@ -278,7 +278,7 @@ Describe 'Package.Validate() — invariants' -Tag 'Light', 'Module' {
     }
 }
 
-Describe 'Package.GetValidationError() — non-throwing probe (#280)' -Tag 'Light', 'Module' {
+Describe 'Package.GetValidationError() — non-throwing probe (#276)' -Tag 'Light', 'Module' {
     It 'returns $null for a valid package without throwing' {
         $p = [Package]@{ Name = 'x'; Installer = 'scoop'; Id = 'main/x' }
         $err = $p.GetValidationError()   # would throw the test if it threw
