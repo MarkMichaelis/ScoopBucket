@@ -115,6 +115,10 @@ try {
     }
     $allHostsProfile = $PROFILE.CurrentUserAllHosts
     if (-not (Test-Path $allHostsProfile)) {
+        $profileDir = Split-Path -Parent $allHostsProfile
+        if ($profileDir -and -not (Test-Path $profileDir)) {
+            New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+        }
         New-Item -ItemType File -Path $allHostsProfile -Force | Out-Null
     }
     if (-not (Select-String -Path $allHostsProfile -Pattern 'Import-Module\s+scoop-completion' -Quiet)) {

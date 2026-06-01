@@ -53,9 +53,13 @@ Function Install-Chocolatey {
             Import-Module $chocoProfileModule -ErrorAction Stop
             $allHostsProfile = $PROFILE.CurrentUserAllHosts
             if (-not (Test-Path $allHostsProfile)) {
+                $profileDir = Split-Path -Parent $allHostsProfile
+                if ($profileDir -and -not (Test-Path $profileDir)) {
+                    New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+                }
                 New-Item -ItemType File -Path $allHostsProfile -Force | Out-Null
             }
-            if (-not (Select-String -Path $allHostsProfile -Pattern 'chocolateyProfile\.psm1' -Quiet)) {
+            if (-not (Select-String -Path $allHostsProfile -Pattern 'Import-Module.*chocolateyProfile\.psm1' -Quiet)) {
                 Add-Content -Path $allHostsProfile -Value 'Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"'
             }
         }
