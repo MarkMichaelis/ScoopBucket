@@ -170,7 +170,7 @@ function Get-PackageCompletionProfilePath {
 
     $target = $PROFILE.AllUsersAllHosts
     if ([string]::IsNullOrWhiteSpace($target)) {
-        Write-Information "Host has no AllUsersAllHosts profile path; completion registration skipped." -InformationAction Continue
+        Write-Verbose "Host has no AllUsersAllHosts profile path; completion registration skipped."
         return $null
     }
     if (-not (Test-IsElevated)) {

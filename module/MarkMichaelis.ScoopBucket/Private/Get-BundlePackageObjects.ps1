@@ -37,7 +37,18 @@ function Get-BundlePackageObjects {
     try {
         . ([scriptblock]::Create($stripped))
     } catch {
-        Write-Verbose "Get-BundlePackageObjects: dot-source threw: $($_.Exception.Message)"
+        # A throw here (as opposed to a bundle that simply never assigns
+        # $Packages) means the bundle body referenced something that failed to
+        # evaluate -- most commonly a STALE cached [Package] class. PowerShell
+        # caches a class by name per session, so when an older module version is
+        # already loaded and a newer one is Import-Module -Force'd over it, the
+        # cached [Package] is NOT redefined; bundle casts to a newer property
+        # then throw. The caller falls back to metadata-only packages, which
+        # strips every scriptblock (CustomInstallScript / VerifyScript / etc.),
+        # silently degrading custom + Reinstall packages. Surface it as a warning
+        # so that degradation is visible and explained instead of nondeterministic.
+        $bundleName = [System.IO.Path]::GetFileNameWithoutExtension($BundlePath)
+        Write-Warning ("Get-BundlePackageObjects: bundle '{0}' failed to reconstruct its [Package] objects ({1}). Falling back to metadata-only packages -- custom/Reinstall scriptblocks are unavailable this session. This usually means a stale [Package] type from a prior module load; start a fresh PowerShell session to clear it." -f $bundleName, $_.Exception.Message)
         return @()
     }
 

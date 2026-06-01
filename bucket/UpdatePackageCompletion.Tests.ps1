@@ -213,4 +213,17 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
         $bw.Action | Should -Be 'Preserved'
         $bw.Reason | Should -Match 'pass -Force'
     }
+
+    It 'returns row objects without writing a Write-Host summary (#276 quiet output)' {
+        # The returned rows ARE the output; the old one-line Write-Host tally
+        # duplicated them (the anti-pattern removed from the package tables).
+        # It is now a transient Write-Verbose, so Write-Host must never fire.
+        Mock -ModuleName MarkMichaelis.ScoopBucket Write-Host { }
+
+        $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
+            -ProfilePath $script:profilePath -WhatIf
+
+        $results | Should -Not -BeNullOrEmpty
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Write-Host -Times 0 -Exactly
+    }
 }

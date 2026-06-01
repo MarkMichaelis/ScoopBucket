@@ -200,11 +200,14 @@ function Update-PackageCompletion {
     }
 
     $arr = $results.ToArray()
+    # The returned row objects ARE the output -- a Write-Host summary here would
+    # duplicate them (the same anti-pattern removed from the package result
+    # tables). Mirror a one-line tally to the transient verbose stream only.
     $byAction = $arr | Group-Object Action | ForEach-Object { "$($_.Name)=$($_.Count)" }
     if ($byAction) {
-        Write-Host "Update-PackageCompletion: $($byAction -join ', ')"
+        Write-Verbose "Update-PackageCompletion: $($byAction -join ', ')"
     } else {
-        Write-Host 'Update-PackageCompletion: no eligible CLIs found.'
+        Write-Verbose 'Update-PackageCompletion: no eligible CLIs found.'
     }
 
     return ,$arr
