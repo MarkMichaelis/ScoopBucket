@@ -31,7 +31,11 @@ Describe 'Completion coverage catalog is honoured' -Tag 'Light','CompletionCover
                 Where-Object { $_.Name -notlike '*.Tests.ps1' } |
                 ForEach-Object {
                     $text = Get-Content -Raw -Path $_.FullName
-                    [regex]::Matches($text, "Register-CliCompletion\b[^\r\n]*?-Cli\s+['""]?(?<cli>[\w.-]+)") |
+                    # Bounded `[\s\S]` (not `[^\r\n]`) so a registration whose
+                    # arguments are split across lines with backticks is still
+                    # discovered -- a missed match would silently drop the
+                    # catalog requirement for that CLI.
+                    [regex]::Matches($text, "Register-CliCompletion\b[\s\S]{0,200}?-Cli\s+['""]?(?<cli>[\w.-]+)") |
                         ForEach-Object { $_.Groups['cli'].Value }
                 } | Sort-Object -Unique
         )
@@ -55,7 +59,9 @@ Describe 'Completion coverage catalog is honoured' -Tag 'Light','CompletionCover
 
         switch ($Status) {
             'Registered' {
-                $pattern = "(?ms)Register-CliCompletion\b[^\r\n]*?-Cli\s+['`"]?$([regex]::Escape($Cli))['`"]?\b[^\r\n]*?-NativeCommand"
+                # Bounded `[\s\S]` spans tolerate harmless line breaks/backticks
+                # between the tokens so a multi-line registration still matches.
+                $pattern = "(?ms)Register-CliCompletion\b[\s\S]{0,200}?-Cli\s+['`"]?$([regex]::Escape($Cli))['`"]?\b[\s\S]{0,200}?-NativeCommand"
                 $content | Should -Match $pattern -Because "$Script must call Register-CliCompletion -Cli $Cli -NativeCommand { ... }"
             }
             'ModuleActivated' {
