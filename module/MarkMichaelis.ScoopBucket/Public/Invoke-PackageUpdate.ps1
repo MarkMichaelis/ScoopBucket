@@ -155,7 +155,7 @@ function Invoke-PackageUpdate {
                     'Reinstall' {
                         if (-not $pkg.CustomInstallScript) {
                             # Metadata-only fallback path lost the scriptblock.
-                            $result = @{ State = 'NoAutoUpdateSupport'; Reason = 'Reinstall requested but CustomInstallScript is unavailable on this path.' }
+                            $result = @{ State = 'NoAutoUpdateSupport'; Reason = 'Reinstall requested but this package was loaded without its CustomInstallScript (metadata-only); reinstall cannot run.' }
                         } elseif ($isWhatIf) {
                             $result = @{ State = 'Updated'; Reason = '(WhatIf)' }
                         } else {
