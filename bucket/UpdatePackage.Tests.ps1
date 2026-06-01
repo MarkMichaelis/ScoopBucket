@@ -562,6 +562,27 @@ Describe 'Invoke-PackageUpdate emits PackageResult objects (#274, #276)' -Tag 'L
                 Should -Be 1
         }
     }
+
+    It 'reports "Reinstall unavailable" when a metadata-only Reinstall package reaches the engine (#276)' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            # When validation is bypassed (e.g. a stale [Package] instance whose
+            # GetValidationError method predates the current module), a Reinstall
+            # package that lost its CustomInstallScript on the metadata round-trip
+            # reaches the UpdateMode switch with no script. It must NOT throw and
+            # must surface the reworded, visible reason -- not silently vanish.
+            Mock Get-PackageValidationError { return $null }
+            Mock Update-PathFromRegistry { }
+
+            $pkg = [Package]::new()
+            $pkg.Name = 'Readwise Reader'; $pkg.Installer = 'custom'; $pkg.UpdateMode = 'Reinstall'
+
+            $result = @(Invoke-PackageUpdate -Packages @($pkg) -Bundle 'ClientBasePackages' -SkipCompletion)
+
+            $result.Count | Should -Be 1
+            $result[0].Status | Should -Be 'NoAutoUpdateSupport'
+            $result[0].Reason | Should -Match 'Reinstall unavailable'
+        }
+    }
 }
 
 Describe 'Quiet-by-default update output (#276)' -Tag 'Light','Module' {
