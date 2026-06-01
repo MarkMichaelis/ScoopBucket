@@ -356,17 +356,39 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
         $errs[0].Exception.Message | Should -Match 'simulated'
     }
 
-    It 'rejects non-Package elements' {
-        { Invoke-PackageInstall -Packages @([pscustomobject]@{Name='x'}) -Bundle 'Test' -SkipCompletion } |
-            Should -Throw -ExpectedMessage '*Package*'
+    It 'records a Failed result for a non-Package element and continues the batch' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Install-WingetPackage {
+            return @{ State = 'Installed'; Reason = $null }
+        }
+        $pkgs = @(
+            [pscustomobject]@{ Name = 'x' }                              # not a [Package]
+            [Package]@{ Name='Good'; Installer='winget'; Id='Foo.Good' }
+        )
+        $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion `
+            -ErrorAction SilentlyContinue -ErrorVariable errs
+        # The valid package still installs; the bad element does not abort the batch.
+        ($r | Where-Object Name -eq 'Good').Name | Should -Be 'Good'
+        $errs.Count | Should -Be 1
+        $errs[0].FullyQualifiedErrorId | Should -Match '^PackageInstallFailed'
+        $errs[0].Exception.Message     | Should -Match 'expected a \[Package\]'
     }
 
-    It 'fails fast on Package.Validate() errors' {
+    It 'records Failed (not throw) on a Package.Validate() error and continues' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Install-ChocoPackage {
+            return @{ State = 'Installed'; Reason = $null }
+        }
+        # 'Bad' is a scoop package with an unprefixed Id -> Validate() rejects it.
         $pkgs = [Package[]]@(
-            [Package]@{ Name='Bad'; Installer='scoop'; Id='no-bucket-prefix' }
+            [Package]@{ Name='Bad';  Installer='scoop'; Id='no-bucket-prefix' }
+            [Package]@{ Name='Good'; Installer='choco'; Id='good' }
         )
-        { Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion } |
-            Should -Throw -ExpectedMessage '*bucket*'
+        $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion `
+            -ErrorAction SilentlyContinue -ErrorVariable errs
+        ($r | Where-Object Name -eq 'Good').Name | Should -Be 'Good'
+        $errs.Count | Should -Be 1
+        $errs[0].FullyQualifiedErrorId | Should -Match '^PackageInstallFailed'
+        $errs[0].TargetObject.Name     | Should -Be 'Bad'
+        $errs[0].Exception.Message     | Should -Match 'bucket'
     }
 
     It 'respects -DryRun: dispatchers receive -WhatIf, returns Installed records' {

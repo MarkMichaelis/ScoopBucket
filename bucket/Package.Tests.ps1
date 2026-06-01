@@ -278,6 +278,37 @@ Describe 'Package.Validate() — invariants' -Tag 'Light', 'Module' {
     }
 }
 
+Describe 'Package.GetValidationError() — non-throwing probe (#280)' -Tag 'Light', 'Module' {
+    It 'returns $null for a valid package without throwing' {
+        $p = [Package]@{ Name = 'x'; Installer = 'scoop'; Id = 'main/x' }
+        $err = $p.GetValidationError()   # would throw the test if it threw
+        $err | Should -BeNullOrEmpty
+    }
+
+    It 'returns the first violation as a string instead of throwing' {
+        $p = [Package]@{ Name = 'x'; Installer = 'custom' }   # missing CustomInstallScript
+        $err = $p.GetValidationError()
+        $err | Should -BeOfType ([string])
+        $err | Should -Match 'CustomInstallScript is required'
+    }
+
+    It 'does not leak an ErrorRecord onto the caller error stream' {
+        # The whole point of the non-throwing core: probing an invalid
+        # package must not surface a spurious error (a class-method throw
+        # under an advanced function double-reports even when caught).
+        $p = [Package]@{ Name = 'x'; Installer = 'scoop'; Id = 'no-prefix' }
+        $Error.Clear()
+        $null = $p.GetValidationError()
+        $Error.Count | Should -Be 0
+    }
+
+    It 'Validate() still throws the same message GetValidationError() reports' {
+        $p = [Package]@{ Name = 'x'; Installer = 'scoop'; Id = 'no-prefix' }
+        $probe = $p.GetValidationError()
+        { $p.Validate() } | Should -Throw -ExpectedMessage "*$probe*"
+    }
+}
+
 Describe 'Package.Companions field' -Tag 'Light', 'Module' {
     It 'defaults to an empty array' {
         $p = [Package]@{ Name = 'demo'; Installer = 'scoop'; Id = 'main/demo' }

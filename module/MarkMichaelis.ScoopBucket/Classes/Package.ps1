@@ -102,12 +102,19 @@ class Package {
     [ValidateSet('Auto', 'Reinstall', 'SelfManaged', 'NoAutoUpdateSupport')]
     [string]   $UpdateMode = 'Auto'
 
-    # Cross-field invariants the type system can't express. Called by
-    # Invoke-PackageInstall before any installer runs so schema errors
-    # fail fast.
-    [void] Validate() {
+    # Cross-field invariants the type system can't express. Returns the
+    # first violation as a string, or $null when the declaration is valid.
+    #
+    # This is the NON-throwing core so batch drivers can probe a package
+    # without paying the class-method-throw tax: a PowerShell class method
+    # that `throw`s under an advanced function leaks a spurious
+    # non-terminating ErrorRecord onto the caller's error stream EVEN when
+    # the throw is caught, which would double-report every invalid package.
+    # Validate() (below) layers the throwing contract on top for callers
+    # that want fail-fast semantics.
+    [string] GetValidationError() {
         if (-not $this.Name) {
-            throw "Package: Name is required."
+            return "Package: Name is required."
         }
 
         if ($this.CustomInstallScript -and -not $this.Installer) {
@@ -115,33 +122,33 @@ class Package {
         }
 
         if (-not $this.Installer) {
-            throw "Package '$($this.Name)': Installer is required unless CustomInstallScript is set."
+            return "Package '$($this.Name)': Installer is required unless CustomInstallScript is set."
         }
 
         if ($this.Installer -ne 'custom' -and -not $this.Id) {
-            throw "Package '$($this.Name)': Id is required for installer '$($this.Installer)'."
+            return "Package '$($this.Name)': Id is required for installer '$($this.Installer)'."
         }
 
         if ($this.Installer -eq 'custom' -and -not $this.CustomInstallScript) {
-            throw "Package '$($this.Name)': CustomInstallScript is required when Installer='custom'."
+            return "Package '$($this.Name)': CustomInstallScript is required when Installer='custom'."
         }
 
         # CustomUninstallScript is optional — not every install is reversible.
         # If present it must only accompany Installer='custom'.
         if ($this.CustomUninstallScript -and $this.Installer -ne 'custom') {
-            throw "Package '$($this.Name)': CustomUninstallScript is only valid when Installer='custom' (got '$($this.Installer)')."
+            return "Package '$($this.Name)': CustomUninstallScript is only valid when Installer='custom' (got '$($this.Installer)')."
         }
 
         if ($this.Source -eq 'msstore' -and $this.Installer -ne 'winget') {
-            throw "Package '$($this.Name)': Source='msstore' is only valid for Installer='winget'."
+            return "Package '$($this.Name)': Source='msstore' is only valid for Installer='winget'."
         }
 
         if ($this.Installer -eq 'scoop' -and $this.Id -notmatch '/') {
-            throw "Package '$($this.Name)': scoop Id '$($this.Id)' must include an explicit '<bucket>/<name>' prefix. Scoop selects buckets by add-order, so unprefixed ids are machine-dependent."
+            return "Package '$($this.Name)': scoop Id '$($this.Id)' must include an explicit '<bucket>/<name>' prefix. Scoop selects buckets by add-order, so unprefixed ids are machine-dependent."
         }
 
         if ($this.Completion -in @('native', 'auto') -and -not $this.NativeCommandScript) {
-            throw "Package '$($this.Name)': NativeCommandScript is required when Completion='$($this.Completion)'."
+            return "Package '$($this.Name)': NativeCommandScript is required when Completion='$($this.Completion)'."
         }
 
         # Inverse direction: if a Package exposes CLIs on PATH, it MUST register
@@ -150,39 +157,50 @@ class Package {
         # ships a CLI with no Tab-completion -- the gap that hid Everything CLI
         # and 24 other packages before this guard existed.
         if ($this.CliCommands.Count -gt 0 -and $this.Completion -eq 'none') {
-            throw "Package '$($this.Name)': Completion='none' is not allowed when CliCommands is non-empty (CLIs: $($this.CliCommands -join ', ')). Either declare Completion='native'|'pscompletions'|'auto' and supply ExpectedCompletions, or remove CliCommands if the tool truly has no tab-completable surface."
+            return "Package '$($this.Name)': Completion='none' is not allowed when CliCommands is non-empty (CLIs: $($this.CliCommands -join ', ')). Either declare Completion='native'|'pscompletions'|'auto' and supply ExpectedCompletions, or remove CliCommands if the tool truly has no tab-completable surface."
         }
 
         if ($this.Completion -ne 'none') {
             if ($this.CliCommands.Count -eq 0) {
-                throw "Package '$($this.Name)': CliCommands must be non-empty when Completion='$($this.Completion)'."
+                return "Package '$($this.Name)': CliCommands must be non-empty when Completion='$($this.Completion)'."
             }
             if (-not $this.ExpectedCompletions -or $this.ExpectedCompletions.Count -eq 0) {
-                throw "Package '$($this.Name)': ExpectedCompletions hashtable is required when Completion='$($this.Completion)' so completion can be verified end-to-end (no mocks)."
+                return "Package '$($this.Name)': ExpectedCompletions hashtable is required when Completion='$($this.Completion)' so completion can be verified end-to-end (no mocks)."
             }
             foreach ($cli in $this.CliCommands) {
                 if (-not $this.ExpectedCompletions.ContainsKey($cli)) {
-                    throw "Package '$($this.Name)': ExpectedCompletions is missing a key for CLI '$cli'."
+                    return "Package '$($this.Name)': ExpectedCompletions is missing a key for CLI '$cli'."
                 }
                 $items = @($this.ExpectedCompletions[$cli])
                 if ($items.Count -eq 0) {
-                    throw "Package '$($this.Name)': ExpectedCompletions['$cli'] is empty; supply at least one subcommand TabExpansion2 must produce."
+                    return "Package '$($this.Name)': ExpectedCompletions['$cli'] is empty; supply at least one subcommand TabExpansion2 must produce."
                 }
             }
         }
 
         if ($this.DependsOn -contains $this.Name) {
-            throw "Package '$($this.Name)': DependsOn cannot reference itself."
+            return "Package '$($this.Name)': DependsOn cannot reference itself."
         }
 
         if ($this.Companions -contains $this.Name) {
-            throw "Package '$($this.Name)': Companions cannot reference itself."
+            return "Package '$($this.Name)': Companions cannot reference itself."
         }
 
         # UpdateMode beyond the default 'Auto' only makes sense for custom
         # installs; engine packages always update through their engine.
         if ($this.UpdateMode -ne 'Auto' -and $this.Installer -ne 'custom') {
-            throw "Package '$($this.Name)': UpdateMode='$($this.UpdateMode)' is only valid when Installer='custom' (got '$($this.Installer)')."
+            return "Package '$($this.Name)': UpdateMode='$($this.UpdateMode)' is only valid when Installer='custom' (got '$($this.Installer)')."
+        }
+
+        return $null
+    }
+
+    # Throwing wrapper over GetValidationError() for callers that want
+    # fail-fast semantics (e.g. bundle authoring / tests).
+    [void] Validate() {
+        $err = $this.GetValidationError()
+        if ($err) {
+            throw $err
         }
     }
 
