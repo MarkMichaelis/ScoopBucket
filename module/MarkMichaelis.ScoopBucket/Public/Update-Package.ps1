@@ -94,6 +94,13 @@ function Update-Package {
     .PARAMETER BucketPath
         Override the auto-detected bucket directory.
 
+    .PARAMETER PassThru
+        Emit the per-package [Package] result objects on the pipeline. By
+        default Update-Package renders only the human-readable summary table
+        (so an interactive run does not also print PowerShell's default-format
+        object table underneath it). Pass -PassThru when you want to capture
+        or pipe the results, e.g. `Update-Package '*' -PassThru | Where-Object ...`.
+
     .EXAMPLE
         Update-Package -Name 'ripgrep'
 
@@ -122,6 +129,10 @@ function Update-Package {
         [switch]$SkipCompletion,
         [switch]$SkipBucketRefresh,
         [string]$BucketPath,
+        # Emit [Package] result objects on the pipeline. Off by default so an
+        # interactive run shows only the summary table, not a duplicate
+        # default-formatted object table beneath it. See #276.
+        [switch]$PassThru,
         # Hard cap on per-package winget upgrade time (minutes). Default
         # 5 minutes (vast majority of winget upgrades finish in <60s).
         # Pass 0 to disable. Forwarded to Invoke-PackageUpdate and only
@@ -305,6 +316,10 @@ function Update-Package {
     # (which would otherwise upgrade Invoke-PackageUpdate's non-terminating
     # WriteError into a terminating error at the call site). See issue #272.
     $pkgErrors = [System.Collections.Generic.List[object]]::new()
+    # Collect the [Package] result objects so we can decide whether to emit
+    # them. By default they are swallowed (the summary table is the only
+    # rendered view); -PassThru re-emits them on the pipeline. See #276.
+    $results = [System.Collections.Generic.List[object]]::new()
 
     # Dispatch (a): selective per-bundle Name filter.
     foreach ($entry in $byBundle.Values) {
@@ -314,10 +329,11 @@ function Update-Package {
             $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
         }
         Write-UpdateStatus "Update-Package: dispatching $($entry.Names -join ', ') via $($entry.Bundle)..."
-        Invoke-PackageUpdate -Packages $pkgObjects -Bundle $entry.Bundle `
+        $out = Invoke-PackageUpdate -Packages $pkgObjects -Bundle $entry.Bundle `
             -Name @($entry.Names) -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
             -PackageTimeoutMinutes $PackageTimeoutMinutes `
             -ErrorAction Continue -ErrorVariable +pkgErrors
+        if ($out) { $results.AddRange(@($out)) }
     }
 
     # Dispatch (b): full-bundle update.
@@ -327,10 +343,11 @@ function Update-Package {
             $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
         }
         Write-UpdateStatus "Update-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
-        Invoke-PackageUpdate -Packages $pkgObjects -Bundle $b.Bundle `
+        $out = Invoke-PackageUpdate -Packages $pkgObjects -Bundle $b.Bundle `
             -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
             -PackageTimeoutMinutes $PackageTimeoutMinutes `
             -ErrorAction Continue -ErrorVariable +pkgErrors
+        if ($out) { $results.AddRange(@($out)) }
     }
 
     # Dispatch (c): bare manifests — no declarative [Package] metadata,
@@ -345,4 +362,9 @@ function Update-Package {
     if ($pkgErrors.Count -gt 0) {
         Write-Warning "Update-Package: $($pkgErrors.Count) package update(s) failed; the sweep continued past each failure. See errors above for details."
     }
+
+    # Emit the [Package] result objects only on request. By default they are
+    # withheld so the summary table is the sole rendered view (avoids a
+    # duplicate default-formatted object table beneath it). See #276.
+    if ($PassThru) { $results }
 }
