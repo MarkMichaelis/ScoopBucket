@@ -249,9 +249,10 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
         )
         $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
         $r.Count | Should -Be 3
-        # Success stream emits [Package] instances on Installed.
+        # Success stream emits one PackageResult per package.
         ($r | ForEach-Object Name) -join ',' | Should -Be 'A,B,C'
-        $r[0] | Should -BeOfType ([Package])
+        $r[0] | Should -BeOfType ([PackageResult])
+        ($r | ForEach-Object Operation | Select-Object -Unique) | Should -Be 'Install'
         # Verify each engine got called exactly once.
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Install-WingetPackage -Times 1 -Exactly
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Install-ChocoPackage  -Times 1 -Exactly
@@ -283,15 +284,19 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
             [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'
                         PostInstallScript = { throw 'boom' } }
         )
-        # Failures go to the error stream as ErrorRecords; capture via
-        # -ErrorVariable to inspect FullyQualifiedErrorId / TargetObject.
+        # The package emits a Failed PackageResult on the success stream
+        # AND a structured ErrorRecord on the error stream. Capture both.
         # NOTE: PowerShell's own throw-propagation also pushes the raw
         # inner RuntimeException ('boom') onto -ErrorVariable in addition
         # to our wrapper. Filter to our contract: exactly one
         # PackageInstallFailed record per failed package.
         $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion `
             -ErrorAction SilentlyContinue -ErrorVariable errs
-        $r | Should -BeNullOrEmpty
+        $r.Count       | Should -Be 1
+        $r[0].Status   | Should -Be 'Failed'
+        $r[0].Name     | Should -Be 'A'
+        $r[0].Reason   | Should -Match 'PostInstallScript threw'
+        $r[0].Error    | Should -Not -BeNullOrEmpty
         $ours = @($errs | Where-Object { $_.FullyQualifiedErrorId -like 'PackageInstallFailed*' })
         $ours.Count | Should -Be 1
         $ours[0].Exception.Message | Should -Match 'boom'
@@ -346,9 +351,11 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
         )
         $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion `
             -ErrorAction SilentlyContinue -ErrorVariable errs
-        # Success stream: only the Good package.
-        $r.Count | Should -Be 1
-        $r[0].Name | Should -Be 'Good'
+        # Success stream: both packages emit a PackageResult; the failed
+        # one carries Status='Failed', the other Status='Installed'.
+        $r.Count | Should -Be 2
+        ($r | Where-Object Name -eq 'Good').Status | Should -Be 'Installed'
+        ($r | Where-Object Name -eq 'Bad').Status  | Should -Be 'Failed'
         # Error stream: one ErrorRecord for the Bad package.
         $errs.Count | Should -Be 1
         $errs[0].FullyQualifiedErrorId | Should -Match '^PackageInstallFailed'

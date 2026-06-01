@@ -24,7 +24,7 @@ function Invoke-PackageUpdate {
              completion definitions).
 
         Output streams:
-          - success stream: one PackageUpdateResult per package (Updated /
+          - success stream: one PackageResult per package (Updated /
             AlreadyLatest / NotInstalled / Skipped / Failed / SelfManaged /
             NoAutoUpdateSupport). A format.ps1xml view renders Status as a
             colored glyph for display; the property stays a plain string.
@@ -33,7 +33,7 @@ function Invoke-PackageUpdate {
             -ErrorVariable / $? / -ErrorAction Stop keep working.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
-    [OutputType([PackageUpdateResult])]
+    [OutputType([PackageResult])]
     param(
         [Parameter(Mandatory)][object[]]$Packages,
         [Parameter(Mandatory)][string]$Bundle,
@@ -73,7 +73,7 @@ function Invoke-PackageUpdate {
     $idx    = 0
     $isCi   = [bool]$env:CI
 
-    # Record a per-package outcome. Emission of the PackageUpdateResult
+    # Record a per-package outcome. Emission of the PackageResult
     # objects is deferred until after the run so interactive (uncaptured)
     # runs render a single table instead of one header-per-row mini-table
     # interleaved with each engine's live progress output. Pipeline
@@ -251,12 +251,13 @@ function Invoke-PackageUpdate {
     # two don't fight over the host's rendering.
     Write-UpdateStatus -Completed
 
-    # Emit one PackageUpdateResult per package on the success stream. The
+    # Emit one PackageResult per package on the success stream. The
     # format.ps1xml view renders Status as a colored glyph for interactive
     # display; piped/exported consumers see the plain Status string and the
     # structured .Error ErrorRecord on failures.
     foreach ($s in $states) {
-        [PackageUpdateResult]@{
+        [PackageResult]@{
+            Operation = 'Update'
             Status    = $s.State
             Name      = $s.Pkg.Name
             Installer = $s.Pkg.Installer

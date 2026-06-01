@@ -198,7 +198,7 @@ Describe 'Invoke-PackageUninstall pipeline' -Tag 'Light','Module' {
         )
         $r = Invoke-PackageUninstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
         $r.Count | Should -Be 3
-        ($r | ForEach-Object State) -join ',' | Should -Be 'Uninstalled,Uninstalled,Uninstalled'
+        ($r | ForEach-Object Status) -join ',' | Should -Be 'Uninstalled,Uninstalled,Uninstalled'
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Uninstall-WingetPackage -Times 1 -Exactly
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Uninstall-ChocoPackage  -Times 1 -Exactly
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Uninstall-ScoopPackage  -Times 1 -Exactly
@@ -210,7 +210,7 @@ Describe 'Invoke-PackageUninstall pipeline' -Tag 'Light','Module' {
         }
         $pkgs = [Package[]]@([Package]@{ Name='A'; Installer='winget'; Id='Foo.A' })
         $r = Invoke-PackageUninstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
-        $r[0].State  | Should -Be 'NotInstalled'
+        $r[0].Status | Should -Be 'NotInstalled'
         $r[0].Reason | Should -Match 'probe said no'
     }
 
@@ -225,7 +225,7 @@ Describe 'Invoke-PackageUninstall pipeline' -Tag 'Light','Module' {
         )
         $r = Invoke-PackageUninstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
         $script:customRan | Should -BeTrue
-        $r[0].State | Should -Be 'Uninstalled'
+        $r[0].Status | Should -Be 'Uninstalled'
     }
 
     It 'records Skipped when Installer=custom has no CustomUninstallScript' {
@@ -236,14 +236,14 @@ Describe 'Invoke-PackageUninstall pipeline' -Tag 'Light','Module' {
             }
         )
         $r = Invoke-PackageUninstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
-        $r[0].State  | Should -Be 'Skipped'
+        $r[0].Status | Should -Be 'Skipped'
         $r[0].Reason | Should -Match 'no CustomUninstallScript'
     }
 
     It 'honors -DryRun: engines receive -WhatIf and presence probe is skipped' {
         $pkgs = [Package[]]@([Package]@{ Name='A'; Installer='winget'; Id='Foo.A' })
         $r = Invoke-PackageUninstall -Packages $pkgs -Bundle 'Test' -SkipCompletion -DryRun
-        $r[0].State | Should -Be 'Uninstalled'
+        $r[0].Status | Should -Be 'Uninstalled'
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Uninstall-WingetPackage -Times 1 -Exactly -ParameterFilter { $WhatIf -eq $true }
     }
 
@@ -280,19 +280,21 @@ Describe 'Invoke-PackageUninstall pipeline' -Tag 'Light','Module' {
                 [Package]@{ Name='Other';      Installer='winget'; Id='Foo.X' }
             )
             $r = Invoke-PackageUninstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
-            ($r | Where-Object Name -eq 'Pushbullet').State | Should -Be 'Skipped'
-            ($r | Where-Object Name -eq 'Other').State      | Should -Be 'Uninstalled'
+            ($r | Where-Object Name -eq 'Pushbullet').Status | Should -Be 'Skipped'
+            ($r | Where-Object Name -eq 'Other').Status      | Should -Be 'Uninstalled'
         } finally {
             if ($null -eq $oldCi) { Remove-Item Env:\CI -ErrorAction Ignore }
             else { $env:CI = $oldCi }
         }
     }
 
-    It 'stores the result on $global:LASTUNINSTALLREPORT' {
+    It 'emits PackageResult objects tagged with Operation=Uninstall' {
         $pkgs = [Package[]]@([Package]@{ Name='A'; Installer='winget'; Id='Foo.A' })
-        $null = Invoke-PackageUninstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
-        $global:LASTUNINSTALLREPORT | Should -Not -BeNullOrEmpty
-        $global:LASTUNINSTALLREPORT[0].Bundle | Should -Be 'Test'
+        $r = Invoke-PackageUninstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
+        $r | Should -Not -BeNullOrEmpty
+        $r[0] | Should -BeOfType ([PackageResult])
+        $r[0].Operation | Should -Be 'Uninstall'
+        $r[0].Bundle    | Should -Be 'Test'
     }
 }
 
@@ -385,15 +387,15 @@ Invoke-PackageInstall -Packages `$Packages -Bundle 'UninstTestBundle'
     }
 
     It 'dispatches a single package by Name (DryRun plans without invoking engines)' {
-        $output = Uninstall-Package -Name 'alpha' -DryRun -SkipCompletion -BucketPath $script:tmpBucket *>&1 | Out-String
+        $output = Uninstall-Package -Name 'alpha' -DryRun -SkipCompletion -BucketPath $script:tmpBucket -Verbose *>&1 | Out-String
         $output | Should -Match "dispatching alpha via UninstTestBundle"
-        $output | Should -Match "=== Invoke-PackageUninstall: UninstTestBundle \(1 packages\) ==="
+        $output | Should -Match "Invoke-PackageUninstall: UninstTestBundle \(1 packages\)"
         $output | Should -Match "\[uninstall\] \[winget\] alpha"
         $output | Should -Not -Match "\[uninstall\] \[winget\] bravo"
     }
 
     It 'dispatches every package when given the bundle name' {
-        $output = Uninstall-Package -Name 'UninstTestBundle' -DryRun -SkipCompletion -BucketPath $script:tmpBucket *>&1 | Out-String
+        $output = Uninstall-Package -Name 'UninstTestBundle' -DryRun -SkipCompletion -BucketPath $script:tmpBucket -Verbose *>&1 | Out-String
         $output | Should -Match "dispatching bundle 'UninstTestBundle' \(all packages\)"
         $output | Should -Match "\[uninstall\] \[winget\] alpha"
         $output | Should -Match "\[uninstall\] \[winget\] bravo"
@@ -455,7 +457,7 @@ Invoke-PackageInstall -Packages `$Packages -Bundle 'CompTestBundle'
     }
 
     It 'uninstalling the owner cascades to its Companions (CLI removed before owner)' {
-        $output = Uninstall-Package -Name 'Owner' -DryRun -SkipCompletion -BucketPath $script:tmpBucket2 *>&1 | Out-String
+        $output = Uninstall-Package -Name 'Owner' -DryRun -SkipCompletion -BucketPath $script:tmpBucket2 -Verbose *>&1 | Out-String
         # Both must appear in the plan
         $output | Should -Match '\[uninstall\] \[winget\] Owner \(Test\.Owner\)'
         $output | Should -Match '\[uninstall\] \[winget\] OwnerCli \(Test\.OwnerCli\)'
@@ -469,7 +471,7 @@ Invoke-PackageInstall -Packages `$Packages -Bundle 'CompTestBundle'
     }
 
     It 'uninstalling the CLI directly does NOT pull in the owner (cascade is owner -> companion only)' {
-        $output = Uninstall-Package -Name 'OwnerCli' -DryRun -SkipCompletion -BucketPath $script:tmpBucket2 *>&1 | Out-String
+        $output = Uninstall-Package -Name 'OwnerCli' -DryRun -SkipCompletion -BucketPath $script:tmpBucket2 -Verbose *>&1 | Out-String
         $output | Should -Match '\[uninstall\] \[winget\] OwnerCli \(Test\.OwnerCli\)'
         $output | Should -Not -Match '\[uninstall\] \[winget\] Owner \(Test\.Owner\)'
     }

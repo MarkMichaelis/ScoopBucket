@@ -45,6 +45,7 @@ function Install-Package {
         Install-Package -Name 'BitwardenCli' -DryRun
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    [OutputType([PackageResult])]
     param(
         [Parameter(Mandatory, Position = 0)][string[]]$Name,
         [switch]$DryRun,
@@ -136,26 +137,38 @@ function Install-Package {
         throw "Install-Package: no bundle declares a package named '$needed' and no '$needed.json' manifest was found in the bucket."
     }
 
+    # Track per-bundle errors across both dispatch loops so the sweep
+    # cannot be aborted by a caller that runs with $ErrorActionPreference='Stop'
+    # (which would otherwise upgrade Invoke-PackageInstall's non-terminating
+    # WriteError into a terminating error at the call site). Mirrors the
+    # resilient sweep Update-Package uses (#272).
+    $pkgErrors = [System.Collections.Generic.List[object]]::new()
+
     # --- Dispatch (a): Package.Name flow with -Name filter -----------------
+    # In-process: reconstruct real [Package] objects from the bundle and call
+    # the driver directly (same model Update-Package uses), so results flow
+    # back as live PackageResult objects rendered once by the format view.
     foreach ($entry in $byBundle.Values) {
-        Invoke-BundleScript -BundlePath $entry.BundlePath -Bundle $entry.Bundle `
-            -Names $entry.Names -DryRun:$DryRun -SkipCompletion:$SkipCompletion
+        $pkgObjects = @(Get-BundlePackageObjects -BundlePath $entry.BundlePath)
+        Invoke-PackageInstall -Packages $pkgObjects -Bundle $entry.Bundle `
+            -Name @($entry.Names) -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
+            -ErrorAction Continue -ErrorVariable +pkgErrors
     }
 
     # --- Dispatch (b): full-bundle install (no -Name filter) ---------------
     foreach ($b in $fullBundles) {
-        Write-Host ""
-        Write-Host "Install-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
-        Invoke-BundleScript -BundlePath $b.BundlePath -Bundle $b.Bundle `
-            -DryRun:$DryRun -SkipCompletion:$SkipCompletion
+        Write-UpdateStatus -Activity 'Install-Package' "Install-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
+        $pkgObjects = @(Get-BundlePackageObjects -BundlePath $b.BundlePath)
+        Invoke-PackageInstall -Packages $pkgObjects -Bundle $b.Bundle `
+            -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
+            -ErrorAction Continue -ErrorVariable +pkgErrors
     }
 
     # --- Dispatch (c): scoop install fallback for bare manifests -----------
     foreach ($n in $manifestNames) {
-        Write-Host ""
-        Write-Host "Install-Package: dispatching manifest '$n' via scoop install (no declarative [Package] match)..."
+        Write-UpdateStatus -Activity 'Install-Package' "Install-Package: dispatching manifest '$n' via scoop install (no declarative [Package] match)..."
         if ($DryRun) {
-            Write-Host "  [DryRun] scoop install $n"
+            Write-UpdateStatus -Activity 'Install-Package' "  [DryRun] scoop install $n"
             continue
         }
         # Delegate to scoop. We pass the bare name (assumes the
