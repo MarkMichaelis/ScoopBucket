@@ -14,18 +14,21 @@ function Update-AllChocoPackages {
     $upgradeArgs = @('upgrade', 'all', '-y', '--no-progress')
 
     if ($WhatIf) {
-        Write-Host "  [WhatIf] choco $($upgradeArgs -join ' ')"
+        Write-UpdateStatus "  [WhatIf] choco $($upgradeArgs -join ' ')"
         return @{ State = 'Updated'; Reason = '(WhatIf)'; Engine = 'choco' }
     }
 
-    Write-Host "  choco $($upgradeArgs -join ' ')"
-    & choco @upgradeArgs
+    Write-UpdateStatus "Sweeping choco (choco upgrade all)..."
+    Write-Verbose "  choco $($upgradeArgs -join ' ')"
+    $out = & choco @upgradeArgs *>&1
     $exit = $LASTEXITCODE
+    $joined = ($out | ForEach-Object { $_.ToString() }) -join "`n"
+    if ($joined) { Write-Verbose $joined }
     # Treat reboot-required exits as Updated (same convention as
     # Update-ChocoPackage); only true failures map to Failed.
     if ($exit -eq 0 -or $exit -in @(1641, 3010)) {
         $reason = if ($exit -ne 0) { "Reboot pending (choco exit $exit)." } else { $null }
         return @{ State = 'Updated'; Reason = $reason; Engine = 'choco' }
     }
-    return @{ State = 'Failed'; Reason = "choco upgrade all exited with $exit."; Engine = 'choco' }
+    return @{ State = 'Failed'; Reason = "choco upgrade all exited with $exit.$(Get-CapturedOutputTail $joined)"; Engine = 'choco' }
 }

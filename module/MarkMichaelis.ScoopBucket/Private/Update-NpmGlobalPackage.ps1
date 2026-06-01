@@ -42,15 +42,18 @@ function Update-NpmGlobalPackage {
     $installArgs = @('install', '--global', "$id@latest")
 
     if ($WhatIf) {
-        Write-Host "  [WhatIf] npm $($installArgs -join ' ')"
+        Write-UpdateStatus "  [WhatIf] npm $($installArgs -join ' ')"
         return @{ State = 'Updated'; Reason = '(WhatIf)' }
     }
 
-    Write-Host "  npm $($installArgs -join ' ')"
-    & npm.cmd @installArgs
+    Write-UpdateStatus "Updating $($Package.Name) (npm $id)..."
+    Write-Verbose "  npm $($installArgs -join ' ')"
+    $out = & npm.cmd @installArgs *>&1
     $exit = $LASTEXITCODE
+    $joined = ($out | ForEach-Object { $_.ToString() }) -join "`n"
+    if ($joined) { Write-Verbose $joined }
     if ($exit -eq 0) {
         return @{ State = 'Updated'; Reason = $null }
     }
-    return @{ State = 'Failed'; Reason = "npm install --global $id@latest exited with $exit." }
+    return @{ State = 'Failed'; Reason = "npm install --global $id@latest exited with $exit.$(Get-CapturedOutputTail $joined)" }
 }

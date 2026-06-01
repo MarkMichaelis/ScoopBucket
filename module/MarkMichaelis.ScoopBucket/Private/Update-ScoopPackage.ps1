@@ -34,11 +34,12 @@ function Update-ScoopPackage {
     $updateArgs = @('update', $appName)
 
     if ($WhatIf) {
-        Write-Host "  [WhatIf] scoop $($updateArgs -join ' ')"
+        Write-UpdateStatus "  [WhatIf] scoop $($updateArgs -join ' ')"
         return @{ State = 'Updated'; Reason = '(WhatIf)' }
     }
 
-    Write-Host "  scoop $($updateArgs -join ' ')"
+    Write-UpdateStatus "Updating $($Package.Name) (scoop $appName)..."
+    Write-Verbose "  scoop $($updateArgs -join ' ')"
     # Capture all streams (stdout 1, stderr 2, information 6). Scoop's
     # internal scoop.ps1 writes its per-app status via Write-Host which
     # in PS7 lands on the Information stream, not stdout — without `6>&1`
@@ -47,9 +48,9 @@ function Update-ScoopPackage {
     $out = & scoop @updateArgs *>&1
     $exit = $LASTEXITCODE
     $joined = ($out | ForEach-Object { $_.ToString() }) -join "`n"
-    # Surface scoop's own output for visibility (it prints per-app status
-    # lines like "'jq' is already installed.").
-    if ($joined) { Write-Host $joined }
+    # Mirror scoop's own output to the verbose stream only (hidden by default,
+    # revealed by -Verbose) instead of the host — see #276.
+    if ($joined) { Write-Verbose $joined }
     if ($exit -eq 0) {
         # Scoop returns 0 even when the app is already at the latest
         # version; the only signal that distinguishes "did work" from
@@ -60,5 +61,5 @@ function Update-ScoopPackage {
         }
         return @{ State = 'Updated'; Reason = $null }
     }
-    return @{ State = 'Failed'; Reason = "scoop update $appName exited with $exit." }
+    return @{ State = 'Failed'; Reason = "scoop update $appName exited with $exit.$(Get-CapturedOutputTail $joined)" }
 }

@@ -14,15 +14,18 @@ function Update-AllNpmGlobalPackages {
     $updateArgs = @('update', '-g')
 
     if ($WhatIf) {
-        Write-Host "  [WhatIf] npm $($updateArgs -join ' ')"
+        Write-UpdateStatus "  [WhatIf] npm $($updateArgs -join ' ')"
         return @{ State = 'Updated'; Reason = '(WhatIf)'; Engine = 'npmGlobal' }
     }
 
-    Write-Host "  npm $($updateArgs -join ' ')"
-    & npm.cmd @updateArgs
+    Write-UpdateStatus "Sweeping npmGlobal (npm update -g)..."
+    Write-Verbose "  npm $($updateArgs -join ' ')"
+    $out = & npm.cmd @updateArgs *>&1
     $exit = $LASTEXITCODE
+    $joined = ($out | ForEach-Object { $_.ToString() }) -join "`n"
+    if ($joined) { Write-Verbose $joined }
     if ($exit -eq 0) {
         return @{ State = 'Updated'; Reason = $null; Engine = 'npmGlobal' }
     }
-    return @{ State = 'Failed'; Reason = "npm update -g exited with $exit."; Engine = 'npmGlobal' }
+    return @{ State = 'Failed'; Reason = "npm update -g exited with $exit.$(Get-CapturedOutputTail $joined)"; Engine = 'npmGlobal' }
 }

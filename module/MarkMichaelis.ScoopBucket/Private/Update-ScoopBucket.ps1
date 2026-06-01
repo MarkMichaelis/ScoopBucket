@@ -25,19 +25,20 @@ function Update-ScoopBucket {
     }
 
     if ($WhatIf) {
-        Write-Host '  [WhatIf] scoop update (refresh bucket clones)'
+        Write-UpdateStatus '  [WhatIf] scoop update (refresh bucket clones)'
         return @{ State = 'Refreshed'; Reason = '(WhatIf)' }
     }
 
-    Write-Host '  scoop update (refresh bucket clones)'
+    Write-UpdateStatus 'Refreshing scoop bucket clones (scoop update)...'
+    Write-Verbose '  scoop update (refresh bucket clones)'
     # Capture all streams (scoop writes progress via Write-Host which
     # in PS7 lands on the Information stream, not stdout).
     $out = & scoop update *>&1
     $exit = $LASTEXITCODE
     $joined = ($out | ForEach-Object { $_.ToString() }) -join "`n"
-    if ($joined) { Write-Host $joined }
+    if ($joined) { Write-Verbose $joined }
     if ($exit -ne 0) {
-        return @{ State = 'Failed'; Reason = "scoop update exited with $exit." }
+        return @{ State = 'Failed'; Reason = "scoop update exited with $exit.$(Get-CapturedOutputTail $joined)" }
     }
     return @{ State = 'Refreshed'; Reason = $null }
 }

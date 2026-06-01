@@ -543,6 +543,140 @@ Describe 'Invoke-PackageUpdate standardized summary table (#274)' -Tag 'Light','
     }
 }
 
+Describe 'Quiet-by-default update output (#276)' -Tag 'Light','Module' {
+
+    It 'emits no Write-Host chatter other than the summary table by default' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }
+            Mock Update-PathFromRegistry { }
+            Mock Register-PackageCompletion { }
+            $captured = New-Object System.Collections.Generic.List[object]
+            Mock Write-Host -MockWith {
+                $captured.Add([pscustomobject]@{ Message = [string]$Object })
+            }
+
+            $pkgs = [Package[]]@(
+                [Package]@{ Name='Claude Desktop'; Installer='winget'; Id='Anthropic.Claude'; Scope='user' }
+            )
+            $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion
+
+            $lines = @($captured | ForEach-Object { [string]$_.Message })
+
+            # The summary table header is still printed on the host.
+            ($lines | Where-Object { $_ -match 'Status' -and $_ -match 'Installer' }) |
+                Should -Not -BeNullOrEmpty
+
+            # None of the transient chatter (section header, per-package
+            # progress line) may reach the host stream.
+            ($lines | Where-Object { $_ -match 'Invoke-PackageUpdate:' }) | Should -BeNullOrEmpty
+            ($lines | Where-Object { $_ -match 'Updating Claude Desktop' }) | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'reports the current package as a transient Write-Progress status' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }
+            Mock Update-PathFromRegistry { }
+            Mock Register-PackageCompletion { }
+            Mock Write-Host { }
+            $statuses = New-Object System.Collections.Generic.List[object]
+            Mock Write-Progress -MockWith {
+                if ($Status) { $statuses.Add([string]$Status) }
+            }
+
+            $pkgs = [Package[]]@(
+                [Package]@{ Name='Claude Desktop'; Installer='winget'; Id='Anthropic.Claude'; Scope='user' }
+            )
+            $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion
+
+            ($statuses | Where-Object { $_ -match 'Updating Claude Desktop' -and $_ -match 'winget' }) |
+                Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'reveals the chatter on the verbose stream when -Verbose is passed' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }
+            Mock Update-PathFromRegistry { }
+            Mock Register-PackageCompletion { }
+            Mock Write-Host { }
+            Mock Write-Progress { }
+
+            $pkgs = [Package[]]@(
+                [Package]@{ Name='Claude Desktop'; Installer='winget'; Id='Anthropic.Claude'; Scope='user' }
+            )
+            $verbose = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion -Verbose 4>&1 |
+                Where-Object { $_ -is [System.Management.Automation.VerboseRecord] } |
+                ForEach-Object { [string]$_.Message }
+
+            ($verbose | Where-Object { $_ -match 'Updating Claude Desktop' }) |
+                Should -Not -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Get-CapturedOutputTail (#276)' -Tag 'Light','Module' {
+
+    It 'returns empty string for empty or whitespace input' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            Get-CapturedOutputTail ''          | Should -BeExactly ''
+            Get-CapturedOutputTail "  `n  `n " | Should -BeExactly ''
+        }
+    }
+
+    It 'folds a tail of captured output into a single line for the failure Reason' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            $captured = "line1`nline2`nline3`nERROR: boom"
+            $tail = Get-CapturedOutputTail $captured
+
+            $tail | Should -Match 'Last output:'
+            $tail | Should -Match 'ERROR: boom'
+            # Folded to a single line (no embedded newlines).
+            $tail | Should -Not -Match "`n"
+        }
+    }
+}
+
+Describe 'Update engines hide installer output by default (#276)' -Tag 'Light','Module' {
+
+    It 'Update-ScoopPackage routes scoop output to verbose, not the host' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            Mock Get-Command { $true } -ParameterFilter { $Name -eq 'scoop' }
+            function scoop {
+                if ($args -contains 'list') { 'ripgrep 14.0.0'; $global:LASTEXITCODE = 0; return }
+                'ripgrep: 14.0.0 (latest version)'; $global:LASTEXITCODE = 0
+            }
+            Mock Write-Host { }
+            Mock Write-Progress { }
+
+            $pkg = [Package]@{ Name='ripgrep'; Installer='scoop'; Id='main/ripgrep'; Scope='global' }
+            $r = Update-ScoopPackage -Package $pkg
+
+            $r.State | Should -Be 'AlreadyLatest'
+            # The raw scoop output must not have been echoed to the host.
+            Should -Invoke Write-Host -Times 0 -ParameterFilter { $Object -match 'latest version' }
+        }
+    }
+
+    It 'Update-ScoopPackage folds failing scoop output into the Reason' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            Mock Get-Command { $true } -ParameterFilter { $Name -eq 'scoop' }
+            function scoop {
+                if ($args -contains 'list') { 'ripgrep 14.0.0'; $global:LASTEXITCODE = 0; return }
+                'Could not download manifest'; $global:LASTEXITCODE = 1
+            }
+            Mock Write-Host { }
+            Mock Write-Progress { }
+
+            $pkg = [Package]@{ Name='ripgrep'; Installer='scoop'; Id='main/ripgrep'; Scope='global' }
+            $r = Update-ScoopPackage -Package $pkg
+
+            $r.State  | Should -Be 'Failed'
+            $r.Reason | Should -Match 'Could not download manifest'
+        }
+    }
+}
+
 Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
 
     BeforeEach {

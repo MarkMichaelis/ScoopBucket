@@ -31,17 +31,19 @@ function Update-DotnetToolPackage {
     $updateArgs = @('tool', 'update', '-g', $id)
 
     if ($WhatIf) {
-        Write-Host "  [WhatIf] dotnet $($updateArgs -join ' ')"
+        Write-UpdateStatus "  [WhatIf] dotnet $($updateArgs -join ' ')"
         return @{ State = 'Updated'; Reason = '(WhatIf)' }
     }
 
-    Write-Host "  dotnet $($updateArgs -join ' ')"
+    Write-UpdateStatus "Updating $($Package.Name) (dotnet $id)..."
+    Write-Verbose "  dotnet $($updateArgs -join ' ')"
     $out = & dotnet @updateArgs 2>&1
     $exit = $LASTEXITCODE
     # Wrap in @(...) so a single-string $out stays an array of one for
     # the -join below (defensive — dotnet typically emits multiple
     # lines, but a one-line success/error path is possible).
     $joined = (@($out) -join "`n")
+    if ($joined) { Write-Verbose $joined }
     if ($exit -eq 0) {
         # `dotnet tool update` returns 0 + a message like
         # "Tool 'xyz' was reinstalled with the latest stable version

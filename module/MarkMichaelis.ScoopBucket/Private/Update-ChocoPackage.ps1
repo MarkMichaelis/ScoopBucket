@@ -34,13 +34,16 @@ function Update-ChocoPackage {
     $upgradeArgs = @('upgrade', $id, '-y', '--no-progress')
 
     if ($WhatIf) {
-        Write-Host "  [WhatIf] choco $($upgradeArgs -join ' ')"
+        Write-UpdateStatus "  [WhatIf] choco $($upgradeArgs -join ' ')"
         return @{ State = 'Updated'; Reason = '(WhatIf)' }
     }
 
-    Write-Host "  choco $($upgradeArgs -join ' ')"
-    & choco @upgradeArgs
+    Write-UpdateStatus "Updating $($Package.Name) (choco $id)..."
+    Write-Verbose "  choco $($upgradeArgs -join ' ')"
+    $out = & choco @upgradeArgs *>&1
     $exit = $LASTEXITCODE
+    $joined = ($out | ForEach-Object { $_.ToString() }) -join "`n"
+    if ($joined) { Write-Verbose $joined }
     if ($exit -eq 0) {
         return @{ State = 'Updated'; Reason = $null }
     }
@@ -53,5 +56,5 @@ function Update-ChocoPackage {
     if ($exit -eq 1605) {
         return @{ State = 'NotInstalled'; Reason = 'choco reports package not installed (exit 1605).' }
     }
-    return @{ State = 'Failed'; Reason = "choco upgrade $id exited with $exit." }
+    return @{ State = 'Failed'; Reason = "choco upgrade $id exited with $exit.$(Get-CapturedOutputTail $joined)" }
 }
