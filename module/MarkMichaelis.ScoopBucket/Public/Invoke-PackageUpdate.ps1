@@ -52,15 +52,14 @@ function Invoke-PackageUpdate {
     # key off -WhatIf, so thread this boolean through dispatch.
     $isWhatIf = [bool]$WhatIfPreference
 
-    foreach ($pkg in $Packages) {
-        if ($null -eq $pkg) {
-            throw "Invoke-PackageUpdate: Packages array contains a null entry."
-        }
-        if ($pkg.GetType().Name -ne 'Package') {
-            throw "Invoke-PackageUpdate: every element must be a [Package]; got [$($pkg.GetType().FullName)]."
-        }
-        $pkg.Validate()
-    }
+    # NOTE: cross-field validation is deliberately NOT done in a pre-loop
+    # here. A single malformed declaration must fail only THAT package (as
+    # a Failed result row) and let the rest of the sweep continue -- see
+    # the per-package Get-PackageValidationError check inside the loop
+    # below. A pre-loop throw would abort the whole bundle (and, under a
+    # caller's $ErrorActionPreference='Stop', the whole `Update-Package *`
+    # sweep). Resolve-PackageOrder only reads Name/DependsOn, so it is safe
+    # to order before validating.
 
     $sortArgs = @{ Packages = $Packages }
     if ($Name) { $sortArgs['Name'] = $Name }
@@ -103,6 +102,16 @@ function Invoke-PackageUpdate {
         $reason = $null
         $idx++
         $pct = if ($total -gt 0) { [int](($idx - 1) / $total * 100) } else { 0 }
+
+        # Validate cross-field invariants per package. A malformed
+        # declaration (e.g. a custom package whose CustomInstallScript was
+        # stripped by the metadata round-trip) becomes a single Failed row
+        # and the sweep continues to the next package.
+        $declErr = Get-PackageValidationError $pkg
+        if ($declErr) {
+            & $failPackage $pkg "Invalid package declaration: $declErr"
+            continue
+        }
 
         if ($pkg.CISkip -and $isCi) {
             $state  = 'Skipped'

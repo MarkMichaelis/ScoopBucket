@@ -526,6 +526,41 @@ Describe 'Invoke-PackageUpdate emits PackageUpdateResult objects (#274, #276)' -
                 Should -Not -BeNullOrEmpty
         }
     }
+    It 'fails one invalid package but continues updating the rest of the batch (#280)' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            Mock Update-ChocoPackage     { return @{ State='Updated'; Reason=$null } }
+            Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }
+            Mock Update-PathFromRegistry { }
+
+            # Middle package is malformed: Installer='custom' but its
+            # CustomInstallScript was stripped (the metadata round-trip case
+            # that previously aborted the whole sweep with a terminating throw).
+            $bad = [Package]::new()
+            $bad.Name = 'Readwise Reader'; $bad.Installer = 'custom'; $bad.UpdateMode = 'Reinstall'
+            $pkgs = @(
+                [Package]@{ Name='nodejs'; Installer='choco';  Id='nodejs' }
+                $bad
+                [Package]@{ Name='Warp';   Installer='winget'; Id='Warp.Warp'; Scope='user' }
+            )
+
+            $result = @(Invoke-PackageUpdate -Packages $pkgs -Bundle 'ClientBasePackages' -SkipCompletion `
+                -ErrorAction SilentlyContinue -ErrorVariable ev)
+
+            # All three packages produce a row -- the bad one did not abort the sweep.
+            $result.Count | Should -Be 3
+            ($result | Where-Object Name -eq 'nodejs').Status | Should -Be 'Updated'
+            ($result | Where-Object Name -eq 'Warp').Status   | Should -Be 'Updated'
+
+            $failed = $result | Where-Object Name -eq 'Readwise Reader'
+            $failed.Status | Should -Be 'Failed'
+            $failed.Reason | Should -Match 'Invalid package declaration'
+            $failed.Reason | Should -Match 'CustomInstallScript is required'
+            $failed.Error  | Should -Not -BeNullOrEmpty
+
+            ($ev | Where-Object { $_.FullyQualifiedErrorId -like 'PackageUpdateFailed*' }).Count |
+                Should -Be 1
+        }
+    }
 }
 
 Describe 'Quiet-by-default update output (#276)' -Tag 'Light','Module' {

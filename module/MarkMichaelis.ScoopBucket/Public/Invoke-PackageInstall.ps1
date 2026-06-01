@@ -86,15 +86,12 @@ function Invoke-PackageInstall {
         [switch]$SkipCompletion
     )
 
-    foreach ($pkg in $Packages) {
-        if ($null -eq $pkg) {
-            throw "Invoke-PackageInstall: Packages array contains a null entry."
-        }
-        if ($pkg.GetType().Name -ne 'Package') {
-            throw "Invoke-PackageInstall: every element must be a [Package]; got [$($pkg.GetType().FullName)]."
-        }
-        $pkg.Validate()
-    }
+    # Cross-field validation is intentionally NOT done in a pre-loop. A
+    # single malformed declaration must fail only THAT package (as a Failed
+    # row) and let the remaining installs proceed -- mirror of
+    # Invoke-PackageUpdate. See the per-package Get-PackageValidationError
+    # check inside the loop below. Resolve-PackageOrder only reads
+    # Name/DependsOn, so ordering before validating is safe.
 
     $sortArgs = @{ Packages = $Packages }
     if ($Name) { $sortArgs['Name'] = $Name }
@@ -116,6 +113,22 @@ function Invoke-PackageInstall {
     foreach ($pkg in $ordered) {
         $state  = 'Pending'
         $reason = $null
+
+        # Validate per package so a malformed declaration fails just this
+        # one install and the batch continues (parity with the update path).
+        $declErr = Get-PackageValidationError $pkg
+        if ($declErr) {
+            $reason = "Invalid package declaration: $declErr"
+            $pkgName = if ($null -ne $pkg -and $pkg.PSObject.Properties.Name -contains 'Name') { $pkg.Name } else { '<unknown>' }
+            $states.Add([pscustomobject]@{ Pkg = $pkg; State = 'Failed'; Reason = $reason })
+            $PSCmdlet.WriteError(
+                [System.Management.Automation.ErrorRecord]::new(
+                    [System.Exception]::new("${pkgName}: $reason"),
+                    'PackageInstallFailed',
+                    [System.Management.Automation.ErrorCategory]::NotInstalled,
+                    $pkg))
+            continue
+        }
 
         if ($pkg.CISkip -and $isCi) {
             $state  = 'Skipped'
