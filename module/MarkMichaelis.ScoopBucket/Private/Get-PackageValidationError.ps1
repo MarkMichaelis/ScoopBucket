@@ -46,6 +46,20 @@ function Get-PackageValidationError {
         return "expected a [Package]; got [$($Package.GetType().FullName)]."
     }
 
+    # A PowerShell `class` is keyed by name within a session: once one module
+    # version's [Package] is loaded, Import-Module -Force on a newer version
+    # does NOT redefine the cached type, so an object may be a STALE [Package]
+    # that pre-dates GetValidationError(). Its type name is still 'Package'
+    # (so the guard above passes), but the method is absent. Probe for it and
+    # skip the non-throwing pre-check rather than throwing an InvalidOperation:
+    # the engine layer still surfaces any real per-package failure, and a fresh
+    # session (or a merge that updates the installed module) restores full
+    # validation. This keeps the sweep resilient under dev-time hot-reload and
+    # cross-version module coexistence.
+    if (-not $Package.PSObject.Methods['GetValidationError']) {
+        return $null
+    }
+
     # Use the NON-throwing core so probing an invalid package does not leak a
     # spurious raw-throw ErrorRecord onto the advanced-function driver's error
     # stream (see Package.GetValidationError() for the full rationale).
