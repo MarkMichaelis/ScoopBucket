@@ -60,7 +60,7 @@ Function Install-Chocolatey {
                 New-Item -ItemType File -Path $allHostsProfile -Force | Out-Null
             }
             if (-not (Select-String -Path $allHostsProfile -Pattern 'Import-Module.*chocolateyProfile\.psm1' -Quiet)) {
-                Add-Content -Path $allHostsProfile -Value 'Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"'
+                Add-Content -Path $allHostsProfile -Value 'Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1" -ErrorAction SilentlyContinue'
             }
         }
     } catch {
