@@ -54,11 +54,12 @@ function Update-WingetPackage {
     }
 
     if ($WhatIf) {
-        Write-Host "  [WhatIf] winget $($upgradeArgs -join ' ')"
+        Write-UpdateStatus "  [WhatIf] winget $($upgradeArgs -join ' ')"
         return @{ State = 'Updated'; Reason = '(WhatIf)' }
     }
 
-    Write-Host "  winget $($upgradeArgs -join ' ')"
+    Write-UpdateStatus "Updating $($Package.Name) (winget $id)..."
+    Write-Verbose "  winget $($upgradeArgs -join ' ')"
     # Per-package override: a bundle can declare UpdateTimeoutMinutes
     # on a single [Package] (e.g. Visual Studio, Office) to grant it
     # more headroom than the global default. 0 = use caller's default.
@@ -67,12 +68,18 @@ function Update-WingetPackage {
     } else {
         $TimeoutMinutes
     }
+    $captured = ''
     if ($effectiveTimeout -gt 0) {
-        $r = Invoke-WithTimeout -FilePath 'winget' -Arguments $upgradeArgs -TimeoutSeconds ($effectiveTimeout * 60)
+        # -CaptureOutput keeps winget's output off the host (it is no longer
+        # streamed live, by design -- see #276); we mirror it to Write-Verbose
+        # for `-Verbose` and fold a tail into the failure Reason instead.
+        $r = Invoke-WithTimeout -FilePath 'winget' -Arguments $upgradeArgs -TimeoutSeconds ($effectiveTimeout * 60) -CaptureOutput
         if ($r.TimedOut) {
             return @{ State = 'Failed'; Reason = "winget upgrade --id $id timed out after $effectiveTimeout minute(s) and was killed (see #269)." }
         }
         $exit = $r.ExitCode
+        $captured = [string]$r.Output
+        if ($captured) { Write-Verbose $captured }
     } else {
         & winget @upgradeArgs
         $exit = $LASTEXITCODE
@@ -87,5 +94,5 @@ function Update-WingetPackage {
     if ($exit -eq -1978335212 -or $exit -eq -1978335189) {
         return @{ State = 'AlreadyLatest'; Reason = "winget reports no applicable upgrade (exit $exit)." }
     }
-    return @{ State = 'Failed'; Reason = "winget upgrade --id $id exited with $exit." }
+    return @{ State = 'Failed'; Reason = "winget upgrade --id $id exited with $exit.$(Get-CapturedOutputTail $captured)" }
 }

@@ -313,8 +313,7 @@ function Update-Package {
             $b = $bundles | Where-Object BundlePath -eq $entry.BundlePath | Select-Object -First 1
             $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
         }
-        Write-Host ""
-        Write-Host "Update-Package: dispatching $($entry.Names -join ', ') via $($entry.Bundle)..."
+        Write-UpdateStatus "Update-Package: dispatching $($entry.Names -join ', ') via $($entry.Bundle)..."
         Invoke-PackageUpdate -Packages $pkgObjects -Bundle $entry.Bundle `
             -Name @($entry.Names) -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
             -PackageTimeoutMinutes $PackageTimeoutMinutes `
@@ -327,8 +326,7 @@ function Update-Package {
         if ($pkgObjects.Count -eq 0) {
             $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
         }
-        Write-Host ""
-        Write-Host "Update-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
+        Write-UpdateStatus "Update-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
         Invoke-PackageUpdate -Packages $pkgObjects -Bundle $b.Bundle `
             -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
             -PackageTimeoutMinutes $PackageTimeoutMinutes `

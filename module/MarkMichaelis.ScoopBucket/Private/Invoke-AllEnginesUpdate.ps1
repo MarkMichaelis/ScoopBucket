@@ -21,13 +21,11 @@ function Invoke-AllEnginesUpdate {
         @{ Name = 'dotnetTool'; Cmd = { param($w) Update-AllDotnetToolPackages -WhatIf:$w } }
     )
 
-    Write-Host ""
-    Write-Host "=== Invoke-AllEnginesUpdate: machine-wide sweep across $($engineOrder.Count) engines ==="
+    Write-UpdateStatus "Invoke-AllEnginesUpdate: machine-wide sweep across $($engineOrder.Count) engines..."
 
     $results = New-Object System.Collections.Generic.List[object]
     foreach ($engine in $engineOrder) {
-        Write-Host ""
-        Write-Host "[update-all] [$($engine.Name)]"
+        Write-UpdateStatus "Sweeping $($engine.Name) (machine-wide)..."
         try {
             $r = & $engine.Cmd $DryRun
         } catch {
@@ -37,6 +35,7 @@ function Invoke-AllEnginesUpdate {
         $results.Add($r)
     }
 
+    Write-UpdateStatus -Completed
     Write-Host ""
     Write-Host "=== Machine-wide update summary ==="
     foreach ($r in $results) {

@@ -68,10 +68,11 @@ function Invoke-PackageUpdate {
     if ($Skip) { $sortArgs['Skip'] = $Skip }
     $ordered = Resolve-PackageOrder @sortArgs
 
-    Write-Host ""
-    Write-Host "=== Invoke-PackageUpdate: $Bundle ($($ordered.Count) packages) ==="
+    Write-UpdateStatus "=== Invoke-PackageUpdate: $Bundle ($($ordered.Count) packages) ==="
 
     $states = New-Object System.Collections.Generic.List[object]
+    $total  = $ordered.Count
+    $idx    = 0
     # Success-stream emission is deferred until after the summary so that
     # interactive (uncaptured) runs render the [Package] objects as a
     # single table instead of one repeated, header-per-row mini-table
@@ -84,11 +85,13 @@ function Invoke-PackageUpdate {
     foreach ($pkg in $ordered) {
         $state  = 'Pending'
         $reason = $null
+        $idx++
+        $pct = if ($total -gt 0) { [int](($idx - 1) / $total * 100) } else { 0 }
 
         if ($pkg.CISkip -and $isCi) {
             $state  = 'Skipped'
             $reason = "CISkip: $($pkg.CISkip)"
-            Write-Host "[skip] $($pkg.Name) -- $reason"
+            Write-UpdateStatus "[skip] $($pkg.Name) -- $reason" -PercentComplete $pct
             $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
             [void]$emit.Add($pkg)
             continue
@@ -106,8 +109,7 @@ function Invoke-PackageUpdate {
             }
         }
 
-        Write-Host ""
-        Write-Host "[update] $pkg"
+        Write-UpdateStatus "Updating $($pkg.Name) ($($pkg.Installer))..." -PercentComplete $pct
 
         try {
             if ($pkg.Installer -eq 'custom' -or $pkg.CustomInstallScript) {
@@ -116,7 +118,7 @@ function Invoke-PackageUpdate {
                 if (-not $pkg.PostUpdateScript) {
                     $state  = 'Skipped'
                     $reason = 'No update path for CustomInstallScript packages (consider adding PostUpdateScript).'
-                    Write-Host "  $reason"
+                    Write-UpdateStatus "  $($pkg.Name): $reason" -PercentComplete $pct
                     $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
                     [void]$emit.Add($pkg)
                     continue
@@ -173,7 +175,7 @@ function Invoke-PackageUpdate {
 
         if ($pkg.PostUpdateScript) {
             if ($DryRun) {
-                Write-Host "  [DryRun] PostUpdateScript"
+                Write-UpdateStatus "  [DryRun] PostUpdateScript ($($pkg.Name))" -PercentComplete $pct
             } else {
                 try {
                     [void](& $pkg.PostUpdateScript $pkg 2>$null)
@@ -211,6 +213,10 @@ function Invoke-PackageUpdate {
         $states.Add([pscustomobject]@{ Pkg = $pkg; State = $state; Reason = $reason })
         [void]$emit.Add($pkg)
     }
+
+    # Tear down the transient progress line before the persistent summary
+    # table so the two don't fight over the host's rendering.
+    Write-UpdateStatus -Completed
 
     Write-Host ""
     Write-Host "=== $Bundle update summary ==="

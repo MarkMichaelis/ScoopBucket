@@ -17,15 +17,18 @@ function Update-AllWingetPackages {
     )
 
     if ($WhatIf) {
-        Write-Host "  [WhatIf] winget $($upgradeArgs -join ' ')"
+        Write-UpdateStatus "  [WhatIf] winget $($upgradeArgs -join ' ')"
         return @{ State = 'Updated'; Reason = '(WhatIf)'; Engine = 'winget' }
     }
 
-    Write-Host "  winget $($upgradeArgs -join ' ')"
-    & winget @upgradeArgs
+    Write-UpdateStatus "Sweeping winget (winget upgrade --all)..."
+    Write-Verbose "  winget $($upgradeArgs -join ' ')"
+    $out = & winget @upgradeArgs *>&1
     $exit = $LASTEXITCODE
+    $joined = ($out | ForEach-Object { $_.ToString() }) -join "`n"
+    if ($joined) { Write-Verbose $joined }
     if ($exit -eq 0) {
         return @{ State = 'Updated'; Reason = $null; Engine = 'winget' }
     }
-    return @{ State = 'Failed'; Reason = "winget upgrade --all exited with $exit."; Engine = 'winget' }
+    return @{ State = 'Failed'; Reason = "winget upgrade --all exited with $exit.$(Get-CapturedOutputTail $joined)"; Engine = 'winget' }
 }

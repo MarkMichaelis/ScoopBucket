@@ -16,15 +16,17 @@ function Update-AllDotnetToolPackages {
     }
 
     if ($WhatIf) {
-        Write-Host "  [WhatIf] dotnet tool update -g --all"
+        Write-UpdateStatus "  [WhatIf] dotnet tool update -g --all"
         return @{ State = 'Updated'; Reason = '(WhatIf)'; Engine = 'dotnetTool' }
     }
 
     # Try the modern --all flag first.
-    Write-Host "  dotnet tool update -g --all"
+    Write-UpdateStatus "Sweeping dotnetTool (dotnet tool update -g --all)..."
+    Write-Verbose "  dotnet tool update -g --all"
     $out = & dotnet tool update -g --all 2>&1
     $exit = $LASTEXITCODE
     $joined = (@($out) -join "`n")
+    if ($joined) { Write-Verbose $joined }
 
     if ($exit -eq 0) {
         return @{ State = 'Updated'; Reason = $null; Engine = 'dotnetTool' }
@@ -35,7 +37,7 @@ function Update-AllDotnetToolPackages {
     # NOT the literal "--all" token (which would falsely trigger fallback
     # for any unrelated error whose message happens to echo our argv).
     if ($joined -match '(?i)unrecognized option|unknown option|unrecognized command') {
-        Write-Host "  dotnet tool update --all unsupported on this SDK; falling back to per-tool enumeration."
+        Write-Verbose "  dotnet tool update --all unsupported on this SDK; falling back to per-tool enumeration."
         $listOut = & dotnet tool list -g 2>&1
         $listExit = $LASTEXITCODE
         if ($listExit -ne 0) {
@@ -48,7 +50,8 @@ function Update-AllDotnetToolPackages {
         foreach ($row in $rows) {
             $id = ($row -split '\s+' | Where-Object { $_ })[0]
             if (-not $id) { continue }
-            Write-Host "  dotnet tool update -g $id"
+            Write-UpdateStatus "Updating dotnet tool $id..."
+            Write-Verbose "  dotnet tool update -g $id"
             & dotnet tool update -g $id | Out-Null
             if ($LASTEXITCODE -ne 0) { $anyFail = $true }
             $count++
