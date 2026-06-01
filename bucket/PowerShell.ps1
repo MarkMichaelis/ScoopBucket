@@ -48,8 +48,9 @@ if (Get-Command git -ErrorAction Ignore) {
 # top-level switches. Registration flows through Register-CliCompletion's
 # self-healing path (Resolve-SelfHealingCompleter): if any of these CLIs later
 # gains a real native helper, it is adopted automatically and a low-priority
-# advisory notes this block can be removed. Best-effort -- silently skipped when
-# the AllUsersAllHosts profile is not writable (e.g. not elevated), matching gh.
+# advisory notes this block can be removed. Best-effort -- skipped with a
+# warning when the AllUsersAllHosts profile is not writable (e.g. not elevated),
+# matching gh.
 # ----------------------------------------------------------------------------
 function New-StaticNativeCompleter {
     # Build a scriptblock that emits a hand-curated `Register-ArgumentCompleter

@@ -26,7 +26,7 @@
         @{ Cli = 'powershell'; Status = 'Registered';      Script = 'PowerShell.ps1' }
         @{ Cli = 'wsl';        Status = 'Registered';      Script = 'PowerShell.ps1' }
         @{ Cli = 'git';        Status = 'ModuleActivated'; Script = 'GitConfigure.ps1'; Module = 'posh-git';          Activation = 'Add-PoshGitToProfile' }
-        @{ Cli = 'choco';      Status = 'ModuleActivated'; Script = 'Chocolatey.ps1';   Module = 'chocolateyProfile'; Activation = 'chocolateyProfile\.psm1' }
+        @{ Cli = 'choco';      Status = 'ModuleActivated'; Script = 'Chocolatey.ps1';   Module = 'chocolateyProfile'; Activation = 'Import-Module.*chocolateyProfile\.psm1' }
         @{ Cli = 'scoop';      Status = 'ModuleActivated'; Script = 'PowerShell.ps1';   Module = 'scoop-completion';  Activation = 'Import-Module\s+scoop-completion' }
     )
 }
