@@ -18,8 +18,9 @@
 # `Register-ArgumentCompletion`. Match it HARDENED, not loosened: a bare
 # `completion`/`completer` token appears in help text and bash scripts and
 # would produce false positives. Tolerate an optional module qualifier
-# (e.g. `Microsoft.PowerShell.Core\Register-ArgumentCompleter`).
-$script:NativeCompletionMarker = '(?i)(?:[\w.]+\\)?Register-ArgumentCompleter\b'
+# (e.g. `Microsoft.PowerShell.Core\Register-ArgumentCompleter`, or a hyphenated
+# module name such as `posh-git\Register-ArgumentCompleter`).
+$script:NativeCompletionMarker = '(?i)(?:[\w.-]+\\)?Register-ArgumentCompleter\b'
 
 # Default probe argument-lines, ordered most- to least-common. Each is run as
 # `<cli> <args>` guarded by Get-Command with all errors swallowed.
@@ -37,11 +38,13 @@ function Invoke-CompletionProbe {
         Run a single `<cli> <args>` completion probe with a hard timeout.
 
     .DESCRIPTION
-        Executes the probe via `cmd.exe /c` (so PATH resolution covers .exe,
-        .cmd and .bat alike) under a .NET Process with a bounded wait. If the
-        process does not exit within $TimeoutMs it -- and its whole child tree
-        (e.g. a `wsl` that blocks waiting for a distro) -- is force-killed and
-        $null is returned. stdout is captured; stderr is drained to avoid a
+        Executes the probe via `cmd.exe /d /s /c` (so PATH resolution covers
+        .exe, .cmd and .bat alike) under a .NET Process with a bounded wait. The
+        CLI token is quoted and `/d` disables any AutoRun side effects, so a CLI
+        path containing spaces and stray cmd metacharacters are handled safely.
+        If the process does not exit within $TimeoutMs it -- and its whole child
+        tree (e.g. a `wsl` that blocks waiting for a distro) -- is force-killed
+        and $null is returned. stdout is captured; stderr is drained to avoid a
         full-pipe deadlock and discarded.
     #>
     [CmdletBinding()]
@@ -54,7 +57,10 @@ function Invoke-CompletionProbe {
 
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $env:ComSpec
-    $psi.Arguments = "/c $Cli $ArgumentLine"
+    # /d  -- skip AutoRun commands; /s -- strip only the outer quote pair so the
+    # quoted CLI token survives. Quoting $Cli handles spaces in a resolved path
+    # and keeps cmd metacharacters from breaking out of the command.
+    $psi.Arguments = "/d /s /c `"`"$Cli`" $ArgumentLine`""
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
