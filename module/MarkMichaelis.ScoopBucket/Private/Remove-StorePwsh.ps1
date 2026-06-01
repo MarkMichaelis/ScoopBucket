@@ -76,23 +76,62 @@ function Resolve-StorePwshRemoval {
     }
 }
 
+function Remove-StorePwshPathEntry {
+    <#
+    .SYNOPSIS
+        Remove the sealed Store/MSIX PowerShell directory from a persisted
+        PATH scope (Machine or User), writing back only when it changed.
+    .DESCRIPTION
+        Isolates the environment side effect (the only non-pure step of the
+        de-Store flow) behind a single mockable function so callers' tests can
+        stub it out and never touch the real registry PATH.
+    .PARAMETER Scope
+        The environment-variable target: 'Machine' or 'User'.
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    param(
+        [Parameter(Mandatory)][ValidateSet('Machine', 'User')][string]$Scope
+    )
+    try {
+        $current = [Environment]::GetEnvironmentVariable('Path', $Scope)
+        if (-not $current) { return }
+        $cleaned = Remove-StorePwshFromPathString -PathValue $current
+        if ($cleaned -ne $current -and
+            $PSCmdlet.ShouldProcess("$Scope PATH", 'Remove sealed WindowsApps PowerShell entry')) {
+            [Environment]::SetEnvironmentVariable('Path', $cleaned, $Scope)
+        }
+    } catch {
+        Write-Warning "Remove-StorePwshPathEntry: could not scrub $Scope PATH ($($_.Exception.Message))."
+    }
+}
+
 function Remove-StorePwsh {
     <#
     .SYNOPSIS
         Remove the Microsoft Store / MSIX build of PowerShell 7 and scrub its
         sealed directory from PATH so the first-party MSI build wins.
     .DESCRIPTION
-        Idempotent and non-fatal. Detects the Microsoft.PowerShell Appx
-        package and, when the MSI build is also present, removes the MSIX
-        package for the current user (the running process keeps going even if
-        it is the Store pwsh) and scrubs the sealed WindowsApps directory from
-        the Machine and User PATH. Warns (never throws) when the Store build is
-        absent, removal fails, or the MSI build is missing. Returns a result
-        object describing what happened.
+        Windows-only, idempotent and non-fatal. Detects the
+        Microsoft.PowerShell Appx package and, when the MSI build is also
+        present, removes the MSIX package for the current user (the running
+        process keeps going even if it is the Store pwsh) and scrubs the sealed
+        WindowsApps directory from the Machine and User PATH. Warns (never
+        throws) when the Store build is absent, removal fails, or the MSI build
+        is missing. Returns a result object describing what happened.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     [OutputType([pscustomobject])]
     param()
+
+    if (-not $IsWindows) {
+        Write-Verbose 'Remove-StorePwsh: not Windows; the Store/MSIX PowerShell build does not apply.'
+        return [pscustomobject]@{
+            StoreBuildFound = $false
+            Removed         = $false
+            MsiPath         = $null
+            Reason          = 'Not Windows; nothing to do.'
+        }
+    }
 
     $msiPwsh = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
     $msiPresent = Test-Path -LiteralPath $msiPwsh
@@ -130,19 +169,8 @@ function Remove-StorePwsh {
         }
     }
 
-    foreach ($scope in 'Machine', 'User') {
-        try {
-            $current = [Environment]::GetEnvironmentVariable('Path', $scope)
-            if (-not $current) { continue }
-            $cleaned = Remove-StorePwshFromPathString -PathValue $current
-            if ($cleaned -ne $current -and
-                $PSCmdlet.ShouldProcess("$scope PATH", 'Remove sealed WindowsApps PowerShell entry')) {
-                [Environment]::SetEnvironmentVariable('Path', $cleaned, $scope)
-            }
-        } catch {
-            Write-Warning "Remove-StorePwsh: could not scrub $scope PATH ($($_.Exception.Message))."
-        }
-    }
+    Remove-StorePwshPathEntry -Scope 'Machine'
+    Remove-StorePwshPathEntry -Scope 'User'
 
     try { Add-MachinePath -Path (Split-Path -Parent $msiPwsh) -Confirm:$false } catch { }
 
