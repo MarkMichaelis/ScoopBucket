@@ -41,6 +41,17 @@ Describe 'De-Store PowerShell helpers' -Tag 'Light' {
                 Remove-StorePwshFromPathString -PathValue $path | Should -Be $path
             }
         }
+
+        It 'drops a sealed entry even when padded with whitespace and prunes blank segments' {
+            InModuleScope MarkMichaelis.ScoopBucket {
+                $path = 'C:\Windows; C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.2.0_x64__8wekyb3d8bbwe ;   ;C:\Tools'
+                $result = Remove-StorePwshFromPathString -PathValue $path
+                $result | Should -Not -Match '(?i)WindowsApps\\Microsoft\.PowerShell_' `
+                    -Because 'a whitespace-padded sealed entry must still be removed'
+                $result | Should -Be 'C:\Windows;C:\Tools' `
+                    -Because 'blank/whitespace-only segments are pruned and other entries preserved'
+            }
+        }
     }
 
     Context 'Resolve-StorePwshRemoval' {
@@ -104,6 +115,24 @@ Describe 'De-Store PowerShell helpers' -Tag 'Light' {
                 Should -Invoke Remove-StorePwshPathEntry -Times 0 -Exactly
                 $result.StoreBuildFound | Should -BeFalse
                 $result.Removed | Should -BeFalse
+            }
+        }
+
+        It 'performs no side effects under -WhatIf' {
+            InModuleScope MarkMichaelis.ScoopBucket {
+                Mock Get-AppxPackage { [pscustomobject]@{ Name = 'Microsoft.PowerShell' } }
+                Mock Remove-AppxPackage { }
+                Mock Test-Path { $true } -ParameterFilter { $LiteralPath -like '*PowerShell\7\pwsh.exe' }
+                Mock Add-MachinePath { }
+                Mock Remove-StorePwshPathEntry { }
+                Mock Get-Command { $true } -ParameterFilter { $Name -eq 'Get-AppxPackage' }
+
+                Remove-StorePwsh -WhatIf | Out-Null
+
+                Should -Invoke Remove-AppxPackage -Times 0 -Exactly `
+                    -Because '-WhatIf must not remove the Appx package'
+                Should -Invoke Add-MachinePath -Times 0 -Exactly `
+                    -Because '-WhatIf must not mutate PATH via Add-MachinePath'
             }
         }
     }
