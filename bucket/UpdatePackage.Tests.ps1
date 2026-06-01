@@ -952,6 +952,37 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
     }
 }
 
+Describe 'Update-Package -PassThru pipeline emission (#276)' -Tag 'Light','Module' {
+
+    BeforeEach {
+        $fakeBundles = @(
+            [pscustomobject]@{ Bundle='Alpha'; BundlePath='C:\fake\Alpha.ps1'; Packages=@(
+                [pscustomobject]@{ Name='a'; Installer='winget'; Id='A.A' }
+            )}
+        )
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages       { return $fakeBundles }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects { return @([Package]@{ Name='a'; Installer='winget'; Id='A.A'; Scope='user' }) }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Resolve-BucketPath       { return $null }
+        # Stand in for the real engine sweep: emit a [Package] result object
+        # on the success stream exactly like Invoke-PackageUpdate does.
+        Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-PackageUpdate {
+            [Package]@{ Name='a'; Installer='winget'; Id='A.A'; Scope='user' }
+        }
+    }
+
+    It 'does NOT emit [Package] objects on the pipeline by default' {
+        $out = Update-Package -Name 'a' -SkipCompletion -DryRun
+        $out | Should -BeNullOrEmpty
+    }
+
+    It 're-emits the [Package] objects when -PassThru is set' {
+        $out = @(Update-Package -Name 'a' -SkipCompletion -DryRun -PassThru)
+        $out.Count | Should -Be 1
+        $out[0]    | Should -BeOfType ([Package])
+        $out[0].Id | Should -Be 'A.A'
+    }
+}
+
 Describe 'Update-All<engine>Packages sweep engines' -Tag 'Light','Module' {
 
     Context 'Update-AllWingetPackages' {
