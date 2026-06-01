@@ -106,13 +106,14 @@ try {
 
 # scoop tab-completion via the upstream `scoop-completion` module (#278). scoop
 # has no `scoop completion powershell` subcommand; its completer is shipped as a
-# PowerShell module installed through scoop itself. Install (best-effort) and
-# add an idempotent import to the CurrentUserAllHosts profile so it loads in
-# every host.
+# PowerShell module installed through scoop itself. Install (best-effort),
+# import it into the current session so completion works immediately, and add an
+# idempotent import to the CurrentUserAllHosts profile so it loads in every host.
 try {
     if (-not (Get-Module -ListAvailable -Name scoop-completion)) {
         scoop install scoop-completion
     }
+    Import-Module scoop-completion -ErrorAction SilentlyContinue
     $allHostsProfile = $PROFILE.CurrentUserAllHosts
     if (-not (Test-Path $allHostsProfile)) {
         $profileDir = Split-Path -Parent $allHostsProfile

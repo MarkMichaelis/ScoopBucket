@@ -43,9 +43,11 @@ function Invoke-CompletionProbe {
         CLI token is quoted and `/d` disables any AutoRun side effects, so a CLI
         path containing spaces and stray cmd metacharacters are handled safely.
         If the process does not exit within $TimeoutMs it -- and its whole child
-        tree (e.g. a `wsl` that blocks waiting for a distro) -- is force-killed
-        and $null is returned. stdout is captured; stderr is drained to avoid a
-        full-pipe deadlock and discarded.
+        tree (e.g. a `wsl` that blocks waiting for a distro) -- is force-killed.
+        stdout is captured; stderr is drained to avoid a full-pipe deadlock and
+        discarded. Always returns a PSCustomObject with `Output` (the captured
+        stdout, or $null when the probe timed out or errored) and `TimedOut`
+        (a boolean the caller uses to short-circuit further probes).
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
