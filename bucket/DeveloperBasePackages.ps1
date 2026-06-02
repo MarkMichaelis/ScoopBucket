@@ -12,6 +12,7 @@ $Packages = [Package[]]@(
         Id          = 'main/dotnet'
         CliCommands = @('dotnet')
         Completion  = 'auto'
+        NativeCompletionKind = 'native'
         Notes       = 'Sources tab completion from the official `dotnet complete` API (https://learn.microsoft.com/en-us/dotnet/core/tools/enable-tab-autocomplete) instead of the third-party PSCompletions catalog so completions track whatever subcommands the installed SDK ships. Hand-curated ExpectedCompletions covers the canonical top-level verbs the test harness validates.'
         ExpectedCompletions = @{ dotnet = @('add','build','clean','pack','publish','restore','run','test') }
         NativeCommandScript = {

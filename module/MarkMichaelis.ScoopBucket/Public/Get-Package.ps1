@@ -98,6 +98,7 @@ function Get-Package {
                 Scope       = $p.Scope
                 CliCommands = @($p.CliCommands)
                 Completion  = $p.Completion
+                NativeCompletionKind = $p.NativeCompletionKind
                 ExpectedCompletions = $expected
                 NativeCommandOutputs = $nativeOutputs
                 DependsOn   = @($p.DependsOn)

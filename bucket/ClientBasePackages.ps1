@@ -173,6 +173,7 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
         Scope       = 'user'
         CliCommands = @('todoist')
         Completion  = 'native'
+        NativeCompletionKind = 'native'
         NativeCommandScript = { todoist completion powershell }
         WingetExtraArgs = @('--silent', '--disable-interactivity')
         DependsOn   = @('Todoist')

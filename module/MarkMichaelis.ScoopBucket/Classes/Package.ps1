@@ -47,6 +47,23 @@ class Package {
     # CompletionContract.Tests.ps1. Required whenever Completion != 'none'.
     [hashtable] $ExpectedCompletions = @{}
 
+    # Reporting-only classification of WHERE a native-completion block's
+    # contents come from. Surfaced as the 'Mode' column of
+    # Update-PackageCompletion so the output distinguishes:
+    #   'native'  - sourced live from the tool's own completion engine
+    #               (e.g. `dotnet complete`, `rg --generate
+    #               complete-powershell`, `warp completions powershell`,
+    #               `todoist completion powershell`); the registered block
+    #               tracks whatever subcommands the installed build ships.
+    #   'curated' - a hand-maintained subcommand/flag list shipped by this
+    #               bucket because the tool has no PowerShell-native
+    #               completion (e.g. bw, devenv, node, claude, 7z).
+    # Only meaningful alongside a NativeCommandScript. Defaults to '' which
+    # Update-PackageCompletion renders as 'curated' (the conservative,
+    # under-claiming label) so authors only opt INTO 'native'.
+    [ValidateSet('', 'native', 'curated')]
+    [string]   $NativeCompletionKind = ''
+
     [scriptblock] $NativeCommandScript
     [scriptblock] $CustomInstallScript
     [scriptblock] $CustomUninstallScript
@@ -149,6 +166,10 @@ class Package {
 
         if ($this.Completion -in @('native', 'auto') -and -not $this.NativeCommandScript) {
             return "Package '$($this.Name)': NativeCommandScript is required when Completion='$($this.Completion)'."
+        }
+
+        if ($this.NativeCompletionKind -and -not $this.NativeCommandScript) {
+            return "Package '$($this.Name)': NativeCompletionKind='$($this.NativeCompletionKind)' is only valid alongside a NativeCommandScript."
         }
 
         # Inverse direction: if a Package exposes CLIs on PATH, it MUST register

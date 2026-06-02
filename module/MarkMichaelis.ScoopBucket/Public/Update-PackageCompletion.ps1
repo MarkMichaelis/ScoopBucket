@@ -60,6 +60,18 @@ function Update-PackageCompletion {
         Reason — the Action column already says 'WhatIf' — and do NOT
         emit the built-in "What if:" host line (the returned summary
         table is the single source of truth).
+
+        The Mode column reports how the completion block is sourced (#289):
+          native  — the block is produced live from the tool's own
+                    completion engine (dotnet/rg/warp/todoist), declared
+                    via the package's NativeCompletionKind='native'.
+          curated — a hand-maintained subcommand/flag list shipped by this
+                    bucket (the default for native registrations whose
+                    NativeCompletionKind is unset).
+          pscompletions — legacy class retained for schema compatibility;
+                    no packages resolve to it after #241.
+        Both native and curated use the same Register-ArgumentCompleter
+        -Native wiring; Mode describes the SOURCE, not the mechanism.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     [OutputType([pscustomobject[]])]
@@ -109,11 +121,26 @@ function Update-PackageCompletion {
                 $effectiveMode = if ($hasNative) { 'native' } else { 'pscompletions' }
             }
 
+            # Reporting label for the Mode column. A native registration is
+            # either 'native' (the block is sourced live from the tool's own
+            # completion engine -- dotnet/rg/warp/todoist) or 'curated' (a
+            # hand-maintained list this bucket ships because the tool has no
+            # PowerShell-native completion). The package declares which via
+            # NativeCompletionKind; an unset kind under-claims as 'curated'.
+            # The registration mechanism is identical for both
+            # (Register-ArgumentCompleter -Native), so $effectiveMode -- the
+            # value handed to Register-PackageCompletion below -- stays
+            # 'native'; only the displayed Mode differs.
+            $displayMode = $effectiveMode
+            if ($effectiveMode -eq 'native') {
+                $displayMode = if ("$($p.NativeCompletionKind)" -eq 'native') { 'native' } else { 'curated' }
+            }
+
             foreach ($cli in $p.CliCommands) {
                 if (-not (Get-Command $cli -ErrorAction SilentlyContinue)) {
                     $results.Add([pscustomobject]@{
                         Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
-                        Mode = $effectiveMode; Action = 'Skipped'; Source = 'Skipped'
+                        Mode = $displayMode; Action = 'Skipped'; Source = 'Skipped'
                         Reason = "CLI '$cli' not on PATH."
                     })
                     continue
@@ -124,7 +151,7 @@ function Update-PackageCompletion {
                 if ($alreadyHas -and -not $Force) {
                     $results.Add([pscustomobject]@{
                         Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
-                        Mode = $effectiveMode; Action = 'Preserved'; Source = 'Existing'
+                        Mode = $displayMode; Action = 'Preserved'; Source = 'Existing'
                         Reason = 'Sentinel block already in profile; pass -Force to refresh.'
                     })
                     continue
@@ -160,7 +187,7 @@ function Update-PackageCompletion {
                     if (-not $nativeArg) {
                         $results.Add([pscustomobject]@{
                             Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
-                            Mode = $effectiveMode; Action = 'Skipped'; Source = 'Skipped'
+                            Mode = $displayMode; Action = 'Skipped'; Source = 'Skipped'
                             Reason = "No pre-captured native completion source for '$cli' (NativeCommandOutputs empty); re-run Install-Package to refresh."
                         })
                         continue
@@ -180,7 +207,7 @@ function Update-PackageCompletion {
                 if ($WhatIfPreference) {
                     $results.Add([pscustomobject]@{
                         Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
-                        Mode = $effectiveMode; Action = 'WhatIf'; Source = 'WhatIf'
+                        Mode = $displayMode; Action = 'WhatIf'; Source = 'WhatIf'
                         Reason = ''
                     })
                     continue
@@ -192,7 +219,7 @@ function Update-PackageCompletion {
                 if (-not $PSCmdlet.ShouldProcess($profileTarget, $action)) {
                     $results.Add([pscustomobject]@{
                         Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
-                        Mode = $effectiveMode; Action = 'Skipped'; Source = 'Skipped'
+                        Mode = $displayMode; Action = 'Skipped'; Source = 'Skipped'
                         Reason = 'Declined at the confirmation prompt.'
                     })
                     continue
@@ -209,7 +236,7 @@ function Update-PackageCompletion {
                     $r = Register-PackageCompletion @registerArgs
                     $results.Add([pscustomobject]@{
                         Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
-                        Mode = $effectiveMode
+                        Mode = $displayMode
                         Action = $(if ($r.Source -eq 'Skipped') { 'Skipped' } else { 'Registered' })
                         Source = $r.Source
                         Reason = $r.Reason
@@ -217,7 +244,7 @@ function Update-PackageCompletion {
                 } catch {
                     $results.Add([pscustomobject]@{
                         Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
-                        Mode = $effectiveMode; Action = 'Skipped'; Source = 'Skipped'
+                        Mode = $displayMode; Action = 'Skipped'; Source = 'Skipped'
                         Reason = "Register-PackageCompletion threw: $($_.Exception.Message)"
                     })
                 }

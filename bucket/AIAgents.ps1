@@ -151,6 +151,7 @@ Register-ArgumentCompleter -Native -CommandName npx -ScriptBlock {
         #              below mirrors that headlessly.
         CliCommands = @('warp','oz')
         Completion  = 'auto'
+        NativeCompletionKind = 'native'
         Notes       = 'Agentic AI terminal (warp.dev). One binary, two exposed entry points: `warp` (UI + CLI passthrough) and `oz` (the canonical "Oz CLI" used in Warp''s docs for agent / MCP / run management). The winget installer drops warp.exe at %LOCALAPPDATA%\Programs\Warp\ but does NOT add it to PATH; PostInstallScript copies warp.exe -> oz.exe in-place (warp uses argv[0] to brand its --help text and Register-ArgumentCompleter target, so a rename is required — a launcher shim would leave argv[0] as warp.exe) and registers both as scoop shims, mirroring the bcomp.com pattern in DeveloperBasePackages. Tab completion is sourced from the binary itself via `warp completions powershell` / `oz completions powershell` so it tracks whatever subcommands Warp ships. MCP wiring below intentionally skips Warp: Warp manages MCP servers via its in-app Settings > Agents > MCP servers UI (its own store); use `oz mcp` from CLI if parity with the JSON/TOML-wired agents is needed.'
         ExpectedCompletions = @{
             warp = @('--help','--version','agent','mcp','run','completions')
