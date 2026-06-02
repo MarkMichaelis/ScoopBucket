@@ -171,8 +171,8 @@ Describe 'Install-Package bare-manifest completion (#291)' -Tag 'Light', 'Module
         }
     }
 
-    It 'honors -WhatIf: neither installs the manifest nor registers completion' {
-        Install-Package -Name 'VsTest' -WhatIf -BucketPath $script:tmpBucket | Out-Null
+    It 'honors -DryRun uniformly: neither installs the manifest nor registers completion' {
+        Install-Package -Name 'VsTest' -DryRun -BucketPath $script:tmpBucket | Out-Null
 
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -Times 0 -Exactly
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Import-PackageCompletion -Times 0 -Exactly

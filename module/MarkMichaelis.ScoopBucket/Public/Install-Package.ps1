@@ -189,16 +189,15 @@ function Install-Package {
     $manifestPackagesToImport = New-Object System.Collections.Generic.List[object]
     foreach ($n in $manifestNames) {
         Write-UpdateStatus -Activity 'Install-Package' "Install-Package: dispatching manifest '$n' via scoop install (no declarative [Package] match)..."
+        # Preview mode is uniform across all dispatch paths: -DryRun is the
+        # module's single preview switch (paths (a)/(b) forward it to
+        # Invoke-PackageInstall; here we short-circuit). We deliberately do
+        # NOT add a path-specific -WhatIf gate, which would make preview
+        # behave differently here than for the Package.Name / bundle paths.
         if ($DryRun) {
             Write-UpdateStatus -Activity 'Install-Package' "  [DryRun] scoop install $n"
             continue
         }
-        # Honor -WhatIf / -Confirm for the bare-manifest path. Install-Package
-        # advertises SupportsShouldProcess, so gating the scoop install here
-        # makes -WhatIf/-Confirm skip the real install (and its completion
-        # work) instead of running it unconditionally. Under -WhatIf this
-        # prints the standard "What if" line and continues to the next name.
-        if (-not $PSCmdlet.ShouldProcess($n, 'scoop install')) { continue }
         # Clear any stale $LASTEXITCODE first. If `scoop` resolves to a
         # PowerShell function/wrapper that runs no native command, it leaves
         # $LASTEXITCODE untouched; a leftover non-zero value from an earlier
