@@ -169,6 +169,45 @@ Register-ArgumentCompleter -Native -CommandName python -ScriptBlock {
     }
 
     [Package]@{
+        Name        = 'Android Platform Tools'
+        Installer   = 'scoop'
+        Id          = 'main/adb'
+        CliCommands = @('adb','fastboot')
+        Completion  = 'auto'
+        Notes       = 'Android SDK platform-tools (adb/fastboot). scoop main/adb shims adb.exe and fastboot.exe automatically. Neither adb nor fastboot ships a `completions powershell` subcommand or a PSCompletions entry, so the completer is hand-curated (curated, not native -- #289/#293). Subcommand lists drawn from `adb --help` and `fastboot --help`.'
+        ExpectedCompletions = @{
+            adb      = @('devices','install','shell','logcat')
+            fastboot = @('devices','flash','reboot')
+        }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName adb -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        'devices','help','version','connect','disconnect','pair','push','pull','sync',
+        'shell','install','install-multiple','uninstall','logcat','forward','reverse',
+        'reboot','sideload','root','unroot','remount','bugreport','backup','restore',
+        'kill-server','start-server','get-state','get-serialno','wait-for-device','tcpip','emu',
+        '-s','-d','-e','-H','-P','-a'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+Register-ArgumentCompleter -Native -CommandName fastboot -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        'devices','flash','flashall','erase','format','getvar','boot','reboot',
+        'reboot-bootloader','continue','update','set_active','oem','flashing',
+        '--help','--version','-w','-s'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
+
+    [Package]@{
         Name        = 'Aspire'
         Installer   = 'scoop'
         Id          = 'MarkMichaelis/Aspire'
