@@ -193,10 +193,11 @@ function Install-Package {
             Write-UpdateStatus -Activity 'Install-Package' "  [DryRun] scoop install $n"
             continue
         }
-        # Honor -WhatIf / -Confirm for the bare-manifest path too, so it is
-        # consistent with paths (a)/(b) which gate every engine call through
-        # Invoke-PackageInstall. Under -WhatIf this prints the standard
-        # "What if" line and skips both the install and the completion work.
+        # Honor -WhatIf / -Confirm for the bare-manifest path. Install-Package
+        # advertises SupportsShouldProcess, so gating the scoop install here
+        # makes -WhatIf/-Confirm skip the real install (and its completion
+        # work) instead of running it unconditionally. Under -WhatIf this
+        # prints the standard "What if" line and continues to the next name.
         if (-not $PSCmdlet.ShouldProcess($n, 'scoop install')) { continue }
         # Clear any stale $LASTEXITCODE first. If `scoop` resolves to a
         # PowerShell function/wrapper that runs no native command, it leaves
