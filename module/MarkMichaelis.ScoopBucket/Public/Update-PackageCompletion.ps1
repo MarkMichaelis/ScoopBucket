@@ -53,9 +53,13 @@ function Update-PackageCompletion {
     .OUTPUTS
         PSCustomObject[] — one record per (Cli, Package) candidate,
         with Cli, Package, Bundle, Mode, Action (Registered | Preserved
-        | Skipped | WhatIf), Source (Native | Existing | Skipped —
-        'Existing' accompanies Action='Preserved'; PSCompletions was
-        removed in #241), and Reason fields.
+        | Skipped | WhatIf), Source (Native | Existing | Skipped |
+        WhatIf — 'Existing' accompanies Action='Preserved', 'WhatIf'
+        accompanies a -WhatIf preview row; PSCompletions was removed in
+        #241), and Reason fields. WhatIf preview rows carry an empty
+        Reason — the Action column already says 'WhatIf' — and do NOT
+        emit the built-in "What if:" host line (the returned summary
+        table is the single source of truth).
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     [OutputType([pscustomobject[]])]
@@ -164,11 +168,32 @@ function Update-PackageCompletion {
                 }
 
                 $action = "Register $effectiveMode completion block for '$cli'"
+
+                # -WhatIf preview: record the would-be row WITHOUT calling
+                # $PSCmdlet.ShouldProcess. ShouldProcess's built-in
+                # "What if: Performing the operation ..." line is written
+                # straight to the host (it bypasses every output stream, so
+                # it can't be redirected) and merely duplicates this row in
+                # the summary table -- which is the single source of truth.
+                # The Action column already says 'WhatIf', so the Reason is
+                # left empty rather than a redundant '(would register)'.
+                if ($WhatIfPreference) {
+                    $results.Add([pscustomobject]@{
+                        Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
+                        Mode = $effectiveMode; Action = 'WhatIf'; Source = 'WhatIf'
+                        Reason = ''
+                    })
+                    continue
+                }
+
+                # Real run (or -Confirm). ShouldProcess still gates the write
+                # and drives the -Confirm prompt; a declined prompt is a
+                # Skipped row, not a registration.
                 if (-not $PSCmdlet.ShouldProcess($profileTarget, $action)) {
                     $results.Add([pscustomobject]@{
                         Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
-                        Mode = $effectiveMode; Action = 'WhatIf'; Source = 'Skipped'
-                        Reason = '(would register)'
+                        Mode = $effectiveMode; Action = 'Skipped'; Source = 'Skipped'
+                        Reason = 'Declined at the confirmation prompt.'
                     })
                     continue
                 }
