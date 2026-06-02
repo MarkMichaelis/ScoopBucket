@@ -198,6 +198,12 @@ function Install-Package {
         # Invoke-PackageInstall. Under -WhatIf this prints the standard
         # "What if" line and skips both the install and the completion work.
         if (-not $PSCmdlet.ShouldProcess($n, 'scoop install')) { continue }
+        # Clear any stale $LASTEXITCODE first. If `scoop` resolves to a
+        # PowerShell function/wrapper that runs no native command, it leaves
+        # $LASTEXITCODE untouched; a leftover non-zero value from an earlier
+        # command would otherwise be misread as a failed install and wrongly
+        # suppress completion. A null exit code is treated as success below.
+        $global:LASTEXITCODE = $null
         # Delegate to scoop. We pass the bare name (assumes the
         # MarkMichaelis bucket has been added — see
         # `Install-Package AddMarkMichaelisScoopBucket`); scoop will
