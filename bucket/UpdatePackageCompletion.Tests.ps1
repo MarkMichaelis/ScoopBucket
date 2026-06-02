@@ -285,3 +285,36 @@ Describe 'Update-PackageCompletion changed-only output (#285)' -Tag 'Light' {
         }
     }
 }
+
+Describe 'Update-PackageCompletion quiet -WhatIf output (#287)' -Tag 'Light' {
+    BeforeEach {
+        if (Test-Path $script:profilePath) { Remove-Item -LiteralPath $script:profilePath -Force }
+    }
+
+    It 'leaves the Reason empty on WhatIf preview rows (the Action column already says WhatIf)' {
+        $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
+            -ProfilePath $script:profilePath -WhatIf -IncludeUnchanged
+
+        $whatIf = $results | Where-Object Action -EQ 'WhatIf'
+        $whatIf | Should -Not -BeNullOrEmpty
+        foreach ($row in $whatIf) {
+            $row.Reason | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'tags WhatIf preview rows with Source=WhatIf (not Skipped)' {
+        # Distinguishes a -WhatIf preview (would register) from a genuine
+        # Skipped row, and guards the same branch that bypasses
+        # ShouldProcess (and therefore its built-in "What if:" host line).
+        # If the ShouldProcess-gated preview path is reinstated, these rows
+        # revert to Source='Skipped' and this fails.
+        $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
+            -ProfilePath $script:profilePath -WhatIf -IncludeUnchanged
+
+        $whatIf = $results | Where-Object Action -EQ 'WhatIf'
+        $whatIf | Should -Not -BeNullOrEmpty
+        foreach ($row in $whatIf) {
+            $row.Source | Should -Be 'WhatIf'
+        }
+    }
+}
