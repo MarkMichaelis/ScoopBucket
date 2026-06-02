@@ -79,8 +79,9 @@ Describe 'Install-Package bare-manifest completion (#291)' -Tag 'Light', 'Module
 
     BeforeEach {
         # Never actually shell out to scoop; the dispatch path runs
-        # `& scoop install <name>` from module scope.
-        Mock -ModuleName MarkMichaelis.ScoopBucket scoop { }
+        # `& scoop install <name>` from module scope. Report success so the
+        # post-install completion registration runs.
+        Mock -ModuleName MarkMichaelis.ScoopBucket scoop { $global:LASTEXITCODE = 0 }
         # Capture (and suppress) the in-session + persistent registration so
         # the test asserts INVOCATION rather than depending on the CLI being
         # present or on $PROFILE.AllUsersAllHosts being writable.
@@ -121,5 +122,20 @@ Describe 'Install-Package bare-manifest completion (#291)' -Tag 'Light', 'Module
 
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Import-PackageCompletion -Times 0 -Exactly
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Register-PackageCompletion -Times 0 -Exactly
+    }
+
+    It 'does NOT register completion when scoop install fails (non-zero exit)' {
+        # A failed install must not leave behind completers for a CLI that was
+        # never actually installed.
+        Mock -ModuleName MarkMichaelis.ScoopBucket scoop { $global:LASTEXITCODE = 1 }
+
+        Install-Package -Name 'VsTest' -BucketPath $script:tmpBucket | Out-Null
+
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Import-PackageCompletion -Times 0 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Register-PackageCompletion -Times 0 -Exactly
+        # The install was still attempted.
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -ParameterFilter {
+            ($args -contains 'install') -and ($args -contains 'VsTest')
+        }
     }
 }
