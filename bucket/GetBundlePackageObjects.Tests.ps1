@@ -99,6 +99,27 @@ Invoke-PackageInstall -Packages $Packages -Bundle 'WithScript'
         $r.Objects[0].CustomInstallScript.GetType().Name | Should -Be 'ScriptBlock'
     }
 
+    It 'preserves scriptblocks (ConfigScript) on reconstructed packages' {
+        $bundle = Join-Path $TestDrive 'WithConfig.ps1'
+        Set-Content -LiteralPath $bundle -Value @'
+$Packages = @(
+    [Package]@{
+        Name         = 'Config'
+        Installer    = 'winget'
+        Id           = 'Foo.Config'
+        ConfigScript = { 'configured' }
+    }
+)
+Invoke-PackageInstall -Packages $Packages -Bundle 'WithConfig'
+'@
+        $r = script:Invoke-GetBundlePackageObjects -Path $bundle
+
+        $r.Warnings.Count | Should -Be 0
+        $r.Objects.Count | Should -Be 1
+        $r.Objects[0].ConfigScript | Should -Not -BeNullOrEmpty
+        $r.Objects[0].ConfigScript.GetType().Name | Should -Be 'ScriptBlock'
+    }
+
     It 'stays quiet (no warning) for a legacy bundle that never assigns $Packages' {
         # Legitimate empty result -- imperative bundle with no $Packages. Must NOT
         # warn (that would be noise on every legacy-bundle dispatch).
