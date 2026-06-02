@@ -117,6 +117,11 @@ function Update-Package {
         [switch]$MachineWide,
         [switch]$SkipCompletion,
         [switch]$SkipBucketRefresh,
+        # Show every package in the result table, including unchanged rows
+        # (AlreadyLatest / NotInstalled / SelfManaged / NoAutoUpdateSupport /
+        # Skipped). By default only changed rows (Updated / Failed) are shown
+        # and the rest are summarized in a one-line host message. See #283.
+        [switch]$IncludeUnchanged,
         [string]$BucketPath,
         # Hard cap on per-package winget upgrade time (minutes). Default
         # 5 minutes (vast majority of winget upgrades finish in <60s).
@@ -137,7 +142,8 @@ function Update-Package {
     # the end of the run reminds users to run Update-PackageCompletion
     # manually since we can't tell which CLIs (if any) version-bumped.
     if ($MachineWide) {
-        Invoke-AllEnginesUpdate -DryRun:$isWhatIf
+        $mwResults = @(Invoke-AllEnginesUpdate -DryRun:$isWhatIf)
+        Select-PackageResultSummary -Result $mwResults -IncludeUnchanged:$IncludeUnchanged
         return
     }
 
@@ -300,6 +306,11 @@ function Update-Package {
     # WriteError into a terminating error at the call site). See issue #272.
     $pkgErrors = [System.Collections.Generic.List[object]]::new()
 
+    # Collect every PackageResult the drivers emit so the summary view can
+    # filter to changed rows (and render a single table for a '*' sweep rather
+    # than one table per bundle). See #283.
+    $results = New-Object System.Collections.Generic.List[object]
+
     # Dispatch (a): selective per-bundle Name filter.
     foreach ($entry in $byBundle.Values) {
         $pkgObjects = @(Get-BundlePackageObjects -BundlePath $entry.BundlePath)
@@ -308,10 +319,11 @@ function Update-Package {
             $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
         }
         Write-UpdateStatus "Update-Package: dispatching $($entry.Names -join ', ') via $($entry.Bundle)..."
-        Invoke-PackageUpdate -Packages $pkgObjects -Bundle $entry.Bundle `
-            -Name @($entry.Names) -WhatIf:$isWhatIf -SkipCompletion:$SkipCompletion `
-            -PackageTimeoutMinutes $PackageTimeoutMinutes `
-            -ErrorAction Continue -ErrorVariable +pkgErrors
+        $results.AddRange([object[]]@(
+            Invoke-PackageUpdate -Packages $pkgObjects -Bundle $entry.Bundle `
+                -Name @($entry.Names) -WhatIf:$isWhatIf -SkipCompletion:$SkipCompletion `
+                -PackageTimeoutMinutes $PackageTimeoutMinutes `
+                -ErrorAction Continue -ErrorVariable +pkgErrors))
     }
 
     # Dispatch (b): full-bundle update.
@@ -321,10 +333,11 @@ function Update-Package {
             $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
         }
         Write-UpdateStatus "Update-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
-        Invoke-PackageUpdate -Packages $pkgObjects -Bundle $b.Bundle `
-            -WhatIf:$isWhatIf -SkipCompletion:$SkipCompletion `
-            -PackageTimeoutMinutes $PackageTimeoutMinutes `
-            -ErrorAction Continue -ErrorVariable +pkgErrors
+        $results.AddRange([object[]]@(
+            Invoke-PackageUpdate -Packages $pkgObjects -Bundle $b.Bundle `
+                -WhatIf:$isWhatIf -SkipCompletion:$SkipCompletion `
+                -PackageTimeoutMinutes $PackageTimeoutMinutes `
+                -ErrorAction Continue -ErrorVariable +pkgErrors))
     }
 
     # Dispatch (c): bare manifests — no declarative [Package] metadata,
@@ -346,4 +359,9 @@ function Update-Package {
     if ($failed.Count -gt 0) {
         Write-Warning "Update-Package: $($failed.Count) package update(s) failed; the sweep continued past each failure. See errors above for details."
     }
+
+    # Emit the collected results through the summary view: changed rows only by
+    # default (with a one-line host summary of the rest), or every row under
+    # -IncludeUnchanged. See #283.
+    Select-PackageResultSummary -Result $results.ToArray() -IncludeUnchanged:$IncludeUnchanged
 }

@@ -32,6 +32,14 @@ class PackageResult {
     # The bundle this package was dispatched from.
     [string] $Bundle
 
+    # Version transition for a real (or planned) upgrade/install. VersionFrom
+    # is the version that was installed before the operation (empty for a
+    # fresh install or when the engine couldn't be probed); VersionTo is the
+    # version after (or the target under -WhatIf). Both feed the Details
+    # column's `from -> to` rendering and stay on the object for export. See #283.
+    [string] $VersionFrom
+    [string] $VersionTo
+
     # Short human-readable detail for any status (e.g. '(WhatIf)',
     # 'CISkip: ...', or a failure's exception message). Surfaced inline by
     # the format view.
@@ -45,5 +53,47 @@ class PackageResult {
 
     [string] ToString() {
         return "[$($this.Status)] $($this.Name)$(if ($this.Id) { " ($($this.Id))" })"
+    }
+
+    # Single human-readable cell merging the version transition and the
+    # reason for the summary table's `Details` column (#283). Rules:
+    #   Updated/Installed : 'Reinstalled', or 'from -> to', or '-> to' (fresh
+    #                       install), suffixed ' (WhatIf)' on a dry run.
+    #   AlreadyLatest     : '<version> (latest)'.
+    #   NotInstalled      : 'not installed'.
+    #   SelfManaged       : 'self-managed'.
+    #   NoAutoUpdate      : 'no auto-update'.
+    #   Skipped/Failed/*  : the Reason verbatim (failure tail / skip cause).
+    # The underlying VersionFrom/VersionTo/Reason properties stay intact for
+    # export; this is presentation only.
+    [string] Details() {
+        $from = $this.VersionFrom
+        $to   = $this.VersionTo
+        $whatIf = ($this.Reason -match 'WhatIf')
+
+        switch -Regex ($this.Status) {
+            '^(Updated|Installed)$' {
+                if ($this.Reason -match 'Reinstall') { $d = 'Reinstalled' }
+                elseif ($from -and $to)              { $d = "$from -> $to" }
+                elseif ($to)                         { $d = "-> $to" }
+                elseif ($from)                       { $d = $from }
+                else                                 { $d = '' }
+                if ($whatIf) {
+                    if ($d) { return "$d (WhatIf)" }
+                    return [string]$this.Reason
+                }
+                if (-not $d) { return [string]$this.Reason }
+                return $d
+            }
+            '^(AlreadyLatest|AlreadyInstalled)$' {
+                if ($from) { return "$from (latest)" }
+                return 'latest'
+            }
+            '^NotInstalled$'        { return 'not installed' }
+            '^SelfManaged$'         { return 'self-managed' }
+            '^NoAutoUpdateSupport$' { return 'no auto-update' }
+            default                 { return [string]$this.Reason }
+        }
+        return [string]$this.Reason
     }
 }
