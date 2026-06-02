@@ -193,6 +193,11 @@ function Install-Package {
             Write-UpdateStatus -Activity 'Install-Package' "  [DryRun] scoop install $n"
             continue
         }
+        # Honor -WhatIf / -Confirm for the bare-manifest path too, so it is
+        # consistent with paths (a)/(b) which gate every engine call through
+        # Invoke-PackageInstall. Under -WhatIf this prints the standard
+        # "What if" line and skips both the install and the completion work.
+        if (-not $PSCmdlet.ShouldProcess($n, 'scoop install')) { continue }
         # Delegate to scoop. We pass the bare name (assumes the
         # MarkMichaelis bucket has been added — see
         # `Install-Package AddMarkMichaelisScoopBucket`); scoop will
