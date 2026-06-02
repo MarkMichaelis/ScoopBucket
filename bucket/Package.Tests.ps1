@@ -167,6 +167,18 @@ Describe 'Package.Validate() — happy paths' -Tag 'Light', 'Module' {
         $p.Installer | Should -Be 'custom'
     }
 
+    It 'accepts a ConfigScript on a non-custom installer and stores it as a scriptblock' {
+        $p = [Package]@{
+            Name         = 'ripgrep'
+            Installer    = 'scoop'
+            Id           = 'main/ripgrep'
+            ConfigScript = { 'configured' }
+        }
+        { $p.Validate() } | Should -Not -Throw
+        $p.ConfigScript | Should -BeOfType ([scriptblock])
+        (& $p.ConfigScript) | Should -Be 'configured'
+    }
+
     It 'passes a native-completion entry with NativeCommandScript' {
         $p = [Package]@{
             Name                = 'gh'

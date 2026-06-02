@@ -317,6 +317,65 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
         $r[0].Name | Should -Be 'Readwise'
     }
 
+    It 'runs ConfigScript after a successful install' {
+        $script:configRan = $false
+        $pkgs = [Package[]]@(
+            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'
+                        ConfigScript = { $script:configRan = $true } }
+        )
+        $null = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
+        $script:configRan | Should -BeTrue
+    }
+
+    It 'runs ConfigScript even when the package is AlreadyInstalled' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Install-WingetPackage {
+            return @{ State = 'AlreadyInstalled'; Reason = $null }
+        }
+        $script:configRan = $false
+        $pkgs = [Package[]]@(
+            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'
+                        ConfigScript = { $script:configRan = $true } }
+        )
+        $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
+        ($r | Where-Object Name -eq 'A').Status | Should -Be 'AlreadyInstalled'
+        $script:configRan | Should -BeTrue
+    }
+
+    It 'passes the [Package] to ConfigScript as $args[0]' {
+        $script:seenName = $null
+        $pkgs = [Package[]]@(
+            [Package]@{ Name='Cfg'; Installer='winget'; Id='Foo.Cfg'
+                        ConfigScript = { param($p) $script:seenName = $p.Name } }
+        )
+        $null = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion
+        $script:seenName | Should -Be 'Cfg'
+    }
+
+    It 'fails the package when ConfigScript throws' {
+        $pkgs = [Package[]]@(
+            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'
+                        ConfigScript = { throw 'cfgboom' } }
+        )
+        $r = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion `
+            -ErrorAction SilentlyContinue -ErrorVariable errs
+        $r.Count     | Should -Be 1
+        $r[0].Status | Should -Be 'Failed'
+        $r[0].Reason | Should -Match 'ConfigScript threw'
+        $ours = @($errs | Where-Object { $_.FullyQualifiedErrorId -like 'PackageInstallFailed*' })
+        $ours.Count | Should -Be 1
+        $ours[0].Exception.Message | Should -Match 'cfgboom'
+    }
+
+    It 'does not run ConfigScript under -DryRun' {
+        $script:configRan = $false
+        $pkgs = [Package[]]@(
+            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'
+                        ConfigScript = { $script:configRan = $true } }
+        )
+        $null = Invoke-PackageInstall -Packages $pkgs -Bundle 'Test' -SkipCompletion -DryRun
+        $script:configRan | Should -BeFalse
+    }
+
     It 'skips packages with CISkip set when $env:CI is truthy' {
         $oldCi = $env:CI
         $env:CI = 'true'

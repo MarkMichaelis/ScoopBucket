@@ -113,6 +113,27 @@ function Invoke-PackageUpdate {
         $PSCmdlet.WriteError($errRec)
     }
 
+    # ConfigScript runner: idempotent machine configuration re-applied on
+    # every update for an installed package (Updated OR a no-op state like
+    # AlreadyLatest), mirroring the always-run nature of the install-path
+    # ConfigScript hook. Returns $true on success, $false when the script
+    # threw (in which case the package has already been recorded Failed).
+    $runConfigScript = {
+        param($p)
+        if (-not $p.ConfigScript) { return $true }
+        if ($isWhatIf) {
+            Write-UpdateStatus "  [WhatIf] ConfigScript ($($p.Name))"
+            return $true
+        }
+        try {
+            [void](& $p.ConfigScript $p 2>$null)
+            return $true
+        } catch {
+            & $failPackage $p "ConfigScript threw: $($_.Exception.Message)"
+            return $false
+        }
+    }
+
     foreach ($pkg in $ordered) {
         $state  = 'Pending'
         $reason = $null
@@ -253,13 +274,20 @@ function Invoke-PackageUpdate {
             continue
         }
 
-        # NotInstalled / Skipped / AlreadyLatest / SelfManaged /
-        # NoAutoUpdateSupport short-circuit: no PATH refresh, no PostUpdate
-        # hook, no completion re-register. The registered completer is by
-        # definition still current for AlreadyLatest, and running
-        # PostUpdateScript on a no-op upgrade would surprise bundle authors
-        # who only intend the hook to fire after a real version bump.
-        if ($state -in @('NotInstalled', 'Skipped', 'AlreadyLatest', 'SelfManaged', 'NoAutoUpdateSupport')) {
+        # NotInstalled / Skipped: the package is not present / not processed,
+        # so there is nothing to configure -- no ConfigScript, no hooks.
+        if ($state -in @('NotInstalled', 'Skipped')) {
+            & $addState $pkg $state $reason $null $from $to
+            continue
+        }
+
+        # AlreadyLatest / SelfManaged / NoAutoUpdateSupport: the package IS
+        # installed but there was no version bump, so PATH refresh,
+        # PostUpdateScript, and completion re-register are intentionally
+        # skipped. ConfigScript STILL runs -- idempotent config is re-applied
+        # on every update regardless of whether a new version was fetched.
+        if ($state -in @('AlreadyLatest', 'SelfManaged', 'NoAutoUpdateSupport')) {
+            if (-not (& $runConfigScript $pkg)) { continue }
             & $addState $pkg $state $reason $null $from $to
             continue
         }
@@ -279,6 +307,9 @@ function Invoke-PackageUpdate {
                 }
             }
         }
+
+        # Idempotent config after a real upgrade, before completion re-register.
+        if (-not (& $runConfigScript $pkg)) { continue }
 
         # Re-register completion only when we actually upgraded — note
         # the AlreadyLatest / NotInstalled paths already short-circuited

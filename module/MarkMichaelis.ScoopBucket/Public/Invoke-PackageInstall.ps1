@@ -217,6 +217,24 @@ function Invoke-PackageInstall {
             }
         }
 
+        # ConfigScript: idempotent machine configuration re-applied on every
+        # install (Installed OR AlreadyInstalled), mirroring the always-run
+        # nature of completion registration. A throw fails the package, like
+        # PostInstallScript. See [Package].ConfigScript.
+        if ($pkg.ConfigScript) {
+            if ($DryRun) {
+                Write-UpdateStatus -Activity 'Install-Package' "  [DryRun] ConfigScript ($($pkg.Name))"
+            } else {
+                try {
+                    [void](& $pkg.ConfigScript $pkg 2>$null)
+                } catch {
+                    $reason = "ConfigScript threw: $($_.Exception.Message)"
+                    & $failPackage $pkg $reason
+                    continue
+                }
+            }
+        }
+
         if (-not $SkipCompletion -and -not $DryRun -and
             $pkg.Completion -ne 'none' -and $pkg.CliCommands.Count -gt 0) {
             foreach ($cli in $pkg.CliCommands) {

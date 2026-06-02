@@ -71,6 +71,17 @@ class Package {
     [scriptblock] $PostUpdateScript
     [scriptblock] $VerifyScript
 
+    # Idempotent machine configuration for this package (e.g. writing tool
+    # config files, persisting env vars, editing profiles). Unlike
+    # PostInstallScript (install-only) and PostUpdateScript (update-only and
+    # skipped on no-op upgrades), ConfigScript is re-applied on EVERY install
+    # and EVERY update -- and on demand via Update-PackageConfig -- mirroring
+    # the way declarative Completion is always (re)registered. It must be
+    # idempotent because it runs repeatedly. Receives the [Package] as
+    # $args[0], like the other *Script hooks. A throw marks the package
+    # Failed, consistent with PostInstallScript / PostUpdateScript.
+    [scriptblock] $ConfigScript
+
     # Engine-specific extra arguments appended to the install command.
     # Currently only consumed by Install-WingetPackage. Use for cases
     # where winget needs a flag beyond the standard ones (e.g.

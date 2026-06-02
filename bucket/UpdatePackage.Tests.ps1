@@ -460,6 +460,70 @@ Describe 'Invoke-PackageUpdate pipeline' -Tag 'Light','Module' {
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-PathFromRegistry -Times 0 -Exactly
     }
 
+    It 'runs ConfigScript after an Updated package' {
+        $script:configRan = $false
+        $pkgs = [Package[]]@(
+            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'
+                        ConfigScript = { $script:configRan = $true } }
+        )
+        $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion
+        $script:configRan | Should -BeTrue
+    }
+
+    It 'runs ConfigScript even when the engine reports AlreadyLatest' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage {
+            return @{ State='AlreadyLatest'; Reason='same' }
+        }
+        $script:configRan = $false
+        $pkgs = [Package[]]@(
+            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'
+                        ConfigScript = { $script:configRan = $true } }
+        )
+        $r = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion
+        ($r | Where-Object Name -eq 'A').Status | Should -Be 'AlreadyLatest'
+        $script:configRan | Should -BeTrue
+    }
+
+    It 'does NOT run ConfigScript when the package is NotInstalled' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage {
+            return @{ State='NotInstalled'; Reason='probe said no' }
+        }
+        $script:configRan = $false
+        $pkgs = [Package[]]@(
+            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'
+                        ConfigScript = { $script:configRan = $true } }
+        )
+        $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion
+        $script:configRan | Should -BeFalse
+    }
+
+    It 'fails the package when ConfigScript throws during update' {
+        $pkgs = [Package[]]@(
+            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'
+                        ConfigScript = { throw 'cfgboom' } }
+        )
+        $r = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion `
+            -ErrorAction SilentlyContinue -ErrorVariable errs
+        ($r | Where-Object Name -eq 'A').Status | Should -Be 'Failed'
+        ($r | Where-Object Name -eq 'A').Reason | Should -Match 'ConfigScript threw'
+        $ours = @($errs | Where-Object { $_.FullyQualifiedErrorId -like 'PackageUpdateFailed*' })
+        $ours.Count | Should -Be 1
+    }
+
+    It 'does not run ConfigScript under -WhatIf' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage { throw 'engine must not run under -WhatIf' }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-PackageUpdateIndex {
+            @{ 'Foo.A' = [pscustomobject]@{ Installed='1.0'; Available='1.0' } }
+        }
+        $script:configRan = $false
+        $pkgs = [Package[]]@(
+            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'
+                        ConfigScript = { $script:configRan = $true } }
+        )
+        $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion -WhatIf
+        $script:configRan | Should -BeFalse
+    }
+
     It 'DOES re-register completion when engine reports Updated' {
         $pkgs = [Package[]]@(
             [Package]@{
