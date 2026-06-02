@@ -40,6 +40,32 @@ Describe 'AIAgents bundle: Warp winget invocation' -Tag 'Light','Bundle' {
     }
 }
 
+Describe 'AIAgents bundle: MCP configuration is declarative' -Tag 'Light','Bundle' {
+    BeforeAll {
+        $bundlePath = Join-Path $PSScriptRoot 'AIAgents.ps1'
+        $script:mcpCfgPkg = & (Get-Module MarkMichaelis.ScoopBucket) {
+            param($p) Get-BundlePackageObjects -BundlePath $p
+        } $bundlePath | Where-Object { $_.Name -eq 'MCP Server Configuration' }
+    }
+
+    It 'declares an MCP Server Configuration package exactly once' {
+        @($script:mcpCfgPkg).Count | Should -Be 1
+    }
+
+    It 'wires the MCP servers through a declarative ConfigScript (not imperative tail code)' {
+        $script:mcpCfgPkg.ConfigScript | Should -Not -BeNullOrEmpty
+        $script:mcpCfgPkg.ConfigScript.GetType().Name | Should -Be 'ScriptBlock'
+        # The script delegates to the self-contained apply function so the
+        # framework re-applies the config on every install/update and via
+        # Update-PackageConfig.
+        "$($script:mcpCfgPkg.ConfigScript)" | Should -Match 'Install-AIAgentsMcpConfiguration'
+    }
+
+    It 'depends on Node.js so npx-based MCP servers resolve at agent start-up' {
+        $script:mcpCfgPkg.DependsOn | Should -Contain 'Node.js'
+    }
+}
+
 Describe 'AIAgents bundle: Gemini desktop -> Gemini CLI Companions' -Tag 'Light','Bundle' {
     BeforeAll {
         $script:aiPkgs = @(Get-Package -BucketPath $PSScriptRoot -Bundle 'AIAgents')
