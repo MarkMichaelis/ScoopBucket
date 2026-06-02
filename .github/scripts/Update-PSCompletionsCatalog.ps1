@@ -16,7 +16,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$OutPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'data\PSCompletionsCatalog.json')
+    [string]$OutPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'data' 'PSCompletionsCatalog.json')
 )
 
 $ErrorActionPreference = 'Stop'
