@@ -99,9 +99,13 @@ The `[Package]` class enforces enums on `Installer` / `Source` / `Scope` /
 `Package.Validate()` for cross-field invariants).
 
 The driver pipeline (validate → topo sort by `DependsOn` → engine
-dispatch → `PostInstallScript` → completion register → completion verify
-via `[CommandCompletion]::CompleteInput`) closes the long-standing gap
-where tab-completion was registered but never end-to-end verified.
+dispatch → `PostInstallScript` → `ConfigScript` → completion register →
+completion verify via `[CommandCompletion]::CompleteInput`) closes the
+long-standing gap where tab-completion was registered but never
+end-to-end verified. `ConfigScript` (see below) is the declarative,
+always-run configuration hook -- it is re-applied on every install and
+every update, surviving the bundle AST harvest the module helper paths
+use.
 
 To use the module locally:
 
@@ -159,10 +163,12 @@ and `PackageManagement\Get-Package`.
 
 **Migration status:** OSBasePackages, DeveloperBasePackages,
 ClientBasePackages, ChatGPT, and Aspire have been migrated to the
-declarative pattern. AIAgents (with its MCP-server matrix logic) and
-the small config-only bundles (`GitConfigVisualStudio`,
-`SetPowerConfiguration`, `McAfeeUninstall`) remain imperative for now;
-the discovery and validation tools handle both forms transparently.
+declarative pattern. AIAgents is migrated, and its MCP-server matrix
+wiring now runs as a declarative `ConfigScript` (see **Refreshing package
+configuration** below) so the module helper paths re-apply it. The small
+config-only bundles (`GitConfigVisualStudio`, `SetPowerConfiguration`,
+`McAfeeUninstall`) remain imperative for now; the discovery and validation
+tools handle both forms transparently.
 
 ### Personal post-install customization (`MarkMichaelis*` bundles)
 
@@ -483,6 +489,46 @@ Behavior:
   blocks were not refreshed.
 - `-WhatIf` / `-Confirm` are honored (the helper opts in to
   `SupportsShouldProcess` with `ConfirmImpact='Medium'`).
+
+### Refreshing package configuration (`ConfigScript` / `Update-PackageConfig`)
+
+Completions are declarative and the framework re-applies them across
+install and update. **Configuration** -- idempotent machine state a
+package owns, such as the AIAgents MCP-server wiring (`mcpServers` JSON /
+Codex TOML entries, the persisted GitHub PAT, the profile self-heal
+block) -- gets the same treatment via the `[Package].ConfigScript` hook.
+
+A `ConfigScript` is:
+
+- **Always run.** Invoked on every install (for both freshly `Installed`
+  and `AlreadyInstalled` packages) and every update (`Updated` *and* the
+  no-op `AlreadyLatest` / `SelfManaged` / `NoAutoUpdateSupport` states) --
+  unlike `PostInstallScript` (install only) and `PostUpdateScript` (update
+  only, skipped on no-op upgrades).
+- **Idempotent.** It receives the `[Package]` as `$args[0]` and re-applies
+  state; re-running just overwrites the package's own entries.
+- **Harvest-surviving.** The scriptblock is preserved by the
+  `Get-BundlePackageObjects` AST harvest, so the module helper paths
+  (`Install-Package` / `Update-Package`) run it -- the gap that previously
+  let `Install-Package AIAgents` install the apps but skip the MCP wiring.
+- **Fail-aware.** A throw marks the package `Failed`, like the other
+  `*Script` hooks. Under `-DryRun` / `-WhatIf` it logs only.
+
+To re-apply configuration on demand -- the clean "refresh the MCP servers"
+entry point -- use `Update-PackageConfig` (the configuration counterpart to
+`Update-PackageCompletion`):
+
+```powershell
+Import-Module MarkMichaelis.ScoopBucket -Force
+Update-PackageConfig AIAgents     # re-wire the MCP servers, no reinstall
+Update-PackageConfig              # re-apply every package's ConfigScript
+Update-PackageConfig -WhatIf      # preview what would run
+```
+
+It accepts a package **or** bundle name (or none / `*` for the whole
+bucket), harvests the real `[Package]` objects so scriptblocks are intact,
+and invokes each `ConfigScript`, returning one row per package
+(`Package`, `Bundle`, `Action`, `Reason`).
 
 ## Testing
 
