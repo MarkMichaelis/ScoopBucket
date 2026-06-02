@@ -176,6 +176,17 @@ function Install-Package {
     }
 
     # --- Dispatch (c): scoop install fallback for bare manifests -----------
+    # Some bare `<name>.json` manifests are ALSO declared by a [Package] in a
+    # bundle via its Id (with the owner prefix stripped -- e.g. the package
+    # whose Id is 'MarkMichaelis/VisualStudio2026Enterprise' declares the
+    # 'VisualStudio2026Enterprise.json' manifest). Those packages carry the
+    # completion metadata (CliCommands / Completion / NativeCommandScript) that
+    # path (a) would register when installed by Package.Name. Resolve that
+    # declaring [Package] after the install so reaching a manifest by its
+    # *manifest* name registers the same completers path (a) does. Manifests
+    # with no declaring [Package] are genuinely metadata-less and dispatch as a
+    # plain `scoop install` with no completion (#291).
+    $manifestPackagesToImport = New-Object System.Collections.Generic.List[object]
     foreach ($n in $manifestNames) {
         Write-UpdateStatus -Activity 'Install-Package' "Install-Package: dispatching manifest '$n' via scoop install (no declarative [Package] match)..."
         if ($DryRun) {
@@ -187,6 +198,58 @@ function Install-Package {
         # `Install-Package AddMarkMichaelisScoopBucket`); scoop will
         # resolve and run the manifest's installer.script.
         & scoop install $n
+
+        if (-not $SkipCompletion) {
+            # Find the declarative [Package] (if any) whose Id base name
+            # matches this manifest. The Id may carry an owner/bucket prefix
+            # ('<owner>/<manifest>'); the manifest base name is the segment
+            # after the last '/'.
+            $declaring = $null
+            foreach ($b in $bundles) {
+                foreach ($p in $b.Packages) {
+                    if (-not $p.Id) { continue }
+                    $manifestBase = ($p.Id -split '/')[-1]
+                    if ($manifestBase -ieq $n -and $p.Completion -ne 'none') {
+                        $declaring = $p
+                        break
+                    }
+                }
+                if ($declaring) { break }
+            }
+
+            if ($declaring -and $declaring.CliCommands -and $declaring.CliCommands.Count -gt 0) {
+                # Persistent sentinel-block registration -- mirrors the path (a)
+                # flow in Invoke-PackageInstall so a fresh pwsh inherits the
+                # completers on next startup.
+                foreach ($cli in $declaring.CliCommands) {
+                    $registerArgs = @{ Cli = $cli; Mode = $declaring.Completion }
+                    if ($declaring.NativeCommandScript) { $registerArgs['NativeCommand'] = $declaring.NativeCommandScript }
+                    # Prefer the loader's pre-captured native completer text
+                    # (NativeCommandOutputs[$cli]) when present -- the live
+                    # NativeCommandScript scriptblock is stripped by the
+                    # Get-BundlePackages JSON round-trip.
+                    if ($declaring.PSObject.Properties.Name -contains 'NativeCommandOutputs' -and $declaring.NativeCommandOutputs) {
+                        $no = $declaring.NativeCommandOutputs
+                        $preCaptured = $null
+                        if ($no -is [hashtable] -and $no.ContainsKey($cli)) {
+                            $preCaptured = [string]$no[$cli]
+                        } elseif ($no.PSObject -and ($no.PSObject.Properties.Name -contains $cli)) {
+                            $preCaptured = [string]$no.$cli
+                        }
+                        if ($preCaptured -and $preCaptured.Trim()) {
+                            $registerArgs['PreCapturedNative'] = $preCaptured
+                        }
+                    }
+                    try {
+                        $null = Register-PackageCompletion @registerArgs
+                    } catch {
+                        Write-Warning "  $n/$cli completion registration failed: $($_.Exception.Message)"
+                    }
+                }
+                # Queue the declaring package for in-session import below.
+                [void]$manifestPackagesToImport.Add($declaring)
+            }
+        }
     }
 
     # --- Post-install: register completers in the caller's session ---------
@@ -221,6 +284,12 @@ function Install-Package {
             foreach ($p in $b.Packages) {
                 if ($p.Completion -ne 'none') { [void]$packagesToImport.Add($p) }
             }
+        }
+        # Path (c): packages whose manifest was installed via `scoop install`
+        # but that a bundle declares via Id (#291). Already filtered to
+        # Completion != 'none' and CliCommands present in the dispatch loop.
+        foreach ($p in $manifestPackagesToImport) {
+            [void]$packagesToImport.Add($p)
         }
         if ($packagesToImport.Count -gt 0) {
             $imported = Import-PackageCompletion -Package $packagesToImport
