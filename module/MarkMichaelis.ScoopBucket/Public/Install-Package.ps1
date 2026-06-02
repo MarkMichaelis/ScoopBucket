@@ -198,8 +198,14 @@ function Install-Package {
         # `Install-Package AddMarkMichaelisScoopBucket`); scoop will
         # resolve and run the manifest's installer.script.
         & scoop install $n
+        # Capture scoop's exit status BEFORE any other command can clobber
+        # $LASTEXITCODE. A failed install must not register completers for a
+        # CLI that was never actually installed. Treat a null exit code (no
+        # native command ran, e.g. a stubbed scoop) as success so the
+        # best-effort registration still fires in that case.
+        $installExit = $global:LASTEXITCODE
 
-        if (-not $SkipCompletion) {
+        if (-not $SkipCompletion -and ($null -eq $installExit -or $installExit -eq 0)) {
             # Find the declarative [Package] (if any) whose Id base name
             # matches this manifest. The Id may carry an owner/bucket prefix
             # ('<owner>/<manifest>'); the manifest base name is the segment
