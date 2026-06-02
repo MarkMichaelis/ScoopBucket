@@ -1,7 +1,7 @@
 #requires -Version 7.0
 <#
 .SYNOPSIS
-    Refresh bucket/PSCompletionsCatalog.json from the upstream
+    Refresh data/PSCompletionsCatalog.json from the upstream
     abgox/PSCompletions completions/ directory.
 
 .DESCRIPTION
@@ -16,7 +16,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$OutPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'bucket\PSCompletionsCatalog.json')
+    [string]$OutPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'data\PSCompletionsCatalog.json')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,5 +36,7 @@ $payload = [ordered]@{
 }
 
 $json = ($payload | ConvertTo-Json -Depth 4)
+$outDir = Split-Path -Parent $OutPath
+if ($outDir -and -not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
 Set-Content -Path $OutPath -Value $json -Encoding UTF8
 Write-Host "Wrote $($names.Count) entries to $OutPath"

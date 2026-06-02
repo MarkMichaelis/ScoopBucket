@@ -176,9 +176,9 @@ Describe 'Declarative bundles (data-driven)' -Tag 'Light','Bundle' {
 
     It "<Pkg.Name> (<Bundle>) Completion='pscompletions' CLI is in upstream PSCompletions catalog" -ForEach $script:pkgCases {
         if ($Pkg.Completion -ne 'pscompletions') { return }
-        $catalogPath = Join-Path $PSScriptRoot 'PSCompletionsCatalog.json'
+        $catalogPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'data/PSCompletionsCatalog.json'
         if (-not (Test-Path $catalogPath)) {
-            Set-ItResult -Skipped -Because "PSCompletionsCatalog.json snapshot missing; run .github/scripts/Update-PSCompletionsCatalog.ps1"
+            Set-ItResult -Skipped -Because "data/PSCompletionsCatalog.json snapshot missing; run .github/scripts/Update-PSCompletionsCatalog.ps1"
             return
         }
         $catalog = @((Get-Content -Raw -Path $catalogPath | ConvertFrom-Json).Completions)
