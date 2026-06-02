@@ -62,7 +62,8 @@ function Update-PackageCompletion {
     param(
         [string]$BucketPath,
         [switch]$Force,
-        [string]$ProfilePath
+        [string]$ProfilePath,
+        [switch]$IncludeUnchanged
     )
 
     $bundleArgs = @{}
@@ -167,7 +168,7 @@ function Update-PackageCompletion {
                     $results.Add([pscustomobject]@{
                         Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
                         Mode = $effectiveMode; Action = 'WhatIf'; Source = 'Skipped'
-                        Reason = '-WhatIf or -Confirm declined.'
+                        Reason = '(would register)'
                     })
                     continue
                 }
@@ -200,9 +201,19 @@ function Update-PackageCompletion {
     }
 
     $arr = $results.ToArray()
-    # The returned row objects ARE the output -- a Write-Host summary here would
-    # duplicate them (the same anti-pattern removed from the package result
-    # tables). Mirror a one-line tally to the transient verbose stream only.
+
+    # Tag every row with a type name so the format view can render a tidy,
+    # consistent column set (mirrors the #283 PackageResult table).
+    foreach ($row in $arr) {
+        if ($row -and -not ($row.PSObject.TypeNames -contains 'MarkMichaelis.ScoopBucket.CompletionResult')) {
+            $row.PSObject.TypeNames.Insert(0, 'MarkMichaelis.ScoopBucket.CompletionResult')
+        }
+    }
+
+    # The returned row objects ARE the output -- a Write-Host tally of the
+    # VISIBLE rows would duplicate them (the anti-pattern removed from the
+    # package tables in #276). Mirror a one-line tally to the transient verbose
+    # stream only.
     $byAction = $arr | Group-Object Action | ForEach-Object { "$($_.Name)=$($_.Count)" }
     if ($byAction) {
         Write-Verbose "Update-PackageCompletion: $($byAction -join ', ')"
@@ -210,5 +221,34 @@ function Update-PackageCompletion {
         Write-Verbose 'Update-PackageCompletion: no eligible CLIs found.'
     }
 
-    return ,$arr
+    if ($IncludeUnchanged) {
+        return , $arr
+    }
+
+    # Changed-only view (#285): show only rows that represent an action --
+    # Registered (we wrote a block) or WhatIf (we would). Preserved (already in
+    # the profile) and Skipped (CLI absent / no native source) are the quiet
+    # majority; summarize their counts on a host-only line that, unlike the
+    # removed #276 tally, never duplicates a visible row.
+    $changed = @('Registered', 'WhatIf')
+    $shown = New-Object System.Collections.Generic.List[object]
+    $suppressed = @{}
+    foreach ($row in $arr) {
+        if ($changed -contains $row.Action) {
+            [void]$shown.Add($row)
+            continue
+        }
+        $label = "$($row.Action)".ToLowerInvariant()
+        if ($suppressed.ContainsKey($label)) { $suppressed[$label]++ } else { $suppressed[$label] = 1 }
+    }
+
+    if ($suppressed.Count -gt 0) {
+        $parts = $suppressed.GetEnumerator() |
+            Sort-Object @{ Expression = 'Value'; Descending = $true }, @{ Expression = 'Key'; Descending = $false } |
+            ForEach-Object { "$($_.Value) $($_.Key)" }
+        Write-Host ("Hidden: {0}   (-IncludeUnchanged to show all)" -f ($parts -join ', ')) -ForegroundColor DarkGray
+        Write-Host ''
+    }
+
+    return , $shown.ToArray()
 }

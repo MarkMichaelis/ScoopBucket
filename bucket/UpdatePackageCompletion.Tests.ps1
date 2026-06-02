@@ -120,7 +120,7 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
 
     It 'skips pscompletions packages whose CLI is not on PATH' {
         $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
-            -ProfilePath $script:profilePath -WhatIf
+            -ProfilePath $script:profilePath -WhatIf -IncludeUnchanged
         $offPath = $results | Where-Object Cli -EQ $script:offPathCli
         $offPath | Should -Not -BeNullOrEmpty
         $offPath.Action | Should -Be 'Skipped'
@@ -170,7 +170,7 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
 
     It "ignores Completion='none' and packages without CliCommands" {
         $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
-            -ProfilePath $script:profilePath -WhatIf
+            -ProfilePath $script:profilePath -WhatIf -IncludeUnchanged
         ($results | Where-Object Cli -EQ "$($script:onPathCli)-none") | Should -BeNullOrEmpty
         ($results | Where-Object Package -EQ 'NoCliCommands')          | Should -BeNullOrEmpty
     }
@@ -208,22 +208,80 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
         Set-Content -Path $script:profilePath -Value $existing -Encoding UTF8
 
         $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
-            -ProfilePath $script:profilePath -WhatIf
+            -ProfilePath $script:profilePath -WhatIf -IncludeUnchanged
         $bw = $results | Where-Object Cli -EQ $script:onPathCli
         $bw.Action | Should -Be 'Preserved'
         $bw.Reason | Should -Match 'pass -Force'
     }
 
-    It 'returns row objects without writing a Write-Host summary (#276 quiet output)' {
+    It 'does not write a per-row Write-Host tally with -IncludeUnchanged (#276 quiet output)' {
         # The returned rows ARE the output; the old one-line Write-Host tally
-        # duplicated them (the anti-pattern removed from the package tables).
-        # It is now a transient Write-Verbose, so Write-Host must never fire.
+        # duplicated them. With -IncludeUnchanged there are no suppressed rows
+        # to summarize, so Write-Host must never fire.
         Mock -ModuleName MarkMichaelis.ScoopBucket Write-Host { }
 
         $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
-            -ProfilePath $script:profilePath -WhatIf
+            -ProfilePath $script:profilePath -WhatIf -IncludeUnchanged
 
         $results | Should -Not -BeNullOrEmpty
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Write-Host -Times 0 -Exactly
+    }
+}
+
+Describe 'Update-PackageCompletion changed-only output (#285)' -Tag 'Light' {
+    BeforeEach {
+        if (Test-Path $script:profilePath) { Remove-Item -LiteralPath $script:profilePath -Force }
+    }
+
+    It 'returns only changed rows (Registered / WhatIf) and suppresses Skipped by default' {
+        # Fresh profile + -WhatIf: every eligible on-PATH CLI is a WhatIf row
+        # (shown); the off-PATH CLI is Skipped (suppressed by default).
+        $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
+            -ProfilePath $script:profilePath -WhatIf
+
+        ($results | Where-Object Action -EQ 'Skipped')  | Should -BeNullOrEmpty
+        ($results | Where-Object Cli -EQ $script:offPathCli) | Should -BeNullOrEmpty
+        ($results | Where-Object Action -EQ 'WhatIf')   | Should -Not -BeNullOrEmpty
+        ($results | ForEach-Object Action | Sort-Object -Unique) |
+            ForEach-Object { $_ | Should -BeIn @('Registered', 'WhatIf') }
+    }
+
+    It 'prints a host-only Hidden summary line for the suppressed rows' {
+        # Record every Write-Host line via a global list. ParameterFilter on
+        # the positional $Object is brittle across hosts, so we capture the
+        # rendered text directly and assert on the joined output.
+        $global:scoopBucketHostLines = New-Object System.Collections.Generic.List[string]
+        Mock -ModuleName MarkMichaelis.ScoopBucket Write-Host {
+            $global:scoopBucketHostLines.Add([string]$Object)
+        }
+
+        $null = Update-PackageCompletion -BucketPath $script:tmpBucket `
+            -ProfilePath $script:profilePath -WhatIf
+
+        try {
+            ($global:scoopBucketHostLines -join "`n") |
+                Should -Match 'Hidden: .*skipped.*-IncludeUnchanged'
+        } finally {
+            Remove-Variable -Name scoopBucketHostLines -Scope Global -ErrorAction Ignore
+        }
+    }
+
+    It '-IncludeUnchanged returns every row (including Skipped) and prints no Hidden line' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Write-Host { }
+
+        $all = Update-PackageCompletion -BucketPath $script:tmpBucket `
+            -ProfilePath $script:profilePath -WhatIf -IncludeUnchanged
+
+        ($all | Where-Object Action -EQ 'Skipped') | Should -Not -BeNullOrEmpty
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Write-Host -Times 0 -Exactly
+    }
+
+    It 'tags every returned row with the CompletionResult type name for the format view' {
+        $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
+            -ProfilePath $script:profilePath -WhatIf
+        $results | Should -Not -BeNullOrEmpty
+        foreach ($r in $results) {
+            $r.PSObject.TypeNames | Should -Contain 'MarkMichaelis.ScoopBucket.CompletionResult'
+        }
     }
 }
