@@ -257,6 +257,30 @@ Describe 'Package.Validate() — invariants' -Tag 'Light', 'Module' {
         { $p.Validate() } | Should -Throw -ExpectedMessage '*NativeCommandScript is required*'
     }
 
+    It 'rejects NativeCompletionKind when no NativeCommandScript is present' {
+        $p = [Package]@{
+            Name        = 'x'
+            Installer   = 'scoop'
+            Id          = 'main/x'
+            NativeCompletionKind = 'native'
+        }
+        { $p.Validate() } | Should -Throw -ExpectedMessage '*NativeCompletionKind*only valid alongside a NativeCommandScript*'
+    }
+
+    It 'accepts NativeCompletionKind alongside a NativeCommandScript' {
+        $p = [Package]@{
+            Name        = 'x'
+            Installer   = 'scoop'
+            Id          = 'main/x'
+            CliCommands = @('x')
+            Completion  = 'native'
+            NativeCompletionKind = 'native'
+            NativeCommandScript  = { 'x completion powershell' }
+            ExpectedCompletions  = @{ x = @('--help') }
+        }
+        $p.GetValidationError() | Should -BeNullOrEmpty
+    }
+
     It 'rejects self-referential DependsOn' {
         $p = [Package]@{
             Name      = 'x'

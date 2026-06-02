@@ -218,6 +218,7 @@ Register-ArgumentCompleter -Native -CommandName ffmpeg -ScriptBlock {
         Id          = 'main/ripgrep'
         CliCommands = @('rg')
         Completion  = 'native'
+        NativeCompletionKind = 'native'
         NativeCommandScript = { rg --generate complete-powershell }
         Notes       = 'scoop main/ripgrep gives v14+, required for --generate complete-powershell. See #73.'
         ExpectedCompletions = @{ rg = @('--help','--version','--color') }

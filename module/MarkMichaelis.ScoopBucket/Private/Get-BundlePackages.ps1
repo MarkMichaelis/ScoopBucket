@@ -104,6 +104,7 @@ function global:Invoke-PackageInstall {
             Scope       = `$p.Scope
             CliCommands = @(`$p.CliCommands)
             Completion  = `$p.Completion
+            NativeCompletionKind = `$p.NativeCompletionKind
             ExpectedCompletions = `$p.ExpectedCompletions
             NativeCommandOutputs = `$nativeOutputs
             DependsOn   = @(`$p.DependsOn)

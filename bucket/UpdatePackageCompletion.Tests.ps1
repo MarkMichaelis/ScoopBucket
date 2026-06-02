@@ -19,7 +19,8 @@ BeforeAll {
     #   pscompletions-bw       — pscompletions mode (eligible)
     #   pscompletions-other    — pscompletions mode but CLI NOT on PATH (skipped)
     #   auto-no-native         — auto mode, no NativeCommandScript (eligible)
-    #   auto-with-native       — auto mode, with NativeCommandScript  (skipped — repair can't rebuild native)
+    #   auto-with-native       — auto mode, NativeCommandScript + NativeCompletionKind='native' (Mode=native)
+    #   native-only            — native mode, NativeCommandScript, kind unset (Mode=curated default)
     #   none-mode              — Completion='none' (ignored entirely)
     #   no-clicommands         — Completion='auto' but CliCommands=@() (ignored)
     $script:tmpBucket = Join-Path ([System.IO.Path]::GetTempPath()) ("ScoopBucket-update-completion-$([guid]::NewGuid().ToString('N'))")
@@ -63,6 +64,7 @@ if (Test-Path `$scoopBucketPsd1) { Import-Module `$scoopBucketPsd1 -Force } else
         Id                  = 'Test.AutoWithNative'
         CliCommands         = @('$($script:onPathCli)-native')
         Completion          = 'auto'
+        NativeCompletionKind = 'native'
         NativeCommandScript = { 'auto-native-completion-source' }
     }
     [Package]@{
@@ -160,7 +162,9 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
         $nativeOnly | Should -Not -BeNullOrEmpty
         $nativeOnly.Action | Should -Be 'Registered'
         $nativeOnly.Source | Should -Be 'Native'
-        $nativeOnly.Mode   | Should -Be 'native'
+        # NativeOnly declares no NativeCompletionKind, so the hand-maintained
+        # default surfaces as 'curated' (#289).
+        $nativeOnly.Mode   | Should -Be 'curated'
 
         # v3 (#216): payload lives in the sidecar, not the profile.
         $sidecar = Join-Path (Split-Path -Parent $script:profilePath) "completions\$($script:onPathCli)-nativeonly.ps1"
@@ -190,7 +194,9 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
         # because that's the only registration path we can safely repair.
         $twin.Mode | Should -Be 'pscompletions'
 
-        # auto-mode WITH a NativeCommandScript now repairs via native too.
+        # auto-mode WITH a NativeCommandScript now repairs via native too;
+        # AutoWithNative declares NativeCompletionKind='native' so it shows
+        # the tool-sourced label (#289).
         $autoNative = $results | Where-Object Cli -EQ "$($script:onPathCli)-native"
         $autoNative | Should -Not -BeNullOrEmpty
         $autoNative.Action | Should -Be 'WhatIf'
@@ -199,7 +205,7 @@ Describe 'Update-PackageCompletion eligibility classification' -Tag 'Light' {
         $nativeOnly = $results | Where-Object Cli -EQ "$($script:onPathCli)-nativeonly"
         $nativeOnly | Should -Not -BeNullOrEmpty
         $nativeOnly.Action | Should -Be 'WhatIf'
-        $nativeOnly.Mode   | Should -Be 'native'
+        $nativeOnly.Mode   | Should -Be 'curated'
     }
 
     It "preserves existing sentinel blocks unless -Force is passed" {
@@ -316,5 +322,48 @@ Describe 'Update-PackageCompletion quiet -WhatIf output (#287)' -Tag 'Light' {
         foreach ($row in $whatIf) {
             $row.Source | Should -Be 'WhatIf'
         }
+    }
+}
+
+Describe 'Update-PackageCompletion native vs curated Mode (#289)' -Tag 'Light' {
+    BeforeEach {
+        if (Test-Path $script:profilePath) { Remove-Item -LiteralPath $script:profilePath -Force }
+    }
+
+    It "reports Mode='native' for packages whose completion is sourced from the tool (NativeCompletionKind='native')" {
+        # AutoWithNative declares NativeCompletionKind='native', modelling a
+        # tool-sourced completer (dotnet/rg/warp/todoist). The Mode column must
+        # say 'native' -- NOT the generic registration label.
+        $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
+            -ProfilePath $script:profilePath -WhatIf -IncludeUnchanged
+
+        $row = $results | Where-Object Cli -EQ "$($script:onPathCli)-native"
+        $row | Should -Not -BeNullOrEmpty
+        $row.Mode | Should -Be 'native'
+    }
+
+    It "reports Mode='curated' for a NativeCommandScript package that leaves NativeCompletionKind unset" {
+        # NativeOnly ships a hand-maintained list with no NativeCompletionKind,
+        # so it must surface as 'curated' rather than the meaningless blanket
+        # 'native' the column produced before #289.
+        $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
+            -ProfilePath $script:profilePath -WhatIf -IncludeUnchanged
+
+        $row = $results | Where-Object Cli -EQ "$($script:onPathCli)-nativeonly"
+        $row | Should -Not -BeNullOrEmpty
+        $row.Mode | Should -Be 'curated'
+    }
+
+    It 'never reports a blanket native Mode for every completion-bearing row' {
+        # Anti-regression for the original complaint: at least one native
+        # registration must be 'curated' so the column carries signal.
+        $results = Update-PackageCompletion -BucketPath $script:tmpBucket `
+            -ProfilePath $script:profilePath -WhatIf -IncludeUnchanged
+
+        $modes = $results |
+            Where-Object { $_.Source -eq 'Native' -or $_.Action -eq 'WhatIf' } |
+            ForEach-Object Mode | Sort-Object -Unique
+        $modes | Should -Contain 'curated'
+        $modes | Should -Contain 'native'
     }
 }
