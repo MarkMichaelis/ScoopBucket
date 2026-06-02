@@ -332,6 +332,10 @@ Describe 'Invoke-PackageUpdate pipeline' -Tag 'Light','Module' {
         Mock -ModuleName MarkMichaelis.ScoopBucket Update-DotnetToolPackage { return @{ State='Updated'; Reason=$null } }
         Mock -ModuleName MarkMichaelis.ScoopBucket Update-PathFromRegistry  { }
         Mock -ModuleName MarkMichaelis.ScoopBucket Register-PackageCompletion { }
+        # The version probe runs a bulk CLI query per installer. Stub it out
+        # by default so real-run pipeline tests stay fast and deterministic;
+        # individual tests that exercise -WhatIf accuracy override it (#283).
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-PackageUpdateIndex { @{} }
     }
 
     It 'threads -PackageTimeoutMinutes to Update-WingetPackage (#269)' {
@@ -469,11 +473,30 @@ Describe 'Invoke-PackageUpdate pipeline' -Tag 'Light','Module' {
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Register-PackageCompletion -Times 2 -Exactly
     }
 
-    It 'engines receive -WhatIf when the cmdlet is called with -WhatIf' {
-        Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -ParameterFilter { $WhatIf } { return @{ State='Updated'; Reason='(WhatIf)' } }
+    It 'under -WhatIf, probes the index instead of invoking the engine and reports the version transition (#283)' {
+        # New contract: a dry run no longer calls the engine -- it consults the
+        # pre-built version index. An available upgrade reports Updated with a
+        # from -> to transition.
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage { throw 'engine must not run under -WhatIf' }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-PackageUpdateIndex {
+            @{ winget = @{ 'foo.a' = @{ Installed = '1.0'; Available = '2.0' } } }
+        }
         $pkgs = [Package[]]@([Package]@{ Name='A'; Installer='winget'; Id='Foo.A' })
-        $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -WhatIf -SkipCompletion
-        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -Times 1 -Exactly -ParameterFilter { $WhatIf }
+        $r = @(Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -WhatIf -SkipCompletion)
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage -Times 0 -Exactly
+        $r[0].Status      | Should -Be 'Updated'
+        $r[0].VersionFrom | Should -Be '1.0'
+        $r[0].VersionTo   | Should -Be '2.0'
+    }
+
+    It 'under -WhatIf, an already-current package reports AlreadyLatest not Updated (#283)' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage { throw 'engine must not run under -WhatIf' }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-PackageUpdateIndex {
+            @{ winget = @{ 'foo.a' = @{ Installed = '2.0'; Available = '' } } }
+        }
+        $pkgs = [Package[]]@([Package]@{ Name='A'; Installer='winget'; Id='Foo.A' })
+        $r = @(Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -WhatIf -SkipCompletion)
+        $r[0].Status | Should -Be 'AlreadyLatest'
     }
 }
 
@@ -592,6 +615,7 @@ Describe 'Quiet-by-default update output (#276)' -Tag 'Light','Module' {
             Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }
             Mock Update-PathFromRegistry { }
             Mock Register-PackageCompletion { }
+            Mock Get-PackageUpdateIndex { @{} }
             $captured = New-Object System.Collections.Generic.List[object]
             Mock Write-Host -MockWith {
                 $captured.Add([pscustomobject]@{ Message = [string]$Object })
@@ -620,6 +644,7 @@ Describe 'Quiet-by-default update output (#276)' -Tag 'Light','Module' {
             Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }
             Mock Update-PathFromRegistry { }
             Mock Register-PackageCompletion { }
+            Mock Get-PackageUpdateIndex { @{} }
             Mock Write-Host { }
             $statuses = New-Object System.Collections.Generic.List[object]
             Mock Write-Progress -MockWith {
@@ -641,6 +666,7 @@ Describe 'Quiet-by-default update output (#276)' -Tag 'Light','Module' {
             Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }
             Mock Update-PathFromRegistry { }
             Mock Register-PackageCompletion { }
+            Mock Get-PackageUpdateIndex { @{} }
             Mock Write-Host { }
             Mock Write-Progress { }
 

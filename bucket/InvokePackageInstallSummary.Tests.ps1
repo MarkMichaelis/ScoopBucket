@@ -64,14 +64,18 @@ Describe 'Invoke-PackageInstall result emission' -Tag 'Light','Module' {
         $goodLine | Should -Not -BeNullOrEmpty
         $badLine  | Should -Not -BeNullOrEmpty
 
-        # Glyph carries the signal even when color is stripped.
-        $goodLine | Should -Match ([regex]::Escape('+ Installed'))
-        $badLine  | Should -Match ([regex]::Escape('x Failed'))
+        # Glyph carries the signal even when color is stripped: the new view
+        # renders a glyph-only Status column (no text label), Name first.
+        $goodLine | Should -Match ([regex]::Escape('+'))
+        $goodLine | Should -Match 'GoodPkg'
+        $badLine  | Should -Match ([regex]::Escape('x'))
+        $badLine  | Should -Match 'BadPkg'
 
-        # Color reinforces it: green for Installed, red for Failed.
+        # Color reinforces it: green for Installed, red for Failed. The glyph
+        # is wrapped in the status color, so assert the colored glyph directly.
         $green = $PSStyle.Foreground.Green
         $red   = $PSStyle.Foreground.Red
-        $goodLine | Should -Match ([regex]::Escape($green))
-        $badLine  | Should -Match ([regex]::Escape($red))
+        $goodLine | Should -Match ([regex]::Escape($green + '+'))
+        $badLine  | Should -Match ([regex]::Escape($red + 'x'))
     }
 }

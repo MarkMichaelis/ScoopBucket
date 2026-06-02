@@ -69,8 +69,12 @@
       <TableControl>
         <TableHeaders>
           <TableColumnHeader>
-            <Label>Status</Label>
-            <Width>21</Width>
+            <Label> </Label>
+            <Width>2</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Name</Label>
+            <Width>26</Width>
           </TableColumnHeader>
           <TableColumnHeader>
             <Label>Installer</Label>
@@ -81,15 +85,7 @@
             <Width>8</Width>
           </TableColumnHeader>
           <TableColumnHeader>
-            <Label>Id</Label>
-            <Width>34</Width>
-          </TableColumnHeader>
-          <TableColumnHeader>
-            <Label>Name</Label>
-            <Width>26</Width>
-          </TableColumnHeader>
-          <TableColumnHeader>
-            <Label>Reason</Label>
+            <Label>Details</Label>
           </TableColumnHeader>
         </TableHeaders>
         <TableRowEntries>
@@ -97,23 +93,22 @@
             <TableColumnItems>
               <TableColumnItem>
                 <ScriptBlock>
-                  # Render Status as a colorblind-safe glyph + label, colored
-                  # via $PSStyle when the host supports it. The underlying
-                  # .Status property stays a plain string for filtering/export.
+                  # Render Status as a colorblind-safe glyph ONLY (no label),
+                  # colored via $PSStyle when the host supports it. The
+                  # underlying .Status string is unchanged for filtering/export.
                   $map = @{
-                    Updated             = @('+', 'Updated')
-                    Installed           = @('+', 'Installed')
-                    Uninstalled         = @('-', 'Uninstalled')
-                    AlreadyLatest       = @('=', 'AlreadyLatest')
-                    AlreadyInstalled    = @('=', 'AlreadyInstalled')
-                    Skipped             = @('>', 'Skipped')
-                    Failed              = @('x', 'Failed')
-                    NotInstalled        = @('!', 'NotInstalled')
-                    SelfManaged         = @('@', 'SelfManaged')
-                    NoAutoUpdateSupport = @('-', 'NoAutoUpdate')
+                    Updated             = '+'
+                    Installed           = '+'
+                    Uninstalled         = '-'
+                    AlreadyLatest       = '='
+                    AlreadyInstalled    = '='
+                    Skipped             = '~'
+                    Failed              = 'x'
+                    NotInstalled        = 'o'
+                    SelfManaged         = '@'
+                    NoAutoUpdateSupport = '-'
                   }
-                  $g, $label = if ($map.ContainsKey($_.Status)) { $map[$_.Status] } else { @('?', $_.Status) }
-                  $text = '{0} {1}' -f $g, $label
+                  $g = if ($map.ContainsKey($_.Status)) { $map[$_.Status] } else { '?' }
                   $style = $null
                   if ($null -ne $PSStyle -and $PSStyle.OutputRendering -ne 'PlainText') {
                     switch ($_.Status) {
@@ -124,13 +119,16 @@
                       'AlreadyInstalled'    { $style = $PSStyle.Foreground.BrightBlack }
                       'Skipped'             { $style = $PSStyle.Foreground.Yellow }
                       'Failed'              { $style = $PSStyle.Foreground.Red }
-                      'NotInstalled'        { $style = $PSStyle.Foreground.Red }
+                      'NotInstalled'        { $style = $PSStyle.Foreground.Yellow }
                       'SelfManaged'         { $style = $PSStyle.Foreground.Cyan }
                       'NoAutoUpdateSupport' { $style = $PSStyle.Foreground.BrightBlack }
                     }
                   }
-                  if ($style) { "$style$text$($PSStyle.Reset)" } else { $text }
+                  if ($style) { "$style$g$($PSStyle.Reset)" } else { $g }
                 </ScriptBlock>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>Name</PropertyName>
               </TableColumnItem>
               <TableColumnItem>
                 <PropertyName>Installer</PropertyName>
@@ -139,13 +137,7 @@
                 <PropertyName>Scope</PropertyName>
               </TableColumnItem>
               <TableColumnItem>
-                <PropertyName>Id</PropertyName>
-              </TableColumnItem>
-              <TableColumnItem>
-                <PropertyName>Name</PropertyName>
-              </TableColumnItem>
-              <TableColumnItem>
-                <PropertyName>Reason</PropertyName>
+                <ScriptBlock>$_.Details()</ScriptBlock>
               </TableColumnItem>
             </TableColumnItems>
           </TableRowEntry>

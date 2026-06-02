@@ -68,6 +68,22 @@ function Invoke-PackageUpdate {
 
     Write-UpdateStatus "=== Invoke-PackageUpdate: $Bundle ($($ordered.Count) packages) ==="
 
+    # Build the version/availability index ONCE for every non-custom installer
+    # in scope (#283). It makes -WhatIf accurate (already-latest packages no
+    # longer masquerade as "will update") and supplies the `from -> to` version
+    # transition shown in the Details column. A flaky probe yields an empty map
+    # (Resolve-PackageVersionInfo then falls back to optimistic/unknown), so it
+    # never aborts the sweep.
+    $nonCustomInstallers = @(
+        $ordered |
+            Where-Object { $_.Installer -ne 'custom' -and -not $_.CustomInstallScript } |
+            ForEach-Object { [string]$_.Installer } |
+            Sort-Object -Unique
+    )
+    $updateIndex = if ($nonCustomInstallers.Count -gt 0) {
+        Get-PackageUpdateIndex -Installers $nonCustomInstallers
+    } else { @{} }
+
     $states = New-Object System.Collections.Generic.List[object]
     $total  = $ordered.Count
     $idx    = 0
@@ -79,8 +95,8 @@ function Invoke-PackageUpdate {
     # interleaved with each engine's live progress output. Pipeline
     # consumers are unaffected.
     $addState = {
-        param($p, $st, $rs, $err)
-        $states.Add([pscustomobject]@{ Pkg = $p; State = $st; Reason = $rs; Err = $err })
+        param($p, $st, $rs, $err, $from, $to)
+        $states.Add([pscustomobject]@{ Pkg = $p; State = $st; Reason = $rs; Err = $err; From = $from; To = $to })
     }
 
     # Build + write the standard Failed ErrorRecord, and record the state
@@ -100,6 +116,8 @@ function Invoke-PackageUpdate {
     foreach ($pkg in $ordered) {
         $state  = 'Pending'
         $reason = $null
+        $from   = $null
+        $to     = $null
         $idx++
         $pct = if ($total -gt 0) { [int](($idx - 1) / $total * 100) } else { 0 }
 
@@ -157,7 +175,7 @@ function Invoke-PackageUpdate {
                             # Metadata-only fallback path lost the scriptblock.
                             $result = @{ State = 'NoAutoUpdateSupport'; Reason = 'Reinstall requested but this package was loaded without its CustomInstallScript (metadata-only); Reinstall unavailable.' }
                         } elseif ($isWhatIf) {
-                            $result = @{ State = 'Updated'; Reason = '(WhatIf)' }
+                            $result = @{ State = 'Updated'; Reason = '(Reinstall) (WhatIf)' }
                         } else {
                             [void](& $pkg.CustomInstallScript $pkg)
                             if ($pkg.VerifyScript) {
@@ -180,13 +198,47 @@ function Invoke-PackageUpdate {
                     }
                 }
             } else {
-                $result = switch ($pkg.Installer) {
-                    'winget'      { Update-WingetPackage     -Package $pkg -WhatIf:$isWhatIf -TimeoutMinutes $PackageTimeoutMinutes }
-                    'scoop'       { Update-ScoopPackage      -Package $pkg -WhatIf:$isWhatIf }
-                    'choco'       { Update-ChocoPackage      -Package $pkg -WhatIf:$isWhatIf }
-                    'npmGlobal'   { Update-NpmGlobalPackage  -Package $pkg -WhatIf:$isWhatIf }
-                    'dotnetTool'  { Update-DotnetToolPackage -Package $pkg -WhatIf:$isWhatIf }
-                    default       { throw "Invoke-PackageUpdate: unknown Installer '$($pkg.Installer)' for '$($pkg.Name)'." }
+                # Probe this package's installed/available versions from the
+                # pre-built index (#283). Drives accurate -WhatIf and the
+                # `from -> to` Details annotation.
+                $verInfo = Resolve-PackageVersionInfo -Package $pkg -Index $updateIndex
+                if ($verInfo.Installed) { $from = $verInfo.Installed }
+
+                if ($isWhatIf) {
+                    # Dry run: decide the outcome from the probe instead of
+                    # invoking the engine. Already-latest packages now report
+                    # AlreadyLatest (=) rather than a misleading Updated (+).
+                    if ($verInfo.Present -eq $false) {
+                        $result = @{ State = 'NotInstalled'; Reason = $null }
+                    } elseif ($verInfo.UpdateAvailable -eq $true) {
+                        $to     = $verInfo.Available
+                        $result = @{ State = 'Updated'; Reason = '(WhatIf)' }
+                    } elseif ($verInfo.UpdateAvailable -eq $false) {
+                        $to     = $from
+                        $result = @{ State = 'AlreadyLatest'; Reason = $null }
+                    } else {
+                        # Availability unknown (dotnetTool, or the engine wasn't
+                        # probed): can't promise a no-op, so plan the update but
+                        # say so.
+                        $result = @{ State = 'Updated'; Reason = '(WhatIf, version unknown)' }
+                    }
+                } else {
+                    $result = switch ($pkg.Installer) {
+                        'winget'      { Update-WingetPackage     -Package $pkg -WhatIf:$isWhatIf -TimeoutMinutes $PackageTimeoutMinutes }
+                        'scoop'       { Update-ScoopPackage      -Package $pkg -WhatIf:$isWhatIf }
+                        'choco'       { Update-ChocoPackage      -Package $pkg -WhatIf:$isWhatIf }
+                        'npmGlobal'   { Update-NpmGlobalPackage  -Package $pkg -WhatIf:$isWhatIf }
+                        'dotnetTool'  { Update-DotnetToolPackage -Package $pkg -WhatIf:$isWhatIf }
+                        default       { throw "Invoke-PackageUpdate: unknown Installer '$($pkg.Installer)' for '$($pkg.Name)'." }
+                    }
+                    # Annotate the version transition from the pre-update probe.
+                    # On a real upgrade the index's Available column is the
+                    # version we just moved TO; AlreadyLatest pins to == from.
+                    if ($result.State -eq 'Updated' -and $verInfo.Available) {
+                        $to = $verInfo.Available
+                    } elseif ($result.State -eq 'AlreadyLatest') {
+                        $to = $from
+                    }
                 }
             }
             $state  = $result.State
@@ -208,7 +260,7 @@ function Invoke-PackageUpdate {
         # PostUpdateScript on a no-op upgrade would surprise bundle authors
         # who only intend the hook to fire after a real version bump.
         if ($state -in @('NotInstalled', 'Skipped', 'AlreadyLatest', 'SelfManaged', 'NoAutoUpdateSupport')) {
-            & $addState $pkg $state $reason $null
+            & $addState $pkg $state $reason $null $from $to
             continue
         }
 
@@ -244,7 +296,7 @@ function Invoke-PackageUpdate {
             }
         }
 
-        & $addState $pkg $state $reason $null
+        & $addState $pkg $state $reason $null $from $to
     }
 
     # Tear down the transient progress line before emitting results so the
@@ -257,15 +309,17 @@ function Invoke-PackageUpdate {
     # structured .Error ErrorRecord on failures.
     foreach ($s in $states) {
         [PackageResult]@{
-            Operation = 'Update'
-            Status    = $s.State
-            Name      = $s.Pkg.Name
-            Installer = $s.Pkg.Installer
-            Scope     = $s.Pkg.Scope
-            Id        = $s.Pkg.Id
-            Bundle    = $Bundle
-            Reason    = $s.Reason
-            Error     = $s.Err
+            Operation   = 'Update'
+            Status      = $s.State
+            Name        = $s.Pkg.Name
+            Installer   = $s.Pkg.Installer
+            Scope       = $s.Pkg.Scope
+            Id          = $s.Pkg.Id
+            Bundle      = $Bundle
+            VersionFrom = $s.From
+            VersionTo   = $s.To
+            Reason      = $s.Reason
+            Error       = $s.Err
         }
     }
 }

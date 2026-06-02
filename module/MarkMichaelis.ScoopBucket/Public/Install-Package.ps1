@@ -50,6 +50,11 @@ function Install-Package {
         [Parameter(Mandatory, Position = 0)][string[]]$Name,
         [switch]$DryRun,
         [switch]$SkipCompletion,
+        # Show every package in the result table, including unchanged rows
+        # (AlreadyInstalled / Skipped). By default only changed rows
+        # (Installed / Failed) are shown and the rest are summarized in a
+        # one-line host message. See #283.
+        [switch]$IncludeUnchanged,
         [string]$BucketPath
     )
 
@@ -144,24 +149,30 @@ function Install-Package {
     # resilient sweep Update-Package uses (#272).
     $pkgErrors = [System.Collections.Generic.List[object]]::new()
 
+    # Collect every PackageResult the driver emits so the summary view can
+    # filter to changed rows and render a single table. See #283.
+    $results = New-Object System.Collections.Generic.List[object]
+
     # --- Dispatch (a): Package.Name flow with -Name filter -----------------
     # In-process: reconstruct real [Package] objects from the bundle and call
     # the driver directly (same model Update-Package uses), so results flow
     # back as live PackageResult objects rendered once by the format view.
     foreach ($entry in $byBundle.Values) {
         $pkgObjects = @(Get-BundlePackageObjects -BundlePath $entry.BundlePath)
-        Invoke-PackageInstall -Packages $pkgObjects -Bundle $entry.Bundle `
-            -Name @($entry.Names) -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
-            -ErrorAction Continue -ErrorVariable +pkgErrors
+        $results.AddRange([object[]]@(
+            Invoke-PackageInstall -Packages $pkgObjects -Bundle $entry.Bundle `
+                -Name @($entry.Names) -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
+                -ErrorAction Continue -ErrorVariable +pkgErrors))
     }
 
     # --- Dispatch (b): full-bundle install (no -Name filter) ---------------
     foreach ($b in $fullBundles) {
         Write-UpdateStatus -Activity 'Install-Package' "Install-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
         $pkgObjects = @(Get-BundlePackageObjects -BundlePath $b.BundlePath)
-        Invoke-PackageInstall -Packages $pkgObjects -Bundle $b.Bundle `
-            -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
-            -ErrorAction Continue -ErrorVariable +pkgErrors
+        $results.AddRange([object[]]@(
+            Invoke-PackageInstall -Packages $pkgObjects -Bundle $b.Bundle `
+                -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
+                -ErrorAction Continue -ErrorVariable +pkgErrors))
     }
 
     # --- Dispatch (c): scoop install fallback for bare manifests -----------
@@ -220,4 +231,9 @@ function Install-Package {
             }
         }
     }
+
+    # Emit the collected results through the summary view: changed rows only by
+    # default (with a one-line host summary of the rest), or every row under
+    # -IncludeUnchanged. See #283.
+    Select-PackageResultSummary -Result $results.ToArray() -IncludeUnchanged:$IncludeUnchanged
 }
