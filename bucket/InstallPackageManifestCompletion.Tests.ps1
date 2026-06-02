@@ -40,6 +40,15 @@ if (Test-Path `$scoopBucketPsd1) { Import-Module `$scoopBucketPsd1 -Force } else
         ExpectedCompletions = @{ devenv = @('/Build','/Run') }
         NativeCommandScript = { 'Register-ArgumentCompleter -Native -CommandName devenv -ScriptBlock { }' }
     }
+    [Package]@{
+        Name        = 'Winget Declared'
+        Installer   = 'winget'
+        Id          = 'Vendor/WingetOnly'
+        CliCommands = @('wgtool')
+        Completion  = 'auto'
+        ExpectedCompletions = @{ wgtool = @('--x') }
+        NativeCommandScript = { 'Register-ArgumentCompleter -Native -CommandName wgtool -ScriptBlock { }' }
+    }
 )
 
 Invoke-PackageInstall -Packages `$Packages -Bundle 'VsTestBundle'
@@ -67,6 +76,19 @@ Invoke-PackageInstall -Packages `$Packages -Bundle 'VsTestBundle'
     }
     Set-Content -LiteralPath (Join-Path $script:tmpBucket 'LonePkg.json') `
         -Value ($loneManifest | ConvertTo-Json -Depth 4) -Encoding UTF8
+
+    # A manifest whose Id base name matches a declarative [Package] that is
+    # NOT a scoop package (Installer='winget'). The scoop-manifest dispatch
+    # must not borrow that package's completion -- the Id match would be
+    # coincidental.
+    $wingetManifest = @{
+        '$schema'  = 'https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json'
+        version   = '1.00.000'
+        url       = @('https://example.invalid/wingetonly')
+        installer = @{ script = @('Write-Host wingetonly install') }
+    }
+    Set-Content -LiteralPath (Join-Path $script:tmpBucket 'WingetOnly.json') `
+        -Value ($wingetManifest | ConvertTo-Json -Depth 4) -Encoding UTF8
 }
 
 AfterAll {
@@ -136,6 +158,16 @@ Describe 'Install-Package bare-manifest completion (#291)' -Tag 'Light', 'Module
         # The install was still attempted.
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -ParameterFilter {
             ($args -contains 'install') -and ($args -contains 'VsTest')
+        }
+    }
+
+    It 'does NOT borrow completion from a non-scoop ([winget]) package whose Id base coincidentally matches' {
+        Install-Package -Name 'WingetOnly' -BucketPath $script:tmpBucket | Out-Null
+
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Import-PackageCompletion -Times 0 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Register-PackageCompletion -Times 0 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -ParameterFilter {
+            ($args -contains 'install') -and ($args -contains 'WingetOnly')
         }
     }
 

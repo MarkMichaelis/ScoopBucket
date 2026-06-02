@@ -208,7 +208,7 @@ function Install-Package {
         # CLI that was never actually installed. Treat a null exit code (no
         # native command ran, e.g. a stubbed scoop) as success so the
         # best-effort registration still fires in that case.
-        $installExit = $global:LASTEXITCODE
+        $installExit = $LASTEXITCODE
 
         if (-not $SkipCompletion -and ($null -eq $installExit -or $installExit -eq 0)) {
             # Find the declarative [Package] (if any) whose Id base name
@@ -219,6 +219,11 @@ function Install-Package {
             foreach ($b in $bundles) {
                 foreach ($p in $b.Packages) {
                     if (-not $p.Id) { continue }
+                    # Only scoop-installed packages can declare a scoop
+                    # manifest; an Id-base collision with a winget/choco/etc.
+                    # package is coincidental and must not borrow its
+                    # completion metadata.
+                    if ($p.Installer -ine 'scoop') { continue }
                     $manifestBase = ($p.Id -split '/')[-1]
                     if ($manifestBase -ieq $n -and $p.Completion -ne 'none') {
                         $declaring = $p
