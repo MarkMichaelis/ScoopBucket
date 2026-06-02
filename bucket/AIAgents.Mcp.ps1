@@ -446,3 +446,277 @@ function Resolve-McpServerCommand {
     $args = @('-y', $PackageName) + $ExtraArguments
     return @{ Command = 'npx'; Arguments = $args }
 }
+
+# ---------------------------------------------------------------------------
+# Shared declarative data for the MCP wiring. Kept as functions (not top-level
+# variables) so dot-sourcing this file stays side-effect free, and so both the
+# apply (Install-AIAgentsMcpConfiguration) and prune
+# (Reset-AIAgentsMcpConfiguration) paths share one source of truth.
+# ---------------------------------------------------------------------------
+
+function Get-AIAgentsMcpJsonAgent {
+    <#
+    .SYNOPSIS
+        The JSON-config agents AIAgents wires MCP servers into.
+    .OUTPUTS
+        Hashtable[] with Label and Path keys.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable[]])]
+    param()
+    @(
+        @{ Label = 'Claude Desktop';     Path = (Join-Path $env:APPDATA     'Claude\claude_desktop_config.json') }
+        @{ Label = 'Claude Code CLI';    Path = (Join-Path $env:USERPROFILE '.claude.json') }
+        @{ Label = 'Gemini CLI';         Path = (Join-Path $env:USERPROFILE '.gemini\settings.json') }
+        @{ Label = 'GitHub Copilot CLI'; Path = (Join-Path $env:USERPROFILE '.copilot\mcp-config.json') }
+    )
+}
+
+function Get-AIAgentsMcpNpmPackage {
+    <#
+    .SYNOPSIS
+        npm package names AIAgents pre-installs globally for its MCP servers.
+    .OUTPUTS
+        String[].
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param()
+    @(
+        '@upstash/context7-mcp',
+        '@playwright/mcp',
+        '@modelcontextprotocol/server-github',
+        '@modelcontextprotocol/server-filesystem'
+    )
+}
+
+function Get-AIAgentsDeprecatedMcpServer {
+    <#
+    .SYNOPSIS
+        MCP server names this bucket has retired and prunes under -Reset.
+    .OUTPUTS
+        String[].
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param()
+    @('shell')
+}
+
+function Install-AIAgentsMcpConfiguration {
+    <#
+    .SYNOPSIS
+        Apply the AIAgents MCP-server configuration idempotently.
+
+    .DESCRIPTION
+        Self-contained machine configuration for the AIAgents bundle: install
+        Playwright browsers, the PoshMcp dotnet tool, and the MCP npm packages;
+        resolve a GitHub PAT; write the mcpServers entries into every supported
+        agent config (JSON + Codex TOML); persist the PAT out-of-band; and
+        install the profile self-heal block. Re-running overwrites only the
+        named entries -- other MCP servers in the same config are preserved.
+
+        This is invoked by the bundle's ConfigScript so it runs on every
+        install, every update, and on demand via Update-PackageConfig.
+    #>
+    [CmdletBinding()]
+    param()
+
+    # Playwright separates its browser binaries from the npm package; install
+    # @playwright/test globally so the `playwright` shim lands on PATH, then
+    # install just chromium.
+    if (Get-Command npm -ErrorAction SilentlyContinue) {
+        if (-not (Get-Command playwright -ErrorAction SilentlyContinue)) {
+            & npm.cmd install --global '@playwright/test'
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "npm install --global @playwright/test exited with code $LASTEXITCODE; falling back to npx for browser install."
+            }
+        }
+        if (Get-Command playwright -ErrorAction SilentlyContinue) {
+            & playwright.cmd install chromium
+        }
+        else {
+            & npx.cmd -y '@playwright/test' install chromium
+        }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "playwright install chromium exited with code $LASTEXITCODE; the Playwright MCP server may fail at runtime."
+        }
+    }
+    else {
+        Write-Warning 'npm not found after package pass; skipping Playwright browser install.'
+    }
+
+    # PoshMcp ships as a .NET global tool. Skip silently if dotnet isn't present.
+    $poshMcpAvailable = $false
+    if (Get-Command dotnet -ErrorAction SilentlyContinue) {
+        Write-Host 'Installing PoshMcp dotnet global tool...'
+        & dotnet tool install -g poshmcp 2>&1 | Tee-Object -Variable poshOut
+        if ($LASTEXITCODE -eq 0 -or ($poshOut -join "`n") -match 'already installed') {
+            $poshMcpAvailable = $true
+            $dotnetTools = Join-Path $env:USERPROFILE '.dotnet\tools'
+            if ((Test-Path $dotnetTools) -and ($env:Path -notlike "*$dotnetTools*")) {
+                $env:Path = "$env:Path;$dotnetTools"
+            }
+        }
+        else {
+            Write-Warning 'dotnet tool install -g poshmcp failed; PoshMcp MCP server will not be configured.'
+        }
+    }
+    else {
+        Write-Warning 'dotnet not found; skipping PoshMcp install. Install the .NET 10+ SDK (e.g., DeveloperBasePackages) and re-run AIAgents to enable PoshMcp.'
+    }
+
+    # Auto-detect a GitHub PAT for the GitHub MCP server.
+    $githubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
+    if ([string]::IsNullOrWhiteSpace($githubToken) -and (Get-Command gh -ErrorAction SilentlyContinue)) {
+        try {
+            $ghToken = & gh auth token 2>$null
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($ghToken)) {
+                $githubToken = $ghToken.Trim()
+                Write-Host 'GitHub MCP: using token from `gh auth token`.'
+            }
+        }
+        catch { Write-Verbose "GitHub MCP: gh auth token lookup failed: $($_.Exception.Message)" }
+    }
+    if ([string]::IsNullOrWhiteSpace($githubToken)) {
+        Write-Warning 'GitHub MCP: no token found (set $env:GITHUB_PERSONAL_ACCESS_TOKEN or run `gh auth login`). The MCP entry will be written but will fail at runtime until a token is provided.'
+    }
+
+    # Pre-install MCP server npm packages globally so each agent spawn invokes
+    # the resolved .cmd shim directly instead of paying a fresh npx round-trip.
+    $mcpNpmPackages = Get-AIAgentsMcpNpmPackage
+    if (Get-Command npm -ErrorAction SilentlyContinue) {
+        foreach ($pkg in $mcpNpmPackages) {
+            Write-Host "Installing $pkg globally (latest)..."
+            & npm.cmd install --global "$pkg@latest" 2>&1 | Out-Host
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "npm install -g $pkg failed; that MCP entry will fall back to 'npx -y'."
+            }
+        }
+    }
+    else {
+        Write-Warning 'npm not found; all MCP npm entries will fall back to npx (slow first-spawn).'
+    }
+
+    $npmGlobalRoot = Get-NpmGlobalRoot
+
+    $context7Cmd   = Resolve-McpServerCommand -PackageName '@upstash/context7-mcp'                    -NpmGlobalRoot $npmGlobalRoot
+    $playwrightCmd = Resolve-McpServerCommand -PackageName '@playwright/mcp'                          -NpmGlobalRoot $npmGlobalRoot
+    $filesystemCmd = Resolve-McpServerCommand -PackageName '@modelcontextprotocol/server-filesystem' -NpmGlobalRoot $npmGlobalRoot -ExtraArguments @($env:USERPROFILE)
+    $githubCmd     = Resolve-McpServerCommand -PackageName '@modelcontextprotocol/server-github'      -NpmGlobalRoot $npmGlobalRoot
+
+    $mcpServers = @(
+        @{ Name = 'context7';   Command = $context7Cmd.Command;   Arguments = $context7Cmd.Arguments }
+        @{ Name = 'playwright'; Command = $playwrightCmd.Command; Arguments = $playwrightCmd.Arguments }
+        @{ Name = 'filesystem'; Command = $filesystemCmd.Command; Arguments = $filesystemCmd.Arguments }
+        @{
+            Name       = 'github'
+            Command    = $githubCmd.Command
+            Arguments  = $githubCmd.Arguments
+            # GitHub Copilot CLI ships its own remote github-mcp-server; skip
+            # writing this entry there to avoid duplication.
+            SkipAgents = @('GitHub Copilot CLI')
+        }
+    )
+
+    if ($poshMcpAvailable) {
+        $mcpServers += @{
+            Name      = 'posh'
+            Command   = 'poshmcp'
+            Arguments = @('serve', '--transport', 'stdio')
+        }
+    }
+
+    $jsonAgents = Get-AIAgentsMcpJsonAgent
+
+    foreach ($server in $mcpServers) {
+        $skip = @()
+        if ($server.ContainsKey('SkipAgents') -and $server.SkipAgents) { $skip = @($server.SkipAgents) }
+
+        foreach ($agent in $jsonAgents) {
+            if ($skip -contains $agent.Label) {
+                Write-Host "$($agent.Label): skipping $($server.Name) MCP (built-in equivalent)."
+                continue
+            }
+            Add-McpServerToJsonConfig -Path $agent.Path -AgentLabel $agent.Label -Server $server
+        }
+        if ($skip -notcontains 'Codex CLI') {
+            Add-McpServerToCodex -Server $server
+        }
+    }
+
+    # Provision the GitHub PAT out-of-band so it does NOT live in any agent
+    # config file. Profile sentinel acts as a self-heal fallback if HKCU is
+    # ever cleared.
+    $isElevated = Test-IsElevated
+
+    if (-not [string]::IsNullOrWhiteSpace($githubToken)) {
+        Set-PersistedGitHubToken -Token $githubToken -IsElevated:$isElevated
+        $scopeLabel = if ($isElevated) { 'HKLM Machine' } else { 'HKCU User' }
+        Write-Host "GitHub MCP: persisted GITHUB_PERSONAL_ACCESS_TOKEN at $scopeLabel scope."
+    }
+
+    foreach ($profilePath in (Get-McpProfileTargets -IsElevated:$isElevated)) {
+        if (Add-McpProfileSentinel -Path $profilePath) {
+            Write-Host "GitHub MCP: installed self-heal block in $profilePath"
+        }
+    }
+}
+
+function Reset-AIAgentsMcpConfiguration {
+    <#
+    .SYNOPSIS
+        Prune retired / skipped MCP entries and clear the persisted PAT.
+
+    .DESCRIPTION
+        The opt-in counterpart to Install-AIAgentsMcpConfiguration: removes the
+        MCP server names this bucket has retired, prunes entries intentionally
+        skipped (e.g. GitHub Copilot CLI), removes the profile self-heal block,
+        clears the persisted GitHub PAT, and uninstalls the MCP npm packages.
+        Invoked only on explicit `AIAgents.ps1 -Reset`.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $deprecated     = Get-AIAgentsDeprecatedMcpServer
+    $jsonAgents     = Get-AIAgentsMcpJsonAgent
+    $mcpNpmPackages = Get-AIAgentsMcpNpmPackage
+    $isElevated     = Test-IsElevated
+
+    Write-Host "-Reset: pruning deprecated MCP server names ($($deprecated -join ', '))..."
+    foreach ($name in $deprecated) {
+        foreach ($agent in $jsonAgents) {
+            Remove-McpServerFromJsonConfig -Path $agent.Path -AgentLabel $agent.Label -ServerName $name
+        }
+        Remove-McpServerFromCodex -ServerName $name
+    }
+
+    # Prune entries this bucket intentionally skips (server -> skipped agents)
+    # so users upgrading from a pre-skip version get the stale entry cleaned.
+    $skipMap = @{ github = @('GitHub Copilot CLI') }
+    foreach ($serverName in $skipMap.Keys) {
+        foreach ($skipLabel in $skipMap[$serverName]) {
+            $agent = $jsonAgents | Where-Object { $_.Label -eq $skipLabel } | Select-Object -First 1
+            if ($agent) {
+                Remove-McpServerFromJsonConfig -Path $agent.Path -AgentLabel $agent.Label -ServerName $serverName
+            }
+        }
+    }
+
+    Write-Host '-Reset: removing GitHub PAT self-heal block from PowerShell profile(s)...'
+    foreach ($profilePath in (Get-McpProfileTargets -IsElevated:$isElevated)) {
+        if (Remove-McpProfileSentinel -Path $profilePath) {
+            Write-Host "  pruned $profilePath"
+        }
+    }
+
+    Write-Host '-Reset: clearing persisted GITHUB_PERSONAL_ACCESS_TOKEN env var...'
+    Clear-PersistedGitHubToken -IsElevated:$isElevated
+
+    if (Get-Command npm -ErrorAction SilentlyContinue) {
+        Write-Host '-Reset: uninstalling MCP npm packages globally...'
+        foreach ($pkg in $mcpNpmPackages) {
+            & npm.cmd uninstall --global $pkg 2>&1 | Out-Host
+        }
+    }
+}

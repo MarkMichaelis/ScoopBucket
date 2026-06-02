@@ -367,4 +367,49 @@ GITHUB_PERSONAL_ACCESS_TOKEN = "leaked"
             $content | Should -Not -Match '\[mcp_servers\.github\.env\]'
         }
     }
+
+    Context 'Install-AIAgentsMcpConfiguration (orchestration)' {
+        BeforeEach {
+            # Force npm/dotnet/gh/playwright "absent" so the real package
+            # installers never run; everything else is mocked at the helper
+            # seam so we assert wiring behavior, not side effects.
+            Mock Get-Command -ParameterFilter { $Name -in @('npm','dotnet','gh','playwright') } { $null }
+            Mock Get-NpmGlobalRoot { 'C:\fake\npm' }
+            Mock Resolve-McpServerCommand { @{ Command = 'npx'; Arguments = @('-y', $PackageName) } }
+            Mock Add-McpServerToJsonConfig { }
+            Mock Add-McpServerToCodex { }
+            Mock Test-IsElevated { $false }
+            Mock Set-PersistedGitHubToken { }
+            Mock Get-McpProfileTargets { @() }
+            Mock Add-McpProfileSentinel { $false }
+        }
+
+        It 'writes every MCP server into every non-skipped JSON agent' {
+            $env:GITHUB_PERSONAL_ACCESS_TOKEN = ''
+            Install-AIAgentsMcpConfiguration 6>$null
+            # 4 servers (no posh -- dotnet absent) x 4 agents = 16, minus the
+            # single github/GitHub Copilot CLI skip = 15.
+            Should -Invoke Add-McpServerToJsonConfig -Times 15 -Exactly
+        }
+
+        It 'does NOT write the github server into GitHub Copilot CLI (built-in)' {
+            $env:GITHUB_PERSONAL_ACCESS_TOKEN = ''
+            Install-AIAgentsMcpConfiguration 6>$null
+            Should -Invoke Add-McpServerToJsonConfig -Times 0 -Exactly -ParameterFilter {
+                $AgentLabel -eq 'GitHub Copilot CLI' -and $Server.Name -eq 'github'
+            }
+        }
+
+        It 'persists the GitHub PAT when one is available' {
+            $env:GITHUB_PERSONAL_ACCESS_TOKEN = 'tok_behaviortest'
+            try {
+                Install-AIAgentsMcpConfiguration 6>$null
+                Should -Invoke Set-PersistedGitHubToken -Times 1 -Exactly -ParameterFilter {
+                    $Token -eq 'tok_behaviortest'
+                }
+            } finally {
+                $env:GITHUB_PERSONAL_ACCESS_TOKEN = ''
+            }
+        }
+    }
 }
