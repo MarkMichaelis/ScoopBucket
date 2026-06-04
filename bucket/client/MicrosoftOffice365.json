@@ -2,7 +2,7 @@
     "$schema": "https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json",
     "version": "1.14.000",
     "url": [
-        "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/MicrosoftOffice365.ps1"
+        "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/client/MicrosoftOffice365.ps1"
     ],
     "installer": {
         "script": "& \"$dir\\MicrosoftOffice365.ps1\""
