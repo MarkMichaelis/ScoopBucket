@@ -61,7 +61,8 @@ Describe 'Completion coverage catalog is honoured' -Tag 'Light','CompletionCover
     ) {
         param($Cli, $Status, $Script, $Activation)
 
-        $scriptPath = Join-Path $PSScriptRoot $Script
+        $scriptPath = Get-ChildItem -Path $PSScriptRoot -Filter $Script -File -Recurse |
+            Select-Object -First 1 -ExpandProperty FullName
         Test-Path $scriptPath | Should -BeTrue -Because "$Script must exist"
         $content = Get-Content -Raw -Path $scriptPath
 
@@ -100,7 +101,9 @@ Describe 'Completion coverage catalog is honoured' -Tag 'Light','CompletionCover
 Describe 'PowerShell.ps1 hand-curated host completers' -Tag 'Light','CompletionCoverage' {
 
     BeforeAll {
-        $script:psInstallSource = Get-Content -Raw -Path (Join-Path $PSScriptRoot 'PowerShell.ps1')
+        $psScriptPath = Get-ChildItem -Path $PSScriptRoot -Filter 'PowerShell.ps1' -File -Recurse |
+            Select-Object -First 1 -ExpandProperty FullName
+        $script:psInstallSource = Get-Content -Raw -Path $psScriptPath
     }
 
     It 'renders a Register-ArgumentCompleter -Native template' {
