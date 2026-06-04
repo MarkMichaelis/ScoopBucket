@@ -517,7 +517,8 @@ function Install-AIAgentsMcpConfiguration {
         named entries -- other MCP servers in the same config are preserved.
 
         This is invoked by the bundle's ConfigScript so it runs on every
-        install, every update, and on demand via Update-PackageConfig.
+        install and every update, and on demand via
+        Update-Package 'MCP Server Configuration'.
     #>
     [CmdletBinding()]
     param()

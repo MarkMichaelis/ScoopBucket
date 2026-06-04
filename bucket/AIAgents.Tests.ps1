@@ -56,8 +56,7 @@ Describe 'AIAgents bundle: MCP configuration is declarative' -Tag 'Light','Bundl
         $script:mcpCfgPkg.ConfigScript | Should -Not -BeNullOrEmpty
         $script:mcpCfgPkg.ConfigScript.GetType().Name | Should -Be 'ScriptBlock'
         # The script delegates to the self-contained apply function so the
-        # framework re-applies the config on every install/update and via
-        # Update-PackageConfig.
+        # framework re-applies the config on every install and every update.
         "$($script:mcpCfgPkg.ConfigScript)" | Should -Match 'Install-AIAgentsMcpConfiguration'
     }
 

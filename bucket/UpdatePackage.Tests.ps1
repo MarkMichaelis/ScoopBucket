@@ -1084,6 +1084,57 @@ Describe 'Update-Package dispatcher' -Tag 'Light','Module' {
     }
 }
 
+Describe 'Update-Package re-applies ConfigScript (replaces standalone refresh command)' -Tag 'Light','Module' {
+    # Behavior contract: a package whose only work is configuration -- a
+    # custom installer with a ConfigScript and no engine upgrade path
+    # (resolves to NoAutoUpdateSupport) -- must still have its ConfigScript
+    # re-applied when targeted by name through Update-Package. This is the
+    # behavior that lets `Update-Package 'MCP Server Configuration'` serve as
+    # the on-demand config refresh, so no separate command is needed.
+
+    It 'runs the ConfigScript for a config-only custom package targeted by name' {
+        $script:cfgRan = $false
+        $cfgPkg = [Package]@{
+            Name      = 'MyConfig'
+            Installer = 'custom'
+            CustomInstallScript = { }
+            ConfigScript = { $script:cfgRan = $true }
+        }
+        $fakeBundles = @(
+            [pscustomobject]@{ Bundle='Cfg'; BundlePath='C:\fake\Cfg.ps1'
+                               Packages=@([pscustomobject]@{ Name='MyConfig'; Installer='custom'; Id=$null }) }
+        )
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages       { return $fakeBundles }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects { return @($cfgPkg) }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Resolve-BucketPath       { return $null }
+
+        $null = Update-Package -Name 'MyConfig' -SkipCompletion -SkipBucketRefresh
+
+        $script:cfgRan | Should -BeTrue
+    }
+
+    It 'does not run the ConfigScript under -WhatIf' {
+        $script:cfgRan = $false
+        $cfgPkg = [Package]@{
+            Name      = 'MyConfig'
+            Installer = 'custom'
+            CustomInstallScript = { }
+            ConfigScript = { $script:cfgRan = $true }
+        }
+        $fakeBundles = @(
+            [pscustomobject]@{ Bundle='Cfg'; BundlePath='C:\fake\Cfg.ps1'
+                               Packages=@([pscustomobject]@{ Name='MyConfig'; Installer='custom'; Id=$null }) }
+        )
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackages       { return $fakeBundles }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-BundlePackageObjects { return @($cfgPkg) }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Resolve-BucketPath       { return $null }
+
+        $null = Update-Package -Name 'MyConfig' -SkipCompletion -SkipBucketRefresh -WhatIf
+
+        $script:cfgRan | Should -BeFalse
+    }
+}
+
 Describe 'Update-Package pipeline emission (#276)' -Tag 'Light','Module' {
 
     BeforeEach {
