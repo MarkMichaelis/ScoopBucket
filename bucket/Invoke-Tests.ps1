@@ -44,7 +44,19 @@ param(
 # Discover recursively so member tests co-located in group subfolders
 # (bucket/os, bucket/developer, bucket/admin, ...) rejoin the gate. A
 # non-recursive glob silently dropped them after the group reorg (#300).
-$matched = @(Get-ChildItem -Path $PSScriptRoot -Filter "$Pattern.Tests.ps1" -File -Recurse -ErrorAction SilentlyContinue)
+#
+# Engine tests are co-located beside the code they exercise under module/
+# (#318), so search BOTH roots. Without the module/ root those moved tests
+# silently drop from the Light gate -- the same regression class as #316.
+$searchRoots = @(
+    $PSScriptRoot
+    Join-Path (Split-Path -Parent $PSScriptRoot) 'module'
+) | Where-Object { Test-Path -LiteralPath $_ }
+$matched = @(
+    $searchRoots | ForEach-Object {
+        Get-ChildItem -Path $_ -Filter "$Pattern.Tests.ps1" -File -Recurse -ErrorAction SilentlyContinue
+    }
+)
 if (-not $matched) {
     Write-Warning "No test files matched: $Pattern.Tests.ps1 under $PSScriptRoot"
     return

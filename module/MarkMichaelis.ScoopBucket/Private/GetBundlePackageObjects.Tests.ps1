@@ -22,7 +22,7 @@
 #>
 
 BeforeAll {
-    $script:moduleManifest = Resolve-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1')
+    $script:moduleManifest = Resolve-Path (Join-Path $PSScriptRoot '..\MarkMichaelis.ScoopBucket.psd1')
     Import-Module $script:moduleManifest -Force
 
     function script:Invoke-GetBundlePackageObjects {
