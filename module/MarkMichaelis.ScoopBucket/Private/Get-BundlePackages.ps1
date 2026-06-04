@@ -38,7 +38,7 @@ function Get-BundlePackages {
         return @()
     }
 
-    $bundles = Get-ChildItem -Path $BucketPath -Filter '*.ps1' -File |
+    $bundles = Get-ChildItem -Path $BucketPath -Filter '*.ps1' -File -Recurse |
         Where-Object { $_.Name -notmatch '\.Tests\.ps1$' } |
         Where-Object { $_.Name -ne 'Utils.ps1' -and $_.Name -ne 'Invoke-Tests.ps1' }
 

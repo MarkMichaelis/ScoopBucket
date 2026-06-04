@@ -22,7 +22,7 @@
 BeforeDiscovery {
     $script:BucketRoot = $PSScriptRoot
     $script:ManifestCases = @(
-        Get-ChildItem -Path $script:BucketRoot -Filter '*.json' -File | ForEach-Object {
+        Get-ChildItem -Path $script:BucketRoot -Filter '*.json' -File -Recurse | ForEach-Object {
             [pscustomobject]@{
                 Name = $_.Name
                 Path = $_.FullName
