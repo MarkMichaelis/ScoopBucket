@@ -490,7 +490,7 @@ Behavior:
 - `-WhatIf` / `-Confirm` are honored (the helper opts in to
   `SupportsShouldProcess` with `ConfirmImpact='Medium'`).
 
-### Refreshing package configuration (`ConfigScript` / `Update-PackageConfig`)
+### Refreshing package configuration (`ConfigScript`)
 
 Completions are declarative and the framework re-applies them across
 install and update. **Configuration** -- idempotent machine state a
@@ -514,21 +514,25 @@ A `ConfigScript` is:
 - **Fail-aware.** A throw marks the package `Failed`, like the other
   `*Script` hooks. Under `-DryRun` / `-WhatIf` it logs only.
 
-To re-apply configuration on demand -- the clean "refresh the MCP servers"
-entry point -- use `Update-PackageConfig` (the configuration counterpart to
-`Update-PackageCompletion`):
+Because `Update-Package` re-applies `ConfigScript` even when there is no
+newer version to fetch (the `AlreadyLatest` / `SelfManaged` /
+`NoAutoUpdateSupport` branch still runs the hook), it doubles as the
+on-demand "refresh the configuration" entry point -- no separate command
+is needed:
 
 ```powershell
 Import-Module MarkMichaelis.ScoopBucket -Force
-Update-PackageConfig AIAgents     # re-wire the MCP servers, no reinstall
-Update-PackageConfig              # re-apply every package's ConfigScript
-Update-PackageConfig -WhatIf      # preview what would run
+Update-Package 'MCP Server Configuration'   # refresh just the MCP wiring
+Update-Package AIAgents                      # refresh the whole bundle
+Update-Package 'MCP Server Configuration' -WhatIf   # preview only
 ```
 
-It accepts a package **or** bundle name (or none / `*` for the whole
-bucket), harvests the real `[Package]` objects so scriptblocks are intact,
-and invokes each `ConfigScript`, returning one row per package
-(`Package`, `Bundle`, `Action`, `Reason`).
+`Update-Package -Name` resolves either a single package name (case a) or a
+whole bundle (case b), reconstructs the real `[Package]` objects so
+`ConfigScript` is intact, and runs the hook. Targeting the dedicated
+`MCP Server Configuration` package keeps the refresh focused -- it has no
+engine upgrade path, so the run skips version probing and just re-applies
+the config.
 
 ## Testing
 

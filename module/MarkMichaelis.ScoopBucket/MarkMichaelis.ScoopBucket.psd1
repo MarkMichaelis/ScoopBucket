@@ -30,7 +30,6 @@
         'Invoke-PackageUninstall',
         'Invoke-PackageUpdate',
         'Update-PackageCompletion',
-        'Update-PackageConfig',
         'Import-PackageCompletion',
         'Remove-StorePwsh',
         'Add-MachinePath',

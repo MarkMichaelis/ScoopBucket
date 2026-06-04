@@ -342,17 +342,18 @@ Register-ArgumentCompleter -Native -CommandName copilot -ScriptBlock {
         }
     }
     # MCP-server wiring as declarative config. Unlike imperative tail code,
-    # a ConfigScript is re-applied by the framework on every install, every
-    # update, and on demand via `Update-PackageConfig AIAgents` -- the same
-    # always-run guarantee completions get. The script is self-contained:
-    # it dot-sources the helper module and resolves its own token / runtime
-    # availability, so it works identically whether invoked by the install
-    # driver, the update driver, or Update-PackageConfig.
+    # a ConfigScript is re-applied by the framework on every install and
+    # every update (including no-op updates where no newer version exists)
+    # -- the same always-run guarantee completions get. Refresh on demand
+    # with `Update-Package 'MCP Server Configuration'`. The script is
+    # self-contained: it dot-sources the helper module and resolves its own
+    # token / runtime availability, so it works identically whether invoked
+    # by the install driver or the update driver.
     [Package]@{
         Name      = 'MCP Server Configuration'
         Installer = 'custom'
         DependsOn = @('Node.js')
-        Notes     = 'Idempotent MCP-server wiring for every MCP-capable agent. Re-applied on every install/update and via Update-PackageConfig AIAgents.'
+        Notes     = 'Idempotent MCP-server wiring for every MCP-capable agent. Re-applied on every install/update; refresh on demand with Update-Package "MCP Server Configuration".'
         # Engine no-op: the configuration IS the work, performed in ConfigScript.
         CustomInstallScript = { }
         ConfigScript = {
