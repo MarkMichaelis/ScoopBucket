@@ -1,5 +1,5 @@
 
-$scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+$scoopBucketPsd1 = Join-Path $PSScriptRoot '..\..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
 if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
 . "$PSScriptRoot\GitConfigBeyondCompare.ps1" # Runs Invoke-GitConfigBeyondCompare
 . "$PSScriptRoot\GitConfigVSCode.ps1"        # Runs Invoke-GitConfigVSCode
