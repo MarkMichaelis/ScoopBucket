@@ -45,4 +45,13 @@ Describe 'Invoke-Tests.ps1 discovery' -Tag 'Light', 'Unit' {
         $discovered = & $script:runner -Pattern 'Package' -ListOnly
         ($discovered.Name) | Should -Contain 'Package.Tests.ps1'
     }
+
+    It 'discovers engine tests co-located under module/' {
+        # GetBundlePackageObjects.Tests.ps1 lives beside its subject in
+        # module/MarkMichaelis.ScoopBucket/Private/ (#318). Dropping the
+        # module/ search root silently removes it from the Light gate.
+        $discovered = & $script:runner -Pattern 'GetBundlePackageObjects' -ListOnly
+        @($discovered).Count | Should -BeGreaterThan 0
+        ($discovered.FullName -join ';') | Should -Match 'module[\\/].+GetBundlePackageObjects\.Tests\.ps1'
+    }
 }
