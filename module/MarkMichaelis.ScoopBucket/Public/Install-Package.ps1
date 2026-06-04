@@ -30,7 +30,13 @@ function Install-Package {
         Package.Name).
 
     .PARAMETER DryRun
-        Plan only — log every action without invoking engines.
+        Preview only — plan every action without invoking engines.
+        `-DryRun` is the preferred ALIAS for the idiomatic `-WhatIf`
+        preview: supplying it sets `$WhatIfPreference = $true` for the
+        whole call so it and `-WhatIf` (and `-Confirm`) drive the SAME
+        ShouldProcess machinery across every dispatch path. Preview is
+        opt-in; the default performs real installs, and `-WhatIf:$false`
+        forces execution.
 
     .PARAMETER SkipCompletion
         Don't attempt completion registration.
@@ -57,6 +63,14 @@ function Install-Package {
         [switch]$IncludeUnchanged,
         [string]$BucketPath
     )
+
+    # Bridge the preferred `-DryRun` alias into the single preview mechanism:
+    # set $WhatIfPreference for this scope so `-DryRun`, `-WhatIf`, and
+    # `-Confirm` all flow through the same ShouldProcess checks (the engine
+    # `-WhatIf` gates on paths (a)/(b) and the $PSCmdlet.ShouldProcess gate on
+    # the bare-manifest path (c) below). Derive one boolean to thread through.
+    if ($DryRun) { $WhatIfPreference = $true }
+    $isWhatIf = [bool]$WhatIfPreference
 
     $bundleArgs = @{}
     if ($BucketPath) { $bundleArgs['BucketPath'] = $BucketPath }
@@ -161,7 +175,7 @@ function Install-Package {
         $pkgObjects = @(Get-BundlePackageObjects -BundlePath $entry.BundlePath)
         $results.AddRange([object[]]@(
             Invoke-PackageInstall -Packages $pkgObjects -Bundle $entry.Bundle `
-                -Name @($entry.Names) -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
+                -Name @($entry.Names) -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
                 -ErrorAction Continue -ErrorVariable +pkgErrors))
     }
 
@@ -171,7 +185,7 @@ function Install-Package {
         $pkgObjects = @(Get-BundlePackageObjects -BundlePath $b.BundlePath)
         $results.AddRange([object[]]@(
             Invoke-PackageInstall -Packages $pkgObjects -Bundle $b.Bundle `
-                -DryRun:$DryRun -SkipCompletion:$SkipCompletion `
+                -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
                 -ErrorAction Continue -ErrorVariable +pkgErrors))
     }
 
@@ -189,12 +203,12 @@ function Install-Package {
     $manifestPackagesToImport = New-Object System.Collections.Generic.List[object]
     foreach ($n in $manifestNames) {
         Write-UpdateStatus -Activity 'Install-Package' "Install-Package: dispatching manifest '$n' via scoop install (no declarative [Package] match)..."
-        # Preview mode is uniform across all dispatch paths: -DryRun is the
-        # module's single preview switch (paths (a)/(b) forward it to
-        # Invoke-PackageInstall; here we short-circuit). We deliberately do
-        # NOT add a path-specific -WhatIf gate, which would make preview
-        # behave differently here than for the Package.Name / bundle paths.
-        if ($DryRun) {
+        # Preview mode is uniform across all dispatch paths via the single
+        # ShouldProcess mechanism. Paths (a)/(b) forward the preview flag to
+        # Invoke-PackageInstall; here we gate the real `scoop install` with
+        # $PSCmdlet.ShouldProcess so `-DryRun`/`-WhatIf`/`-Confirm` all skip
+        # the engine call identically while still logging the planned action.
+        if (-not $PSCmdlet.ShouldProcess($n, 'scoop install')) {
             Write-UpdateStatus -Activity 'Install-Package' "  [DryRun] scoop install $n"
             continue
         }
@@ -283,7 +297,7 @@ function Install-Package {
     # invoke Register-ArgumentCompleter directly in the current session.
     # Register-ArgumentCompleter -Native is process-global so this works
     # regardless of module scope.
-    if (-not $SkipCompletion -and -not $DryRun) {
+    if (-not $SkipCompletion -and -not $isWhatIf) {
         # NOTE: List[object] (not List[Package]) because $b.Packages items
         # are JSON-deserialized PSCustomObjects from Get-BundlePackages'
         # child runspace, not real [Package] instances. PowerShell can't

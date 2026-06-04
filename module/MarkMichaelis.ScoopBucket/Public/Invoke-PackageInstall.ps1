@@ -66,9 +66,12 @@ function Invoke-PackageInstall {
         Drop these packages. Packages that DependsOn-ed them log a warning.
 
     .PARAMETER DryRun
-        Plan only — log every action without invoking engines. Named
-        DryRun instead of WhatIf because SupportsShouldProcess already
-        steals -WhatIf for ShouldProcess prompts.
+        Preview only — plan every action without invoking engines.
+        `-DryRun` is a first-class ALIAS for the standard `-WhatIf`
+        preview: it simply sets `$WhatIfPreference = $true` for the call
+        scope, so it and `-WhatIf` drive the SAME ShouldProcess machinery
+        (the per-engine `-WhatIf` checks, the per-hook guards below).
+        Preview is opt-in; the default performs the real install.
 
     .PARAMETER SkipCompletion
         Don't attempt completion registration (used by tests / CI when
@@ -84,6 +87,14 @@ function Invoke-PackageInstall {
         [switch]$DryRun,
         [switch]$SkipCompletion
     )
+
+    # Bridge the `-DryRun` alias into the single preview mechanism: flipping
+    # $WhatIfPreference for this scope makes every nested `$PSCmdlet.ShouldProcess`
+    # / `-WhatIf` check (here and in the engines) treat the run as a preview, so
+    # `-DryRun` and `-WhatIf` are indistinguishable downstream. Derive one
+    # boolean and key every preview branch off it.
+    if ($DryRun) { $WhatIfPreference = $true }
+    $isWhatIf = [bool]$WhatIfPreference
 
     # Cross-field validation is intentionally NOT done in a pre-loop. A
     # single malformed declaration must fail only THAT package (as a Failed
@@ -152,7 +163,7 @@ function Invoke-PackageInstall {
 
         try {
             if ($pkg.CustomInstallScript) {
-                if ($DryRun) {
+                if ($isWhatIf) {
                     Write-UpdateStatus -Activity 'Install-Package' "  [DryRun] CustomInstallScript"
                     $result = @{ State = 'Installed'; Reason = '(DryRun)' }
                 } else {
@@ -167,11 +178,11 @@ function Invoke-PackageInstall {
                 }
             } else {
                 $result = switch ($pkg.Installer) {
-                    'winget'      { Install-WingetPackage     -Package $pkg -WhatIf:$DryRun }
-                    'scoop'       { Install-ScoopPackage      -Package $pkg -WhatIf:$DryRun }
-                    'choco'       { Install-ChocoPackage      -Package $pkg -WhatIf:$DryRun }
-                    'npmGlobal'   { Install-NpmGlobalPackage  -Package $pkg -WhatIf:$DryRun }
-                    'dotnetTool'  { Install-DotnetToolPackage -Package $pkg -WhatIf:$DryRun }
+                    'winget'      { Install-WingetPackage     -Package $pkg -WhatIf:$isWhatIf }
+                    'scoop'       { Install-ScoopPackage      -Package $pkg -WhatIf:$isWhatIf }
+                    'choco'       { Install-ChocoPackage      -Package $pkg -WhatIf:$isWhatIf }
+                    'npmGlobal'   { Install-NpmGlobalPackage  -Package $pkg -WhatIf:$isWhatIf }
+                    'dotnetTool'  { Install-DotnetToolPackage -Package $pkg -WhatIf:$isWhatIf }
                     default       { throw "Invoke-PackageInstall: unknown Installer '$($pkg.Installer)' for '$($pkg.Name)'." }
                 }
             }
@@ -190,10 +201,10 @@ function Invoke-PackageInstall {
             continue
         }
 
-        if (-not $DryRun) { Update-PathFromRegistry }
+        if (-not $isWhatIf) { Update-PathFromRegistry }
 
         if ($pkg.PostInstallScript) {
-            if ($DryRun) {
+            if ($isWhatIf) {
                 Write-UpdateStatus -Activity 'Install-Package' "  [DryRun] PostInstallScript"
             } else {
                 try {
@@ -210,7 +221,7 @@ function Invoke-PackageInstall {
             }
         }
 
-        if (-not $DryRun) {
+        if (-not $isWhatIf) {
             $verified = Test-PackageInstalled -Package $pkg
             if (-not $verified -and ($pkg.CliCommands.Count -gt 0 -or $pkg.VerifyScript)) {
                 Write-Warning "  $($pkg.Name): verification failed (CliCommands not on PATH and/or VerifyScript=false)."
@@ -222,7 +233,7 @@ function Invoke-PackageInstall {
         # nature of completion registration. A throw fails the package, like
         # PostInstallScript. See [Package].ConfigScript.
         if ($pkg.ConfigScript) {
-            if ($DryRun) {
+            if ($isWhatIf) {
                 Write-UpdateStatus -Activity 'Install-Package' "  [DryRun] ConfigScript ($($pkg.Name))"
             } else {
                 try {
@@ -235,7 +246,7 @@ function Invoke-PackageInstall {
             }
         }
 
-        if (-not $SkipCompletion -and -not $DryRun -and
+        if (-not $SkipCompletion -and -not $isWhatIf -and
             $pkg.Completion -ne 'none' -and $pkg.CliCommands.Count -gt 0) {
             foreach ($cli in $pkg.CliCommands) {
                 $registerArgs = @{ Cli = $cli; Mode = $pkg.Completion }

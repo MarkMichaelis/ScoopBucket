@@ -40,6 +40,9 @@ function Invoke-PackageUpdate {
         [string[]]$Name,
         [string[]]$Skip,
         [switch]$SkipCompletion,
+        # Preferred alias for the standard -WhatIf preview. Bridged into
+        # $WhatIfPreference below so -DryRun and -WhatIf drive one mechanism.
+        [switch]$DryRun,
         # Per-package winget timeout in minutes (0 disables). Forwarded
         # to Update-WingetPackage only; other engines are unaffected.
         # Default 5 minutes; bundles can override per-package via
@@ -49,7 +52,9 @@ function Invoke-PackageUpdate {
 
     # The driver advertises SupportsShouldProcess, so -WhatIf flips
     # $WhatIfPreference in this scope (and is inherited by callees). Engines
-    # key off -WhatIf, so thread this boolean through dispatch.
+    # key off -WhatIf, so thread this boolean through dispatch. The preferred
+    # `-DryRun` alias bridges into the same flag for one preview mechanism.
+    if ($DryRun) { $WhatIfPreference = $true }
     $isWhatIf = [bool]$WhatIfPreference
 
     # NOTE: cross-field validation is deliberately NOT done in a pre-loop
