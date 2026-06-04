@@ -24,7 +24,7 @@ BeforeDiscovery {
     $script:SelfRefPrefix = 'https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/'
 
     $script:UrlCases = @()
-    Get-ChildItem -Path $script:BucketRoot -Filter '*.json' -File | ForEach-Object {
+    Get-ChildItem -Path $script:BucketRoot -Filter '*.json' -File -Recurse | ForEach-Object {
         $manifestPath = $_.FullName
         $manifestName = $_.BaseName
         try {

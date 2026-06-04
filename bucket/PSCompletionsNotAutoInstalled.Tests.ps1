@@ -22,7 +22,7 @@ Describe 'PSCompletions hard dependency removed' -Tag 'Light','Module' {
 
     It 'no production bucket file declares Completion=pscompletions' {
         $bucketDir = Join-Path $script:repoRoot 'bucket'
-        $offenders = Get-ChildItem -Path $bucketDir -Filter '*.ps1' |
+        $offenders = Get-ChildItem -Path $bucketDir -Filter '*.ps1' -Recurse |
             Where-Object { $_.Name -notmatch '\.Tests\.ps1$' } |
             Where-Object {
                 $raw = Get-Content -Raw -Encoding UTF8 -LiteralPath $_.FullName

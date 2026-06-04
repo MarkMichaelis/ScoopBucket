@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 foreach ($dir in @('Private', 'Public')) {
     $folder = Join-Path $PSScriptRoot $dir
     if (-not (Test-Path $folder)) { continue }
-    foreach ($file in Get-ChildItem -Path $folder -Filter '*.ps1' -File) {
+    foreach ($file in Get-ChildItem -Path $folder -Filter '*.ps1' -File | Where-Object { $_.Name -notmatch '\.Tests\.ps1$' }) {
         . $file.FullName
     }
 }

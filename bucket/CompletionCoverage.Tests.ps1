@@ -35,7 +35,7 @@ Describe 'Completion coverage catalog is honoured' -Tag 'Light','CompletionCover
         # Every `Register-CliCompletion -Cli <name>` actually present in the
         # bucket scripts (the registrations that must each be catalogued).
         $script:registeredClis = @(
-            Get-ChildItem -Path $script:bucketDir -Filter '*.ps1' -File |
+            Get-ChildItem -Path $script:bucketDir -Filter '*.ps1' -File -Recurse |
                 Where-Object { $_.Name -notlike '*.Tests.ps1' } |
                 ForEach-Object {
                     $text = Get-Content -Raw -Path $_.FullName

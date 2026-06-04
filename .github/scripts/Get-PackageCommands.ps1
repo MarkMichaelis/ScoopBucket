@@ -355,7 +355,7 @@ try {
 # Bundles already covered by the declarative source above are skipped.
 # ---------------------------------------------------------------------------
 
-$bundleScripts = Get-ChildItem -Path $BucketPath -Filter *.ps1 |
+$bundleScripts = Get-ChildItem -Path $BucketPath -Filter *.ps1 -Recurse |
     Where-Object { $_.Name -notlike '*.Tests.ps1' } |
     Where-Object {
         $stem = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
