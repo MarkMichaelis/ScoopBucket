@@ -123,7 +123,18 @@ Get-Package -Installer scoop      # filter by engine
 Get-Package -Name 'rip*','Bit*'   # wildcard
 Install-Package -Name 'BitwardenCli'   # auto-pulls Bitwarden via DependsOn
 Install-Package -Name beyon<Tab>       # Tab-completes to 'Beyond Compare'
+Install-Package -Name 'ripgrep' -DryRun   # preview, no real install
+Update-Package  -Name 'ripgrep' -DryRun   # preview, no real update
 ```
+
+**Preview is one opt-in mechanism.** `Install-Package` and
+`Update-Package` build on PowerShell's standard
+`SupportsShouldProcess`, so `-WhatIf` and `-Confirm` work for free.
+`-DryRun` is the preferred alias for the same preview: it simply sets
+`$WhatIfPreference = $true` for the call, so `-DryRun` and `-WhatIf`
+drive identical behavior (plan every action, emit the planned result
+rows, invoke no engines). Preview is **opt-in** -- the default actually
+installs/updates, and `-WhatIf:$false` forces execution.
 
 `-Name` on both `Install-Package` and `Get-Package` registers a Tab
 completer that suggests every package declared in any bundle (prefix

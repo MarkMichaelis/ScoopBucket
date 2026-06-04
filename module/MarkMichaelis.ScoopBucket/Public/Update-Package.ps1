@@ -88,6 +88,13 @@ function Update-Package {
         few-seconds refresh cost, or when running offline. Has no
         effect under -WhatIf or -MachineWide (which bypass it already).
 
+    .PARAMETER DryRun
+        Preview only — plan the update without invoking engines. `-DryRun`
+        is the preferred ALIAS for the idiomatic `-WhatIf` preview:
+        supplying it sets `$WhatIfPreference = $true` for the whole call so
+        it and `-WhatIf` (and `-Confirm`) drive the SAME ShouldProcess
+        machinery. Preview is opt-in; the default performs real updates.
+
     .PARAMETER BucketPath
         Override the auto-detected bucket directory.
 
@@ -96,6 +103,10 @@ function Update-Package {
 
     .EXAMPLE
         Update-Package -Name '*' -WhatIf
+
+    .EXAMPLE
+        Update-Package -Name 'ripgrep' -DryRun
+        # -DryRun is an alias for -WhatIf: previews without updating.
 
     .EXAMPLE
         Update-Package -Name 'OSBasePackages'
@@ -117,6 +128,10 @@ function Update-Package {
         [switch]$MachineWide,
         [switch]$SkipCompletion,
         [switch]$SkipBucketRefresh,
+        # Preferred alias for the standard -WhatIf preview (see .PARAMETER
+        # DryRun). Bridged into $WhatIfPreference below so both spellings
+        # drive one ShouldProcess mechanism.
+        [switch]$DryRun,
         # Show every package in the result table, including unchanged rows
         # (AlreadyLatest / NotInstalled / SelfManaged / NoAutoUpdateSupport /
         # Skipped). By default only changed rows (Updated / Failed) are shown
@@ -134,7 +149,9 @@ function Update-Package {
 
     # Update-Package advertises SupportsShouldProcess, so -WhatIf flips
     # $WhatIfPreference in this scope (and is inherited by Invoke-PackageUpdate
-    # and the engines, which key off -WhatIf). Thread this boolean through.
+    # and the engines, which key off -WhatIf). The preferred `-DryRun` alias
+    # bridges into the same flag so both spellings preview identically.
+    if ($DryRun) { $WhatIfPreference = $true }
     $isWhatIf = [bool]$WhatIfPreference
 
     # Machine-wide sweep: bypass bundle resolution entirely and dispatch
