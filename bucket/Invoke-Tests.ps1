@@ -34,8 +34,25 @@
 param(
     [string[]]$Tag = @('Light'),
     [string[]]$ExcludeTag = @(),
-    [string]$Pattern = '*'
+    [string]$Pattern = '*',
+
+    # Emit the discovered test files and return WITHOUT running Pester. Lets
+    # the discovery contract be asserted in a fast, side-effect-free test.
+    [switch]$ListOnly
 )
+
+# Discover recursively so member tests co-located in group subfolders
+# (bucket/os, bucket/developer, bucket/admin, ...) rejoin the gate. A
+# non-recursive glob silently dropped them after the group reorg (#300).
+$matched = @(Get-ChildItem -Path $PSScriptRoot -Filter "$Pattern.Tests.ps1" -File -Recurse -ErrorAction SilentlyContinue)
+if (-not $matched) {
+    Write-Warning "No test files matched: $Pattern.Tests.ps1 under $PSScriptRoot"
+    return
+}
+
+if ($ListOnly) {
+    return $matched
+}
 
 # Ensure Pester v5+ is available. v3 is the Windows in-box version and won't
 # understand BeforeAll/AfterAll the way our templates use them.
@@ -48,12 +65,6 @@ if (-not $pester -or $pester.Version.Major -lt 5) {
 }
 Import-Module Pester -MinimumVersion 5.0.0
 
-$testPath = Join-Path $PSScriptRoot "$Pattern.Tests.ps1"
-$matched = @(Get-ChildItem -Path $testPath -ErrorAction SilentlyContinue)
-if (-not $matched) {
-    Write-Warning "No test files matched: $testPath"
-    return
-}
 Write-Host "Found $($matched.Count) test file(s) matching '$Pattern.Tests.ps1':"
 $matched | ForEach-Object { Write-Host "  $($_.Name)" }
 
