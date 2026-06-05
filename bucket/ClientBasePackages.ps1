@@ -164,22 +164,7 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
     [Package]@{ Name = 'Snagit';           Installer = 'winget'; Id = 'XPDNSF6TXN2R6Z'; Source = 'msstore'
                 Notes = 'winget default source ships user-scope MSIX only; ms-store is the automated path (#9).' }
     [Package]@{ Name = 'Todoist';          Installer = 'winget'; Id = '9MWF2DWS5Z9N'; Source = 'msstore'
-                Companions = @('Todoist CLI')
-                Notes = 'winget default source ships user-scope MSIX only; ms-store is the automated path (#11).' }
-    [Package]@{
-        Name        = 'Todoist CLI'
-        Installer   = 'winget'
-        Id          = 'Sachaos.Todoist'
-        Scope       = 'user'
-        CliCommands = @('todoist')
-        Completion  = 'native'
-        NativeCompletionKind = 'native'
-        NativeCommandScript = { todoist completion powershell }
-        WingetExtraArgs = @('--silent', '--disable-interactivity')
-        DependsOn   = @('Todoist')
-        Notes       = 'sachaos/todoist Go CLI for Todoist. Co-located with the Todoist desktop entry above so the ClientBasePackages bundle installs both; DependsOn ensures the desktop app is provisioned first when the CLI is installed directly. Mirrors the Bitwarden / Bitwarden CLI pattern (#208). Scope=user because the upstream winget manifest only publishes a user-scope portable .exe -- omitting Scope causes Install-WingetPackage to default to --scope machine and winget hard-fails with -1978335212 APPINSTALLER_CLI_ERROR_NO_APPLICABLE_INSTALLER (#213).'
-        ExpectedCompletions = @{ todoist = @('add','list','show','completion','--help') }
-    }
+                Notes = 'winget default source ships user-scope MSIX only; ms-store is the automated path (#11). The sachaos/todoist CLI companion was removed in #326 because Sachaos.Todoist was delisted from winget (confirmed on CI, #325).' }
 
     [Package]@{
         Name        = 'Readwise Reader'

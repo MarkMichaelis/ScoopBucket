@@ -54,8 +54,6 @@ $script:CISkipPackages = @{
     'Pushbullet.Pushbullet'         = 'User-scope MSIX only — no machine installer; no msstore/scoop/choco alternative (#8)'
     # winget: GUI app requiring VCRedist + an interactive/desktop session
     'Warp.Warp'                     = 'GUI terminal; pulls a VCRedist dependency and expects a desktop session — installer returns -1/0xFFFFFFFF on the headless Server runner (persistently flaky). Revisit if upstream ships a headless-clean installer (#322)'
-    # winget: no-applicable-installer headless; depends on an msstore desktop app
-    'Sachaos.Todoist'               = 'Todoist CLI DependsOn the msstore Todoist desktop (itself untested headless); winget reports -1978335212 NO_APPLICABLE_INSTALLER on the headless Server runner. Scope=user mitigation (#213) is unchanged (#322)'
     # choco: delisted or CI-incompatible
     'Office365ProPlus'              = 'Requires GUI session and license activation (exit 17004)'
     # scoop: browser-watch installers requiring interactive Download click
