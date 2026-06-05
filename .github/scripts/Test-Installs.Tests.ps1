@@ -928,8 +928,7 @@ Describe 'CISkipPackages recurring-failure skip list' {
         $script:SkipList['Warp.Warp'] | Should -Not -BeNullOrEmpty
     }
 
-    It 'classifies Todoist CLI (Sachaos.Todoist) as untested, not fail' {
-        $script:SkipList.ContainsKey('Sachaos.Todoist') | Should -BeTrue
-        $script:SkipList['Sachaos.Todoist'] | Should -Not -BeNullOrEmpty
+    It 'does not skip-list the removed Todoist CLI (Sachaos.Todoist delisted from winget, #326)' {
+        $script:SkipList.ContainsKey('Sachaos.Todoist') | Should -BeFalse
     }
 }

@@ -110,11 +110,11 @@ Describe 'Engine dispatchers' -Tag 'Light','Module' {
         }
 
         It 'passes --scope user (not --scope machine) when Package.Scope=user (#213)' {
-            # Regression guard for Todoist CLI (Sachaos.Todoist): the upstream
-            # winget manifest only publishes a user-scope portable .exe. When
-            # Package.Scope='user' the wrapper must opt into --scope user and
-            # MUST NOT pass --scope machine (which causes winget to fail with
-            # -1978335212 APPINSTALLER_CLI_ERROR_NO_APPLICABLE_INSTALLER).
+            # Generic Scope=user wrapper behavior (originally motivated by the
+            # Todoist CLI, removed in #326). When Package.Scope='user' the wrapper
+            # must opt into --scope user and MUST NOT pass --scope machine (which
+            # makes winget fail -1978335212 APPINSTALLER_CLI_ERROR_NO_APPLICABLE_INSTALLER
+            # for manifests that publish only a user-scope portable .exe).
             $script:installArgs = $null
             Mock -ModuleName MarkMichaelis.ScoopBucket winget {
                 if ($args[0] -eq 'list') { $global:LASTEXITCODE = 1; return '' }
