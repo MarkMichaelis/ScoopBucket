@@ -897,3 +897,39 @@ Describe 'Install helper command construction' -Tag 'Unit' {
         $script:CapturedCommands[0] | Should -Match '--scope user'
     }
 }
+
+# ============================================================================
+# CISkipPackages  recurring-failure classification (#322)
+# ============================================================================
+#
+# Packages that cannot install on a headless Windows Server runner must be
+# recorded as 'untested' (skip) rather than 'fail', so install-validation does
+# not surface a permanent red regression for an upstream/environment limitation.
+# These guards fail behaviorally if an entry is removed from the skip list.
+
+Describe 'CISkipPackages recurring-failure skip list' {
+    BeforeAll {
+        $scriptPath = Join-Path $PSScriptRoot 'Test-Installs.ps1'
+        $content = Get-Content $scriptPath -Raw
+        # Extract the literal hashtable assignment and evaluate it into a local
+        # (the closing brace sits at column 0; inner lines are all indented).
+        if ($content -match '(?ms)\$script:CISkipPackages\s*=\s*@\{.+?^\}') {
+            $eval = $Matches[0] -replace '\$script:CISkipPackages', '$skip'
+            Invoke-Expression $eval
+            $script:SkipList = $skip
+        }
+        else {
+            throw 'Could not locate $script:CISkipPackages block in Test-Installs.ps1'
+        }
+    }
+
+    It 'classifies the flaky Warp GUI install (Warp.Warp) as untested, not fail' {
+        $script:SkipList.ContainsKey('Warp.Warp') | Should -BeTrue
+        $script:SkipList['Warp.Warp'] | Should -Not -BeNullOrEmpty
+    }
+
+    It 'classifies Todoist CLI (Sachaos.Todoist) as untested, not fail' {
+        $script:SkipList.ContainsKey('Sachaos.Todoist') | Should -BeTrue
+        $script:SkipList['Sachaos.Todoist'] | Should -Not -BeNullOrEmpty
+    }
+}
