@@ -1441,7 +1441,7 @@ function New-OneDriveMigrationPlan {
 
     $rootExists = Test-Path $RootDir
     $plan.Add((New-OneDriveMigrationPlanItem -Type 'CreateDir' -Target $RootDir -CurrentValue $(if ($rootExists) { $RootDir } else { $null }) -DesiredValue $RootDir -SameVolume $null -Account $null -Reason 'Ensure the canonical OneDrive root exists.' -Skipped:$rootExists -SkipReason $(if ($rootExists) { 'Directory already exists.' } else { $null }))) | Out-Null
-        $plan.Add((New-OneDriveMigrationPlanItem -Type 'HardenRootDirAcl' -Target $RootDir -CurrentValue $(if ($rootExists) { $RootDir } else { $null }) -DesiredValue $RootDir -SameVolume $null -Account $null -Reason 'Copy the home-directory ACL onto the canonical OneDrive root immediately after creation.' -Skipped:$rootExists -SkipReason $(if ($rootExists) { 'RootDir already existed before this run; leaving ACL unchanged.' } else { $null }))) | Out-Null
+    $plan.Add((New-OneDriveMigrationPlanItem -Type 'HardenRootDirAcl' -Target $RootDir -CurrentValue $RootDir -DesiredValue $RootDir -SameVolume $null -Account $null -Reason 'Re-assert the home-directory ACL on the canonical OneDrive root. Runs even when the root already exists, in case it inherited a world-readable drive-root ACL.')) | Out-Null
 
     foreach ($a in $Accounts) {
         if ($freshSyncSlots -contains $a.Slot) { continue }
