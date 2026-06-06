@@ -985,6 +985,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration running state' -Tag 'Heavy' 
         Mock -CommandName Set-OneDriveUpdateRingPolicy
         Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
         Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Set-RootDirAclFromHome
         Mock -CommandName Move-OneDriveFolder
         Mock -CommandName Update-OneDriveAccountRegistry
         Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $true }
@@ -1043,6 +1044,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration verification failure' -Tag '
         Mock -CommandName Set-OneDriveUpdateRingPolicy
         Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\backup.reg' }
         Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Set-RootDirAclFromHome
         Mock -CommandName Move-OneDriveFolder -MockWith { [pscustomobject]@{ SameVolume = $true; DeferredDeletePath = $null } }
         Mock -CommandName Get-OneDriveAccountRegistrySnapshot -MockWith { [pscustomobject]@{ UserFolder = $oldPath; CacheValues = @{} } }
         Mock -CommandName Update-OneDriveAccountRegistry
@@ -1096,6 +1098,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration rollback' -Tag 'Heavy' {
         Mock -CommandName Set-OneDriveUpdateRingPolicy
         Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
         Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Set-RootDirAclFromHome
         Mock -CommandName Move-OneDriveFolder -MockWith { $script:afterMove = $true }
         Mock -CommandName Get-OneDriveAccountRegistrySnapshot -MockWith { [pscustomobject]@{ UserFolder = $oldPath; CacheValues = @{} } }
         Mock -CommandName Update-OneDriveAccountRegistry -MockWith { throw 'registry write failed' }
@@ -1154,6 +1157,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration KFM rebind' -Tag 'Heavy' {
         Mock -CommandName Set-OneDriveUpdateRingPolicy
         Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
         Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Set-RootDirAclFromHome
         Mock -CommandName Move-OneDriveFolder
         Mock -CommandName Update-OneDriveAccountRegistry
         Mock -CommandName Invoke-AppFixUps
@@ -1189,6 +1193,7 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration KFM rebind' -Tag 'Heavy' {
         Mock -CommandName Set-OneDriveUpdateRingPolicy
         Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\\backup.reg' }
         Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Set-RootDirAclFromHome
         Mock -CommandName Move-OneDriveFolder
         Mock -CommandName Update-OneDriveAccountRegistry
         Mock -CommandName Invoke-AppFixUps
@@ -1203,6 +1208,39 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration KFM rebind' -Tag 'Heavy' {
 
         Should -Invoke Update-KfmBindings -Times 0
         Should -Invoke Write-Warning -Times 1 -ParameterFilter { $Message -like '*not under any discovered OneDrive account UserFolder*' }
+    }
+}
+
+Describe 'New-OneDriveMigrationPlan root ACL hardening (#328)' -Tag 'Light' {
+    It 're-asserts ACL hardening on the root even when it already exists' {
+        # A pre-existing root may have inherited the world-readable drive-root
+        # ACL (e.g. created by a plain mkdir). The hardening must run anyway so
+        # the sync root is never left readable by every local account, while
+        # the root CreateDir stays skipped because the directory is already there.
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $decision = [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                'C:\OneDrive\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-ItemProperty -MockWith { [pscustomobject]@{} }
+
+        $plan = New-OneDriveMigrationPlan -RootDir 'C:\OneDrive' -Accounts @($acct) -FreshSyncAccounts @() -KfmCurrentPath $null -KfmDecision $decision -WasRunning:$false
+
+        $harden = @($plan | Where-Object { $_.Type -eq 'HardenRootDirAcl' -and $_.Target -eq 'C:\OneDrive' })
+        $harden.Count | Should -Be 1
+        $harden[0].Skipped | Should -BeFalse
+        $rootCreate = @($plan | Where-Object { $_.Type -eq 'CreateDir' -and $_.Target -eq 'C:\OneDrive' })
+        $rootCreate[0].Skipped | Should -BeTrue
     }
 }
 
@@ -1234,6 +1272,7 @@ Describe 'Plan-then-execute architecture' -Tag 'Heavy' {
         Mock -CommandName Move-OneDriveFolder -MockWith { throw 'state change not allowed under WhatIf' }
         Mock -CommandName Update-OneDriveAccountRegistry -MockWith { throw 'state change not allowed under WhatIf' }
         Mock -CommandName Stop-OneDriveExe -MockWith { throw 'state change not allowed under WhatIf' }
+        Mock -CommandName Set-RootDirAclFromHome -MockWith { throw 'state change not allowed under WhatIf' }
         Mock -CommandName Start-OneDriveExe -MockWith { throw 'state change not allowed under WhatIf' }
         Mock -CommandName Update-KfmBindings -MockWith { throw 'state change not allowed under WhatIf' }
         Mock -CommandName Invoke-AppFixUps -MockWith { throw 'state change not allowed under WhatIf' }
@@ -1290,6 +1329,7 @@ Describe 'Plan-then-execute architecture' -Tag 'Heavy' {
         Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
         Mock -CommandName Set-OneDriveUpdateRingPolicy
         Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Set-RootDirAclFromHome
         Mock -CommandName Move-OneDriveFolder -MockWith { $script:firstRunComplete = $true }
         Mock -CommandName Update-OneDriveAccountRegistry
         Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $true }
@@ -1421,7 +1461,7 @@ Describe 'Plan-then-execute architecture' -Tag 'Heavy' {
         ($plan | Where-Object { $_.Type -eq 'HardenRootDirAcl' -and -not $_.Skipped -and $_.Target -eq 'C:\OneDrive' }).Count | Should -Be 1
     }
 
-    It 'marks every plan item skipped on a second idempotent run' {
+    It 'marks every plan item except the root ACL re-assertion skipped on a second idempotent run' {
         $acct = [pscustomobject]@{
             Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
             UserEmail = 'user@example.com'; UserFolder = 'C:\OneDrive\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
@@ -1454,7 +1494,9 @@ Describe 'Plan-then-execute architecture' -Tag 'Heavy' {
         $plan = New-OneDriveMigrationPlan -RootDir 'C:\OneDrive' -Accounts @($acct) -FreshSyncAccounts @() -KfmCurrentPath $null -KfmDecision $decision -WasRunning:$false
 
         @($plan).Count | Should -BeGreaterThan 0
-        @($plan | Where-Object { -not $_.Skipped }).Count | Should -Be 0
+        $nonSkipped = @($plan | Where-Object { -not $_.Skipped })
+        $nonSkipped.Count | Should -Be 1
+        $nonSkipped[0].Type | Should -Be 'HardenRootDirAcl'
     }
 }
 
