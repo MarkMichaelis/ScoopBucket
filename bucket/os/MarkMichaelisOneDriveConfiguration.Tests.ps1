@@ -1799,7 +1799,13 @@ Describe 'Elevation pre-flight' -Tag 'Light' {
     }
 }
 
-Describe 'Script entry output (#334)' -Tag 'Light' {
+Describe 'Script entry output (#334)' -Tag 'Heavy' {
+    # End-to-end script-entry behavior: requires a machine with real OneDrive
+    # accounts so the bundle runs through to returning its plan. Tagged Heavy
+    # (excluded from the CI Light suite) for the same reason as the other
+    # full-execution tests -- the CI runner has no OneDrive accounts, so
+    # Get-OneDriveAccountList returns nothing and the orchestrator cannot build
+    # a plan. Validated locally.
     BeforeAll {
         $script:bundlePath = "$PSScriptRoot\MarkMichaelisOneDriveConfiguration.ps1"
     }
