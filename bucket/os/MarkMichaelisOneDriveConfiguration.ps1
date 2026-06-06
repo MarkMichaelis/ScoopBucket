@@ -1712,11 +1712,17 @@ function Format-OneDriveMigrationPlan {
         function Format-PlanPath {
             param([string]$Path)
             if ([string]::IsNullOrEmpty($Path)) { return '' }
-            if ($HomeDir -and $Path.StartsWith($HomeDir, [System.StringComparison]::OrdinalIgnoreCase)) {
-                return '~' + $Path.Substring($HomeDir.Length)
-            }
-            if ($RootDir -and $Path.StartsWith($RootDir, [System.StringComparison]::OrdinalIgnoreCase)) {
-                return '.' + $Path.Substring($RootDir.Length)
+            foreach ($pair in @(
+                @{ Root = $HomeDir; Token = '~' },
+                @{ Root = $RootDir; Token = '.' })) {
+                $root = ([string]$pair.Root).TrimEnd('\')
+                if (-not $root) { continue }
+                if ([string]::Equals($Path, $root, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    return $pair.Token
+                }
+                if ($Path.StartsWith($root + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+                    return $pair.Token + $Path.Substring($root.Length)
+                }
             }
             return $Path
         }

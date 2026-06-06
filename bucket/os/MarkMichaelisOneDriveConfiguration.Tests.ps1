@@ -1815,6 +1815,25 @@ Describe 'Format-OneDriveMigrationPlan' -Tag 'Light' {
         $joined | Should -Match ([regex]::Escape('(~ = C:\Users\Mark,  . = C:\OneDrive)'))
         $joined | Should -Not -Match 'Current:'
     }
+
+    It 'enforces a path boundary and trims trailing separators when shortening' {
+        $plan = @([pscustomobject]@{
+            Type = 'MoveAccount'; Target = 'C:\OneDrive\Tenant'
+            CurrentValue = 'C:\Users\Markus\OneDrive'
+            DesiredValue = 'C:\OneDrive\Tenant'
+            Reason = 'Migrate account folder'; Skipped = $false; SkipReason = $null; Warnings = @()
+        })
+        Format-OneDriveMigrationPlan -Plan $plan -Accounts @() `
+            -RootDir 'C:\OneDrive\' -KfmOwner 'Michaelis' `
+            -FreshSyncAccounts @() -HomeDir 'C:\Users\Mark'
+        $joined = $script:capturedPlanLines -join "`n"
+        # 'C:\Users\Markus' must NOT be shortened against HomeDir 'C:\Users\Mark'.
+        $joined | Should -Match ([regex]::Escape('C:\Users\Markus\OneDrive'))
+        $joined | Should -Not -Match '~us'
+        # Trailing-slash RootDir still yields a clean '.\Tenant'.
+        $joined | Should -Match ([regex]::Escape('.\Tenant'))
+        $joined | Should -Not -Match ([regex]::Escape('.Tenant '))
+    }
 }
 
 Describe 'Elevation pre-flight' -Tag 'Light' {
