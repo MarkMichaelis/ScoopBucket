@@ -2133,7 +2133,12 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
 # `& "$dir\MarkMichaelisOneDriveConfiguration.ps1"`). When dot-sourced
 # (Pester tests), expose the helpers without running migration.
 if ($MyInvocation.InvocationName -ne '.') {
-    Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner `
+    # Suppress the plan object the orchestrator returns: the human-readable
+    # summary is already written via Write-Host. Without this, the returned
+    # plan array would be echoed to the success stream and auto-formatted into
+    # a second, raw object dump on the console. The function still returns the
+    # plan for programmatic and test callers that capture it.
+    $null = Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner `
         -KfmOwnerContains:$KfmOwnerContains -NoKfmRebind:$NoKfmRebind `
         -NoFolderDescriptionsWrite:$NoFolderDescriptionsWrite -FreshSync $FreshSync `
         -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -ForceHydrate:$ForceHydrate `
