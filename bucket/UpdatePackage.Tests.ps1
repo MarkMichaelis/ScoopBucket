@@ -26,7 +26,14 @@ Describe 'Update engine dispatchers' -Tag 'Light','Module' {
             $r.State | Should -Be 'NotInstalled'
         }
 
-        It 'invokes winget upgrade --id <Id> --silent with --scope machine for global' {
+        It 'invokes winget upgrade --id <Id> --silent WITHOUT --scope, even when Package.Scope=global (#336)' {
+            # Regression for #336: winget upgrade filtered by --scope misses
+            # installs at the other scope and returns NO_APPLICABLE_UPGRADE
+            # (exit -1978335212), which our engine maps to AlreadyLatest --
+            # silently hiding stale installs (the real-world Bitwarden CLI
+            # case: user-scope install vs Scope='global' bundle entry).
+            # Upgrade always operates on whatever scope is installed; only
+            # Install-WingetPackage should ever choose a scope.
             $script:captured = $null
             Mock -ModuleName MarkMichaelis.ScoopBucket winget {
                 if ($args[0] -eq 'list') { $global:LASTEXITCODE = 0; return 'row' }
@@ -43,11 +50,7 @@ Describe 'Update engine dispatchers' -Tag 'Light','Module' {
             ($script:captured -contains '--silent')                      | Should -BeTrue
             ($script:captured -contains '--accept-package-agreements')   | Should -BeTrue
             ($script:captured -contains '--accept-source-agreements')    | Should -BeTrue
-            $hasScope = $false
-            for ($i=0; $i -lt $script:captured.Count; $i++) {
-                if ($script:captured[$i] -eq '--scope' -and $script:captured[$i+1] -eq 'machine') { $hasScope = $true }
-            }
-            $hasScope | Should -BeTrue
+            ($script:captured -contains '--scope') | Should -BeFalse -Because 'winget upgrade --scope filters to one scope and misses cross-scope installs (#336)'
         }
 
         It 'maps exit -1978335212 (no applicable upgrade) to AlreadyLatest' {
