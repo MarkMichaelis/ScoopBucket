@@ -45,10 +45,15 @@ function Update-WingetPackage {
     $upgradeArgs = @('upgrade', '--id', $id, '--silent', '--accept-package-agreements', '--accept-source-agreements')
     if ($Package.Source -eq 'msstore') {
         $upgradeArgs += @('--source', 'msstore')
-    } else {
-        $scope = if ($Package.Scope -eq 'user') { 'user' } else { 'machine' }
-        $upgradeArgs += @('--scope', $scope)
     }
+    # Intentionally NOT passing --scope on upgrade (see #336): `winget upgrade`
+    # filters by --scope and returns NO_APPLICABLE_UPGRADE (-1978335212) when
+    # no install matches that scope -- which our engine then maps to
+    # AlreadyLatest, silently hiding stale installs. The real-world case is
+    # Bitwarden CLI: bundle declares Scope='global' (default) but winget
+    # installs it at user scope, so --scope machine masked a real upgrade.
+    # Scope selection matters at INSTALL time (Install-WingetPackage keeps it);
+    # for upgrades we always operate on whatever scope the package is at.
     if ($Package.WingetExtraArgs -and $Package.WingetExtraArgs.Count -gt 0) {
         $upgradeArgs += @($Package.WingetExtraArgs)
     }
