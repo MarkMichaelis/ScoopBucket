@@ -1798,3 +1798,30 @@ Describe 'Elevation pre-flight' -Tag 'Light' {
         }
     }
 }
+
+Describe 'Script entry output (#334)' -Tag 'Light' {
+    BeforeAll {
+        $script:bundlePath = "$PSScriptRoot\MarkMichaelisOneDriveConfiguration.ps1"
+    }
+
+    AfterEach {
+        if (Test-Path 'Variable:Global:__MMOD_ForceIsElevated') {
+            Remove-Variable -Name '__MMOD_ForceIsElevated' -Scope Global -Force
+        }
+    }
+
+    It 'does not echo the raw plan object dump to the success stream when run as a script' {
+        # The bundle already prints a human-readable plan summary via Write-Host
+        # (the information stream). It must not ALSO emit the returned plan array
+        # to the success stream, which PowerShell would auto-format into a second
+        # raw object dump on the console.
+        $global:__MMOD_ForceIsElevated = $true
+
+        # Information (6) and warning (3) streams carry the intended summary and
+        # the internal-API caveat; discard them so only the success stream
+        # (stream 1) -- where an accidental object dump would land -- is captured.
+        $successOutput = & $script:bundlePath -RootDir 'TestDrive:\OD' -SkipElevationCheck -NoKfmRebind -WhatIf 3>$null 6>$null
+
+        @($successOutput).Count | Should -Be 0
+    }
+}
