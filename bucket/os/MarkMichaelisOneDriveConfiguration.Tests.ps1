@@ -1390,7 +1390,8 @@ Describe 'Plan-then-execute architecture' -Tag 'Heavy' {
         Mock -CommandName New-Item
         Mock -CommandName Get-Process -MockWith { $null }
 
-        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false | Out-Null
+        $firstRun = Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+        $firstRun | Should -BeNullOrEmpty
         $secondPlan = Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false -PassThru
 
         Should -Invoke Move-OneDriveFolder -Times 1
@@ -1810,6 +1811,8 @@ Describe 'Format-OneDriveMigrationPlan' -Tag 'Light' {
         $joined | Should -Match 'To'
         $joined | Should -Match 'MoveAccount'
         $joined | Should -Match ([regex]::Escape('~\OneDrive - Michaelis'))
+        $joined | Should -Match ([regex]::Escape('.\OneDrive - Michaelis'))
+        $joined | Should -Match ([regex]::Escape('(~ = C:\Users\Mark,  . = C:\OneDrive)'))
         $joined | Should -Not -Match 'Current:'
     }
 }
