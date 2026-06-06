@@ -743,7 +743,16 @@ function Move-OneDriveFolder {
         return $result
     }
     if (Test-Path $Destination) {
-        throw "Refusing to merge: destination '$Destination' already exists. Resolve manually."
+        $destChildren = @(Get-ChildItem -LiteralPath $Destination -Force -ErrorAction SilentlyContinue)
+        if ($destChildren.Count -gt 0) {
+            throw "Refusing to merge: destination '$Destination' already exists and is not empty. Resolve manually."
+        }
+        # An empty pre-existing destination is safe: remove it so the move
+        # recreates the destination path itself (a same-volume rename moves the
+        # source onto the path, not into an existing directory).
+        if ($PSCmdlet.ShouldProcess($Destination, 'Remove empty pre-existing destination directory')) {
+            Remove-Item -LiteralPath $Destination -Force
+        }
     }
 
     $parent = Split-Path -Parent $Destination

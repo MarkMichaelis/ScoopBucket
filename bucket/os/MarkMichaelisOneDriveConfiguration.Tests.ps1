@@ -691,6 +691,58 @@ Describe 'Move-OneDriveFolder' -Tag 'Light' {
         Should -Invoke Move-Item -Times 1
         Should -Invoke Remove-Item -Times 0
     }
+
+    It 'moves into an existing but empty destination by removing the empty directory first' {
+        # A partial prior run -- or OneDrive re-creating an empty sync folder --
+        # can leave an empty target. An empty destination is safe to move into.
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                'C:\OneDrive\OneDrive - IntelliTect' { $true; break }
+                'C:\OneDrive' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-Item -MockWith { param($Path) [pscustomobject]@{ FullName = $Path } }
+        Mock -CommandName Get-ChildItem -MockWith { @() }
+        Mock -CommandName Test-IsSameVolume -MockWith { $true }
+        Mock -CommandName Move-Item
+        Mock -CommandName Remove-Item
+
+        { Move-OneDriveFolder -Source 'C:\Users\me\OneDrive - IntelliTect' -Destination 'C:\OneDrive\OneDrive - IntelliTect' -Confirm:$false } |
+            Should -Not -Throw
+
+        Should -Invoke Remove-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq 'C:\OneDrive\OneDrive - IntelliTect'
+        }
+        Should -Invoke Move-Item -Times 1 -ParameterFilter {
+            $LiteralPath -eq 'C:\Users\me\OneDrive - IntelliTect' -and
+            $Destination -eq 'C:\OneDrive\OneDrive - IntelliTect'
+        }
+    }
+
+    It 'refuses to move into an existing non-empty destination' {
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                'C:\OneDrive\OneDrive - IntelliTect' { $true; break }
+                'C:\OneDrive' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-Item -MockWith { param($Path) [pscustomobject]@{ FullName = $Path } }
+        Mock -CommandName Get-ChildItem -MockWith { [pscustomobject]@{ Name = 'leftover.txt' } }
+        Mock -CommandName Move-Item
+        Mock -CommandName Remove-Item
+
+        { Move-OneDriveFolder -Source 'C:\Users\me\OneDrive - IntelliTect' -Destination 'C:\OneDrive\OneDrive - IntelliTect' -Confirm:$false } |
+            Should -Throw -ExpectedMessage '*already exists and is not empty*'
+
+        Should -Invoke Move-Item -Times 0
+        Should -Invoke Remove-Item -Times 0
+    }
 }
 
 Describe 'Remove-OneDriveAccountLink' -Tag 'Light' {
