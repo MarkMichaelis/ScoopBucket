@@ -27,6 +27,26 @@
 # scrolling log; shorter windows degrade to the single-line region.
 $script:StickyMinHeight = 6
 
+function Get-ConsoleWindowHeight {
+    <#
+    .SYNOPSIS
+        Read the console window height in rows, returning 0 when it cannot be read.
+    .DESCRIPTION
+        Isolated so callers can probe the (potentially throwing) [Console]::WindowHeight
+        getter through a single seam. On a headless host (CI / redirected) the getter
+        raises a non-terminating "handle is invalid" error that try/catch does NOT
+        swallow and that would leak into a caller's -ErrorVariable, so this is only
+        ever invoked once the cheaper, non-throwing host gates have failed to short
+        circuit. Returns 0 on any failure (treated as "height unknown"). Pure read.
+    .OUTPUTS
+        System.Int32 -- the window height, or 0 when unavailable.
+    #>
+    [CmdletBinding()]
+    [OutputType([int])]
+    param()
+    try { return [int][Console]::WindowHeight } catch { return 0 }
+}
+
 function Resolve-LiveOutputMode {
     <#
     .SYNOPSIS
@@ -87,9 +107,6 @@ function Resolve-LiveOutputMode {
     if ($null -eq $SupportsVirtualTerminal) {
         try { $SupportsVirtualTerminal = [bool]$Host.UI.SupportsVirtualTerminal } catch { $SupportsVirtualTerminal = $false }
     }
-    if ($null -eq $WindowHeight) {
-        try { $WindowHeight = [Console]::WindowHeight } catch { $WindowHeight = 0 }
-    }
 
     if ($ProgressPreferenceValue -eq 'SilentlyContinue') { return 'Off' }
 
@@ -104,6 +121,16 @@ function Resolve-LiveOutputMode {
     if ($TermProgram -eq 'vscode')                        { return 'Single' }
     if ($HostName -like '*ISE*')                          { return 'Single' }
     if (-not $SupportsVirtualTerminal)                    { return 'Single' }
+
+    # Only now -- once every cheaper, non-throwing gate has had its chance to return
+    # Single -- read the console window height. On a headless host (CI / redirected)
+    # the [Console]::WindowHeight getter raises a non-terminating "handle is invalid"
+    # error that try/catch does NOT swallow and that would otherwise leak into a
+    # caller's -ErrorVariable; deferring the read past those gates means such hosts
+    # never touch the console handle (#361 CI regression).
+    if ($null -eq $WindowHeight) {
+        $WindowHeight = Get-ConsoleWindowHeight
+    }
     # A window too short for a pinned bar plus a usable log degrades to Single.
     if ($WindowHeight -gt 0 -and $WindowHeight -lt $script:StickyMinHeight) { return 'Single' }
     return 'Sticky'

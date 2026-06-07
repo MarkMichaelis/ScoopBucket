@@ -117,6 +117,40 @@ Describe 'Resolve-LiveOutputMode' -Tag 'Light','Module' {
         }
         $m | Should -Be 'Single'
     }
+
+    It 'does not read the console window height once a cheap gate has chosen Single' {
+        # On a headless host the [Console]::WindowHeight getter raises a
+        # non-terminating "handle is invalid" error that leaks into a caller's
+        # -ErrorVariable. The cheap, non-throwing gates (CI / redirected / vscode /
+        # ISE / no-VT) must therefore short-circuit BEFORE the height is probed.
+        foreach ($case in @(
+                @{ Name = 'CI';         Args = @{ Ci = 'true'; OutputRedirected = $false; SupportsVirtualTerminal = $true } }
+                @{ Name = 'redirected'; Args = @{ Ci = '';     OutputRedirected = $true;  SupportsVirtualTerminal = $true } }
+                @{ Name = 'vscode';     Args = @{ Ci = '';     OutputRedirected = $false; SupportsVirtualTerminal = $true; TermProgram = 'vscode' } }
+                @{ Name = 'no-VT';      Args = @{ Ci = '';     OutputRedirected = $false; SupportsVirtualTerminal = $false } }
+            )) {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-ConsoleWindowHeight { 30 }
+            $splat = $case.Args
+            $m = & $script:mod {
+                param($splat)
+                Resolve-LiveOutputMode @splat -HostName 'ConsoleHost' -ProgressPreferenceValue 'Continue' -LivePaneOverride ''
+            } $splat
+            $m | Should -Be 'Single' -Because "the $($case.Name) gate must force Single"
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Get-ConsoleWindowHeight -Times 0 -Exactly `
+                -Because "the $($case.Name) gate must short-circuit before the console handle is touched"
+        }
+    }
+
+    It 'reads the console window height only when no cheaper gate short-circuits' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-ConsoleWindowHeight { 30 }
+        $m = & $script:mod {
+            Resolve-LiveOutputMode -TermProgram 'WindowsTerminal' -Ci '' -OutputRedirected $false `
+                -HostName 'ConsoleHost' -SupportsVirtualTerminal $true -ProgressPreferenceValue 'Continue' `
+                -LivePaneOverride ''
+        }
+        $m | Should -Be 'Sticky'
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Get-ConsoleWindowHeight -Times 1 -Exactly
+    }
 }
 
 Describe 'Get-LivePaneFrame' -Tag 'Light','Module' {
