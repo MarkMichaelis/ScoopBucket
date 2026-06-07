@@ -7,11 +7,14 @@
     The multiline pane is the portability risk, so its decision logic and frame
     strings are pure and pinned here:
 
-      * Resolve-LiveOutputMode resolves Multiline only for a genuinely interactive,
-        VT-capable, non-VS-Code, non-CI, non-redirected, non-ISE console; every
-        other signature is Single, and a silenced progress preference is Off.
+      * Resolve-LiveOutputMode defaults to the safe single-line Write-Progress
+        region for every interactive console, and only resolves Multiline when
+        $env:SCOOPBUCKET_LIVE_PANE explicitly opts in AND the host is a capable,
+        VT-capable, non-VS-Code, non-CI, non-redirected, non-ISE console; a silenced
+        progress preference is Off.
       * Get-LivePaneFrame / Get-LivePaneClear emit the exact cursor-move + clear
-        sequences and account for the drawn line count.
+        sequences, split embedded newlines, truncate to a supplied width, and
+        account for the drawn line count.
       * Write-LivePane mirrors to verbose in every mode and maintains the pane's
         line-count state across calls / teardown.
 #>
@@ -67,12 +70,30 @@ Describe 'Resolve-LiveOutputMode' -Tag 'Light','Module' {
         $m | Should -Be 'Single'
     }
 
-    It 'returns Multiline only for a capable interactive console' {
+    It 'returns Single for a capable interactive console when the pane is not opted in' {
         $m = & $script:mod {
             Resolve-LiveOutputMode -TermProgram 'WindowsTerminal' -Ci '' -OutputRedirected $false `
-                -HostName 'ConsoleHost' -SupportsVirtualTerminal $true -ProgressPreferenceValue 'Continue'
+                -HostName 'ConsoleHost' -SupportsVirtualTerminal $true -ProgressPreferenceValue 'Continue' `
+                -LivePaneOptIn ''
+        }
+        $m | Should -Be 'Single'
+    }
+
+    It 'returns Multiline only for a capable interactive console that opts in' {
+        $m = & $script:mod {
+            Resolve-LiveOutputMode -TermProgram 'WindowsTerminal' -Ci '' -OutputRedirected $false `
+                -HostName 'ConsoleHost' -SupportsVirtualTerminal $true -ProgressPreferenceValue 'Continue' `
+                -LivePaneOptIn 'multiline'
         }
         $m | Should -Be 'Multiline'
+    }
+
+    It 'keeps Single even when opted in if the host is not capable (redirected)' {
+        $m = & $script:mod {
+            Resolve-LiveOutputMode -Ci '' -OutputRedirected $true -SupportsVirtualTerminal $true `
+                -ProgressPreferenceValue 'Continue' -LivePaneOptIn 'true'
+        }
+        $m | Should -Be 'Single'
     }
 }
 
@@ -95,6 +116,20 @@ Describe 'Get-LivePaneFrame' -Tag 'Light','Module' {
         $f = & $script:mod { Get-LivePaneFrame -Lines @('1', '2', '3', '4', '5', '6') -PreviousLineCount 0 -MaxLines 3 }
         $f.Text | Should -Be "4`n5`n6"
         $f.LineCount | Should -Be 3
+    }
+
+    It 'splits an embedded-newline record into separate physical rows' {
+        # A single captured record carrying its own newlines must count as the rows
+        # it actually occupies, or the next frame''s cursor-up math desyncs (#356).
+        $f = & $script:mod { Get-LivePaneFrame -Lines @("a`nb`nc") -PreviousLineCount 0 }
+        $f.Text | Should -Be "a`nb`nc"
+        $f.LineCount | Should -Be 3
+    }
+
+    It 'truncates each drawn row to Width so it cannot wrap' {
+        $f = & $script:mod { Get-LivePaneFrame -Lines @('abcdefghij') -PreviousLineCount 0 -Width 4 }
+        $f.Text | Should -Be 'abcd'
+        $f.LineCount | Should -Be 1
     }
 }
 
