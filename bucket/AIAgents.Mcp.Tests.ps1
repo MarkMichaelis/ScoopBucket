@@ -289,6 +289,54 @@ exit /b 1
         }
     }
 
+    Context 'PoshMcp full-access config' {
+        BeforeEach {
+            $script:TmpDir = New-TempDir
+            $script:TempRoots.Add($script:TmpDir)
+            $script:PoshCfg = Join-Path $script:TmpDir 'sub\appsettings.full.json'
+        }
+
+        It 'exposes the full PowerShell surface via IncludePatterns *' {
+            Write-PoshMcpFullAccessConfig -Path $script:PoshCfg | Should -Be $script:PoshCfg
+            $cfg = Get-Content -Path $script:PoshCfg -Raw | ConvertFrom-Json
+            @($cfg.PowerShellConfiguration.IncludePatterns) | Should -Be @('*')
+            @($cfg.PowerShellConfiguration.ExcludePatterns) | Should -Be @()
+        }
+
+        It 'creates the parent directory when missing' {
+            Test-Path (Split-Path -Parent $script:PoshCfg) | Should -BeFalse
+            Write-PoshMcpFullAccessConfig -Path $script:PoshCfg | Out-Null
+            Test-Path $script:PoshCfg | Should -BeTrue
+        }
+
+        It 'is idempotent: re-running leaves a single valid full-access config' {
+            Write-PoshMcpFullAccessConfig -Path $script:PoshCfg | Out-Null
+            Write-PoshMcpFullAccessConfig -Path $script:PoshCfg | Out-Null
+            $cfg = Get-Content -Path $script:PoshCfg -Raw | ConvertFrom-Json
+            @($cfg.PowerShellConfiguration.IncludePatterns) | Should -Be @('*')
+        }
+    }
+
+    Context 'Get-PoshMcpServerEntry' {
+        It 'points poshmcp serve at the supplied --config path' {
+            $entry = Get-PoshMcpServerEntry -ConfigPath 'C:\cfg\appsettings.full.json'
+            $entry.Name    | Should -Be 'posh'
+            $entry.Command | Should -Be 'poshmcp'
+            $entry.Arguments | Should -Contain 'serve'
+            $entry.Arguments | Should -Contain '--transport'
+            $entry.Arguments | Should -Contain 'stdio'
+            $entry.Arguments | Should -Contain '--config'
+            $entry.Arguments | Should -Contain 'C:\cfg\appsettings.full.json'
+        }
+
+        It 'orders --config immediately before its value' {
+            $entry = Get-PoshMcpServerEntry -ConfigPath 'C:\cfg\x.json'
+            $idx = [array]::IndexOf($entry.Arguments, '--config')
+            $idx | Should -BeGreaterThan -1
+            $entry.Arguments[$idx + 1] | Should -Be 'C:\cfg\x.json'
+        }
+    }
+
     Context 'Add-McpServerToJsonConfig: env emission' {
         BeforeEach {
             $script:TmpDir = New-TempDir
