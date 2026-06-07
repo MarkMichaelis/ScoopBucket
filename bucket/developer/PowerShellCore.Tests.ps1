@@ -34,6 +34,16 @@ Describe 'PowerShellCore install source policy' -Tag 'Light' {
             -Because 'the winget source serves the MSI; the msstore source serves the sealed MSIX'
     }
 
+    It 'upgrades PowerShell on subsequent runs (winget install alone is a no-op when installed)' {
+        # #339: scoop only re-runs the installer when the manifest version bumps,
+        # and `winget install` on an installed package is a no-op. Without an
+        # explicit `winget upgrade`, the manifest can ship a version bump and
+        # still leave the underlying Microsoft.PowerShell package on an old
+        # release. The installer must invoke `winget upgrade` for the same id.
+        $script:Script | Should -Match '(?i)winget\s+upgrade\b[^\r\n]*--id\s+Microsoft\.PowerShell\b' `
+            -Because 'winget install is idempotent; only winget upgrade moves an installed package to a newer version'
+    }
+
     It 'does not install PowerShell via choco (which let the Store build shadow the MSI)' {
         $script:Script | Should -Not -Match '(?i)choco\s+install\s+powershell-core' `
             -Because 'choco install powershell-core regressed to a Store-shadowed pwsh'
