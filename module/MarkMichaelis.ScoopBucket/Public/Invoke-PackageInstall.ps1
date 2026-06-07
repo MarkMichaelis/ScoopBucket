@@ -114,6 +114,8 @@ function Invoke-PackageInstall {
     # deferred until after the loop so an interactive run renders a single
     # table; failures additionally go to the error stream at each failure site.
     $states = New-Object System.Collections.Generic.List[object]
+    $configFailures = New-Object System.Collections.Generic.List[object]
+    $runStart = Get-Date
     $isCi = [bool]$env:CI
 
     $addState = {
@@ -236,11 +238,20 @@ function Invoke-PackageInstall {
             if ($isWhatIf) {
                 Write-UpdateStatus -Activity 'Install-Package' "  [DryRun] ConfigScript ($($pkg.Name))"
             } else {
+                # Capture ConfigScript output into the transient channel + a buffer
+                # so success runs stay quiet and failures stay visible (#352).
+                $buf = New-Object System.Collections.Generic.List[string]
                 try {
-                    [void](& $pkg.ConfigScript $pkg 2>$null)
+                    Invoke-ConfigScriptCaptured -ConfigScript $pkg.ConfigScript -Package $pkg -Buffer $buf -Activity 'Install-Package'
                 } catch {
-                    $reason = "ConfigScript threw: $($_.Exception.Message)"
+                    $reason = "ConfigScript threw: $($_.Exception.Message)$(Get-CapturedOutputTail (($buf) -join [Environment]::NewLine))"
                     & $failPackage $pkg $reason
+                    Out-CapturedFailure -Name $pkg.Name -Lines $buf
+                    $configFailures.Add([pscustomobject]@{
+                            Name   = $pkg.Name
+                            Reason = "ConfigScript threw: $($_.Exception.Message)"
+                            Output = ($buf -join [Environment]::NewLine)
+                        })
                     continue
                 }
             }
@@ -281,6 +292,18 @@ function Invoke-PackageInstall {
     # Tear down the transient progress line before emitting results so the
     # two don't fight over the host's rendering.
     Write-UpdateStatus -Activity 'Install-Package' -Completed
+
+    # Persist a per-run failure log when any ConfigScript failed (#352).
+    if ($configFailures.Count -gt 0 -and -not $isWhatIf) {
+        try {
+            $logName = Get-FailureLogFileName -Verb 'Install' -Timestamp $runStart
+            $logPath = Get-FailureLogPath -FileName $logName -PreferredDirectory (Get-Location).Path -FallbackDirectory $env:TEMP
+            $written = Write-FailureLog -Path $logPath -Verb 'Install' -Failures $configFailures.ToArray()
+            Write-Host "Install-Package: wrote failure log to $written" -ForegroundColor Yellow
+        } catch {
+            Write-Warning "Install-Package: could not write failure log: $($_.Exception.Message)"
+        }
+    }
 
     # Emit one PackageResult per package on the success stream. The
     # format.ps1xml view renders Status as a colored glyph for interactive
