@@ -1,10 +1,10 @@
 {
     "$schema": "https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json",
-    "version": "1.02.000",
+    "version": "1.03.000",
     "url": ["https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/_placeholder"],
     "installer": {
         "script": [
-            "winget install --id Anthropic.ClaudeCode -e --silent --accept-package-agreements --accept-source-agreements"
+            "$listed = (winget list --id Anthropic.ClaudeCode -e --accept-source-agreements 2>$null | Select-String -SimpleMatch 'Anthropic.ClaudeCode'); if ($listed) { winget upgrade --id Anthropic.ClaudeCode -e --silent --accept-package-agreements --accept-source-agreements } else { winget install --id Anthropic.ClaudeCode -e --silent --accept-package-agreements --accept-source-agreements }"
         ]
     }
 }
