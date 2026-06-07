@@ -373,6 +373,38 @@ exit /b 1
         }
     }
 
+    Context 'Get-PoshMcpInstallFailureDetail' {
+        It 'classifies a missing .NET SDK (runtime-only machine) (#350)' {
+            # Real `dotnet tool update` output when only the .NET runtime is present.
+            $raw = @(
+                'The command could not be loaded, possibly because:'
+                '  * You intended to execute a .NET application:'
+                "      The application 'tool' does not exist."
+                '  * You intended to execute a .NET SDK command:'
+                '      No .NET SDKs were found.'
+                'Download a .NET SDK:'
+                'https://aka.ms/dotnet/download'
+            )
+            $detail = Get-PoshMcpInstallFailureDetail -RawOutput $raw
+            $detail | Should -Match 'no \.NET SDK found'
+            # The multi-line dotnet block must be collapsed to a single line.
+            $detail | Should -Not -Match "`n"
+        }
+
+        It 'classifies a locked tool store (running MCP client) (#350)' {
+            $raw = @(
+                "Failed to uninstall tool package 'poshmcp':"
+                "Access to the path 'C:\Users\Mark\.dotnet\tools\.store\poshmcp\0.8.11' is denied."
+            )
+            Get-PoshMcpInstallFailureDetail -RawOutput $raw | Should -Match 'tool store locked'
+        }
+
+        It 'falls back to the last meaningful line for an unrecognized failure (#350)' {
+            $raw = @('warming up', '', 'Something specific went wrong')
+            Get-PoshMcpInstallFailureDetail -RawOutput $raw | Should -Be 'Something specific went wrong'
+        }
+    }
+
     Context 'Add-McpServerToJsonConfig: env emission' {
         BeforeEach {
             $script:TmpDir = New-TempDir
