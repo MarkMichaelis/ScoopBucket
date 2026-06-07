@@ -509,6 +509,17 @@ package owns, such as the AIAgents MCP-server wiring (`mcpServers` JSON /
 Codex TOML entries, the persisted GitHub PAT, the profile self-heal
 block) -- gets the same treatment via the `[Package].ConfigScript` hook.
 
+> **`posh` MCP server -- full, write-capable PowerShell.** The `posh`
+> server (PoshMcp) is wired with a generated config
+> (`~\.poshmcp\appsettings.full.json`) whose `PowerShellConfiguration`
+> sets `IncludePatterns: ["*"]`, exposing the **entire** PowerShell command
+> surface -- including destructive cmdlets and `Invoke-Expression` -- so
+> agents get a real interactive terminal rather than a read-only `Get-*`
+> subset. This grants every wired agent unrestricted PowerShell on the
+> machine; it is a deliberate posture for this personal bucket. Narrow it
+> by editing `IncludePatterns` / `ExcludePatterns` in that config if you
+> want a more conservative surface.
+
 A `ConfigScript` is:
 
 - **Always run.** Invoked on every install (for both freshly `Installed`

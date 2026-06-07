@@ -503,6 +503,85 @@ function Get-AIAgentsDeprecatedMcpServer {
     @('shell')
 }
 
+# ---------------------------------------------------------------------------
+# PoshMcp full-access PowerShell surface.
+#
+# PoshMcp filters which PowerShell commands it exposes as MCP tools via the
+# PowerShellConfiguration section of its config (CommandNames / Modules /
+# IncludePatterns / ExcludePatterns). Its default surface is read-only
+# (Get-* style commands only). To give agents a full, write-capable
+# interactive PowerShell, we ship a config with IncludePatterns '*' and
+# point `poshmcp serve --config <path>` at it.
+#
+# SECURITY: IncludePatterns '*' exposes EVERY command, including destructive
+# cmdlets and Invoke-Expression. This is a deliberate, owner-approved posture
+# for this bucket; every wired agent inherits unrestricted PowerShell.
+# ---------------------------------------------------------------------------
+
+function Get-PoshMcpConfigPath {
+    <#
+    .SYNOPSIS
+        Per-user path of the PoshMcp full-access config file.
+    .OUTPUTS
+        String.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    Join-Path $env:USERPROFILE '.poshmcp\appsettings.full.json'
+}
+
+function Write-PoshMcpFullAccessConfig {
+    <#
+    .SYNOPSIS
+        Idempotently write a PoshMcp config exposing the full (write-capable)
+        PowerShell command surface via IncludePatterns '*'.
+    .OUTPUTS
+        The config file path that was written.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $dir = Split-Path -Parent $Path
+    if ($dir -and -not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+
+    $config = [ordered]@{
+        PowerShellConfiguration = [ordered]@{
+            CommandNames    = @()
+            Modules         = @()
+            IncludePatterns = @('*')
+            ExcludePatterns = @()
+        }
+    }
+    $config | ConvertTo-Json -Depth 10 | Set-Content -Path $Path -Encoding UTF8
+    return $Path
+}
+
+function Get-PoshMcpServerEntry {
+    <#
+    .SYNOPSIS
+        Build the `posh` MCP server entry that points poshmcp at a full-access
+        config so agents get the complete (write-capable) PowerShell surface.
+    .OUTPUTS
+        Hashtable with Name, Command, and Arguments keys.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)][string]$ConfigPath
+    )
+    @{
+        Name      = 'posh'
+        Command   = 'poshmcp'
+        Arguments = @('serve', '--transport', 'stdio', '--config', $ConfigPath)
+    }
+}
+
 function Install-AIAgentsMcpConfiguration {
     <#
     .SYNOPSIS
@@ -621,11 +700,9 @@ function Install-AIAgentsMcpConfiguration {
     )
 
     if ($poshMcpAvailable) {
-        $mcpServers += @{
-            Name      = 'posh'
-            Command   = 'poshmcp'
-            Arguments = @('serve', '--transport', 'stdio')
-        }
+        $poshConfigPath = Write-PoshMcpFullAccessConfig -Path (Get-PoshMcpConfigPath)
+        Write-Host "PoshMcp: wrote full-access PowerShell config to $poshConfigPath (IncludePatterns '*')."
+        $mcpServers += Get-PoshMcpServerEntry -ConfigPath $poshConfigPath
     }
 
     $jsonAgents = Get-AIAgentsMcpJsonAgent
