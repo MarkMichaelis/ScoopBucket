@@ -490,6 +490,42 @@ function Get-AIAgentsMcpNpmPackage {
     )
 }
 
+function Get-AIAgentsNpmInstallArgument {
+    <#
+    .SYNOPSIS
+        Build the `npm install --global` argument vector for an MCP package,
+        with quieting flags so a successful run is not buried in noise.
+    .DESCRIPTION
+        Pre-installing the MCP server packages globally drags in transitive
+        dependencies that emit warn-level deprecation / EBADENGINE notices and
+        funding banners. None of it is actionable by the user, yet it reads
+        like a failure on an otherwise successful `Update-Package` run. These
+        flags suppress that chatter while leaving real errors intact:
+
+          --no-fund        drop the "N packages are looking for funding" banner
+          --no-audit       skip the post-install audit summary
+          --loglevel=error silence warn-level (deprecated / EBADENGINE) output;
+                           genuine errors still print and still set a non-zero
+                           exit code, so the caller's npx fallback still fires
+
+        Returned as a typed array so the call site can splat it to `npm.cmd`
+        and so the flags are independently testable.
+    .PARAMETER Package
+        The npm package spec to install (a version suffix such as `@latest`
+        may already be appended by the caller).
+    .OUTPUTS
+        String[].
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Package
+    )
+    @('install', '--global', $Package, '--no-fund', '--no-audit', '--loglevel=error')
+}
+
 function Get-AIAgentsDeprecatedMcpServer {
     <#
     .SYNOPSIS
@@ -652,7 +688,8 @@ function Install-AIAgentsMcpConfiguration {
     # install just chromium.
     if (Get-Command npm -ErrorAction SilentlyContinue) {
         if (-not (Get-Command playwright -ErrorAction SilentlyContinue)) {
-            & npm.cmd install --global '@playwright/test'
+            $playwrightNpmArgs = Get-AIAgentsNpmInstallArgument -Package '@playwright/test'
+            & npm.cmd @playwrightNpmArgs
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "npm install --global @playwright/test exited with code $LASTEXITCODE; falling back to npx for browser install."
             }
@@ -730,7 +767,8 @@ function Install-AIAgentsMcpConfiguration {
     if (Get-Command npm -ErrorAction SilentlyContinue) {
         foreach ($pkg in $mcpNpmPackages) {
             Write-Host "Installing $pkg globally (latest)..."
-            & npm.cmd install --global "$pkg@latest" 2>&1 | Out-Host
+            $npmArgs = Get-AIAgentsNpmInstallArgument -Package "$pkg@latest"
+            & npm.cmd @npmArgs 2>&1 | Out-Host
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "npm install -g $pkg failed; that MCP entry will fall back to 'npx -y'."
             }
