@@ -337,6 +337,24 @@ exit /b 1
         }
     }
 
+    Context 'Test-PoshMcpShouldConfigure' {
+        It 'configures when poshmcp is already present even if the update failed (#344)' {
+            # Regression: a running MCP client locks the tool store, so
+            # `dotnet tool update -g poshmcp` returns non-zero with
+            # "Access to the path '...\.store\poshmcp\<ver>' is denied" -- but the
+            # already-installed tool is still usable, so the server must be wired.
+            Test-PoshMcpShouldConfigure -ToolPresent $true -InstallExitCode 1 | Should -BeTrue
+        }
+
+        It 'configures when a fresh install succeeded' {
+            Test-PoshMcpShouldConfigure -ToolPresent $false -InstallExitCode 0 | Should -BeTrue
+        }
+
+        It 'skips when the tool is absent and the install failed' {
+            Test-PoshMcpShouldConfigure -ToolPresent $false -InstallExitCode 1 | Should -BeFalse
+        }
+    }
+
     Context 'Add-McpServerToJsonConfig: env emission' {
         BeforeEach {
             $script:TmpDir = New-TempDir
