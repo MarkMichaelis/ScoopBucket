@@ -36,26 +36,19 @@ function Write-UpdateStatus {
         [switch]$Completed
     )
 
+    # Forward to the host-adaptive pane (#354). Write-LivePane owns the verbose
+    # mirror and, per Resolve-LiveOutputMode, renders either the multiline ANSI pane
+    # (interactive VT console) or the original single-line Write-Progress region
+    # (CI / redirected / VS Code / no-VT) or verbose-only (progress silenced). In CI
+    # and under redirection the mode is always Single, so the #276 behaviour --
+    # transient Write-Progress plus a -Verbose mirror -- is preserved exactly.
+    $forward = @{ Activity = $Activity; Id = $Id; ParentId = $ParentId; PercentComplete = $PercentComplete }
     if ($Completed) {
-        Write-Progress -Activity $Activity -Id $Id -Completed
+        Write-LivePane @forward -Completed
         return
     }
-
-    if (-not $Status) { return }
-
-    # Persistent-on-demand copy: hidden unless the caller passed -Verbose, in
-    # which case it shows inline and is captured by 4>. $VerbosePreference is
-    # inherited from the calling cmdlet's scope, so engines invoked without an
-    # explicit -Verbose still honour a -Verbose on Update-Package.
-    Write-Verbose $Status
-
-    # Transient live copy: never captured by redirection, auto-clears on
-    # completion. Safe (no-op) on non-interactive hosts and honours a caller
-    # who set $ProgressPreference = 'SilentlyContinue'.
-    $progressArgs = @{ Activity = $Activity; Status = $Status; Id = $Id }
-    if ($ParentId -ge 0)        { $progressArgs['ParentId']        = $ParentId }
-    if ($PercentComplete -ge 0) { $progressArgs['PercentComplete'] = [Math]::Min(100, [Math]::Max(0, $PercentComplete)) }
-    Write-Progress @progressArgs
+    if ($Status) { $forward['Status'] = $Status }
+    Write-LivePane @forward
 }
 
 function Get-CapturedOutputTail {
