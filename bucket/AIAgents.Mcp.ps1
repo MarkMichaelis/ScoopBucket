@@ -663,6 +663,46 @@ function Test-PoshMcpShouldConfigure {
     return ($InstallExitCode -eq 0)
 }
 
+function Get-PoshMcpInstallFailureDetail {
+    <#
+    .SYNOPSIS
+        Condense raw `dotnet tool install/update` output into one concise reason.
+    .DESCRIPTION
+        The best-effort PoshMcp update path captures dotnet's output instead of
+        streaming it, so a single WARNING can explain why the update did not run
+        without dumping dotnet's multi-line SDK-resolution or locked-store error
+        block on an otherwise successful Update-Package run. This classifies the
+        two common failures (no .NET SDK on the machine; tool store locked by a
+        running MCP client) and otherwise falls back to the last meaningful line.
+    .PARAMETER RawOutput
+        The combined (2>&1) output lines captured from the dotnet invocation.
+    .OUTPUTS
+        A short human-readable reason string.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter()]
+        [AllowNull()]
+        [object[]]$RawOutput
+    )
+
+    $lines = @($RawOutput | ForEach-Object { "$_" })
+    $text = ($lines -join "`n")
+    if ([string]::IsNullOrWhiteSpace($text)) { return 'no output' }
+
+    if ($text -match 'No \.NET SDKs were found' -or $text -match 'sdk-not-found') {
+        return 'no .NET SDK found (only the runtime is installed); install the .NET SDK to update the tool'
+    }
+    if ($text -match 'denied' -and $text -match '\.store') {
+        return 'tool store locked by a running MCP client'
+    }
+
+    $lastMeaningful = @($lines | Where-Object { $_.Trim() }) | Select-Object -Last 1
+    if ($lastMeaningful) { return $lastMeaningful.Trim() }
+    return 'unknown error'
+}
+
 function Install-AIAgentsMcpConfiguration {
     <#
     .SYNOPSIS
@@ -717,7 +757,11 @@ function Install-AIAgentsMcpConfiguration {
         $toolPresent = Test-PoshMcpToolPresent
         if ($toolPresent) {
             Write-Host 'PoshMcp already installed; attempting best-effort update...'
-            & dotnet tool update -g poshmcp 2>&1 | Tee-Object -Variable poshOut | Out-Host
+            # Capture rather than stream: on a machine with only the .NET runtime
+            # (no SDK) `dotnet tool update` dumps a multi-line "No .NET SDKs were
+            # found" block. We always fall back to the installed tool, so surface
+            # just a one-line reason in the WARNING below instead (#350).
+            $poshOut = & dotnet tool update -g poshmcp 2>&1
         }
         else {
             Write-Host 'Installing PoshMcp dotnet global tool...'
@@ -728,8 +772,8 @@ function Install-AIAgentsMcpConfiguration {
         $poshMcpAvailable = Test-PoshMcpShouldConfigure -ToolPresent $toolPresent -InstallExitCode $installExit
         if ($poshMcpAvailable) {
             if ($installExit -ne 0) {
-                $detail = (@($poshOut) | Select-Object -Last 1)
-                Write-Warning "PoshMcp install/update returned $installExit but poshmcp is already present (tool store likely locked by a running MCP client); using the installed version. Detail: $detail"
+                $detail = Get-PoshMcpInstallFailureDetail -RawOutput $poshOut
+                Write-Warning "PoshMcp install/update returned $installExit but poshmcp is already present (using the installed version). Detail: $detail"
             }
             $dotnetTools = Join-Path $env:USERPROFILE '.dotnet\tools'
             if ((Test-Path $dotnetTools) -and ($env:Path -notlike "*$dotnetTools*")) {
@@ -737,7 +781,7 @@ function Install-AIAgentsMcpConfiguration {
             }
         }
         else {
-            $detail = (@($poshOut) | Select-Object -Last 3) -join '; '
+            $detail = Get-PoshMcpInstallFailureDetail -RawOutput $poshOut
             Write-Warning "dotnet tool install -g poshmcp failed and poshmcp is not present; PoshMcp MCP server will not be configured. Detail: $detail"
         }
     }
