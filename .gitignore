@@ -21,3 +21,7 @@ Thumbs.db
 Samples/HAR-Original/
 .dogfood-output/
 testResults.xml
+# Per-run package install/update failure logs written by the failure-log
+# feature (#352). These are transient diagnostic artifacts emitted into the
+# working directory on a failed run, not source -- never commit them.
+ScoopBucket-*-failures.log

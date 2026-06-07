@@ -139,6 +139,7 @@ function Invoke-PackageInstall {
         $PSCmdlet.WriteError($errRec)
     }
 
+    try {
     foreach ($pkg in $ordered) {
         $state  = 'Pending'
         $reason = $null
@@ -288,10 +289,13 @@ function Invoke-PackageInstall {
 
         & $addState $pkg $state $reason $null
     }
-
-    # Tear down the transient progress line before emitting results so the
-    # two don't fight over the host's rendering.
-    Write-UpdateStatus -Activity 'Install-Package' -Completed
+    }
+    finally {
+        # Tear down the transient status bar / progress line before emitting results
+        # so the two don't fight over the host's rendering. In a finally so an aborted
+        # or throwing run never leaves the terminal with a stuck VT scroll region.
+        Write-UpdateStatus -Activity 'Install-Package' -Completed
+    }
 
     # Persist a per-run failure log when any ConfigScript failed (#352).
     if ($configFailures.Count -gt 0 -and -not $isWhatIf) {

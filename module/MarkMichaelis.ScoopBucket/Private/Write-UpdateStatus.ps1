@@ -36,12 +36,14 @@ function Write-UpdateStatus {
         [switch]$Completed
     )
 
-    # Forward to the host-adaptive pane (#354). Write-LivePane owns the verbose
-    # mirror and, per Resolve-LiveOutputMode, renders either the multiline ANSI pane
-    # (interactive VT console) or the original single-line Write-Progress region
-    # (CI / redirected / VS Code / no-VT) or verbose-only (progress silenced). In CI
-    # and under redirection the mode is always Single, so the #276 behaviour --
-    # transient Write-Progress plus a -Verbose mirror -- is preserved exactly.
+    # Forward to the host-adaptive pane (#354/#361). Write-LivePane owns the verbose
+    # mirror and, per Resolve-LiveOutputMode, renders either the bottom-anchored sticky
+    # status bar over a persistent scrolling log (capable interactive VT console) or the
+    # original single-line Write-Progress region (CI / redirected / VS Code / no-VT /
+    # too-short window) or verbose-only (progress silenced). In CI and under redirection
+    # the mode is always Single, so the #276 behaviour -- transient Write-Progress plus a
+    # -Verbose mirror -- is preserved exactly. Callers MUST invoke this with -Completed in
+    # a finally so an aborted run resets the VT scroll region.
     $forward = @{ Activity = $Activity; Id = $Id; ParentId = $ParentId; PercentComplete = $PercentComplete }
     if ($Completed) {
         Write-LivePane @forward -Completed

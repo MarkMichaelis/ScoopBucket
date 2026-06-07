@@ -739,6 +739,10 @@ Describe 'Quiet-by-default update output (#276)' -Tag 'Light','Module' {
 
     It 'reports the current package as a transient Write-Progress status' {
         InModuleScope MarkMichaelis.ScoopBucket {
+            # Pin the Single (Write-Progress) renderer so this #276 path is asserted
+            # deterministically regardless of the test host's console capability
+            # (a capable interactive console now defaults to the Sticky renderer).
+            Mock Resolve-LiveOutputMode { 'Single' }
             Mock Update-WingetPackage    { return @{ State='Updated'; Reason=$null } }
             Mock Update-PathFromRegistry { }
             Mock Register-PackageCompletion { }
