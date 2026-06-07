@@ -41,6 +41,17 @@ foreach ($dir in @('Private', 'Public')) {
 # that calls them later.
 try { . Initialize-ScoopEnvironment } catch { Write-Verbose "Initialize-ScoopEnvironment: $($_.Exception.Message)" }
 
+# Load our display formatting (PackageUpdateResult colorization etc.) here rather
+# than via the manifest's FormatsToProcess. Update-FormatData rebuilds the WHOLE
+# session format table and re-validates every registered format file, including
+# those owned by unrelated modules (e.g. PSReadLine). If a foreign format file is
+# missing from disk, that rebuild throws -- and via FormatsToProcess it would abort
+# our entire import, making the module unusable through no fault of our own. Guarding
+# it here degrades gracefully: a broken foreign format file only costs us colorized
+# output, never the module load. See issue #346.
+$formatFile = Join-Path $PSScriptRoot 'MarkMichaelis.ScoopBucket.format.ps1xml'
+try { Update-FormatData -PrependPath $formatFile } catch { Write-Warning "MarkMichaelis.ScoopBucket: display formatting was not loaded ($($_.Exception.Message)). Functionality is unaffected." }
+
 # Wire up Tab completion for `Install-Package -Name <tab>` and
 # `Get-Package -Name <tab>` so callers don't need to remember exact
 # package spellings. The completer is regex-driven and cached, so it's
