@@ -582,6 +582,51 @@ function Get-PoshMcpServerEntry {
     }
 }
 
+function Test-PoshMcpToolPresent {
+    <#
+    .SYNOPSIS
+        Report whether the poshmcp dotnet global tool is already installed.
+    .DESCRIPTION
+        The tool is "present" when its shim exists under the dotnet global-tools
+        directory OR resolves on PATH. The on-disk check matters because a fresh
+        `dotnet tool install` does not add the tools dir to the current session
+        PATH, so Get-Command alone would miss a just-installed tool.
+    .OUTPUTS
+        Boolean.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+    $exe = Join-Path $env:USERPROFILE '.dotnet\tools\poshmcp.exe'
+    return ((Test-Path $exe) -or [bool](Get-Command poshmcp -ErrorAction SilentlyContinue))
+}
+
+function Test-PoshMcpShouldConfigure {
+    <#
+    .SYNOPSIS
+        Decide whether the `posh` MCP server should be wired, given whether the
+        poshmcp tool is already present and the exit code of the install/update
+        attempt.
+    .DESCRIPTION
+        A tool that is already present stays usable even when a re-install or
+        update returns non-zero -- the common cause is a locked tool store
+        because a running MCP client holds poshmcp open ("Access to the path
+        '...\.store\poshmcp\<ver>' is denied"). In that case the existing version
+        is perfectly serviceable, so we still configure the server. Only a tool
+        that is genuinely absent AND failed to install is treated as unavailable.
+    .OUTPUTS
+        Boolean.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][bool]$ToolPresent,
+        [Parameter(Mandatory)][int]$InstallExitCode
+    )
+    if ($ToolPresent) { return $true }
+    return ($InstallExitCode -eq 0)
+}
+
 function Install-AIAgentsMcpConfiguration {
     <#
     .SYNOPSIS
@@ -627,19 +672,36 @@ function Install-AIAgentsMcpConfiguration {
     }
 
     # PoshMcp ships as a .NET global tool. Skip silently if dotnet isn't present.
+    # If the tool is already installed, a re-install/update can fail merely
+    # because a running MCP client locks the tool store -- the existing version
+    # is still usable, so we configure the server regardless of that exit code.
     $poshMcpAvailable = $false
     if (Get-Command dotnet -ErrorAction SilentlyContinue) {
-        Write-Host 'Installing PoshMcp dotnet global tool...'
-        & dotnet tool install -g poshmcp 2>&1 | Tee-Object -Variable poshOut
-        if ($LASTEXITCODE -eq 0 -or ($poshOut -join "`n") -match 'already installed') {
-            $poshMcpAvailable = $true
+        $toolPresent = Test-PoshMcpToolPresent
+        if ($toolPresent) {
+            Write-Host 'PoshMcp already installed; attempting best-effort update...'
+            & dotnet tool update -g poshmcp 2>&1 | Tee-Object -Variable poshOut | Out-Host
+        }
+        else {
+            Write-Host 'Installing PoshMcp dotnet global tool...'
+            & dotnet tool install -g poshmcp 2>&1 | Tee-Object -Variable poshOut | Out-Host
+        }
+        $installExit = $LASTEXITCODE
+
+        $poshMcpAvailable = Test-PoshMcpShouldConfigure -ToolPresent $toolPresent -InstallExitCode $installExit
+        if ($poshMcpAvailable) {
+            if ($installExit -ne 0) {
+                $detail = (@($poshOut) | Select-Object -Last 1)
+                Write-Warning "PoshMcp install/update returned $installExit but poshmcp is already present (tool store likely locked by a running MCP client); using the installed version. Detail: $detail"
+            }
             $dotnetTools = Join-Path $env:USERPROFILE '.dotnet\tools'
             if ((Test-Path $dotnetTools) -and ($env:Path -notlike "*$dotnetTools*")) {
                 $env:Path = "$env:Path;$dotnetTools"
             }
         }
         else {
-            Write-Warning 'dotnet tool install -g poshmcp failed; PoshMcp MCP server will not be configured.'
+            $detail = (@($poshOut) | Select-Object -Last 3) -join '; '
+            Write-Warning "dotnet tool install -g poshmcp failed and poshmcp is not present; PoshMcp MCP server will not be configured. Detail: $detail"
         }
     }
     else {
