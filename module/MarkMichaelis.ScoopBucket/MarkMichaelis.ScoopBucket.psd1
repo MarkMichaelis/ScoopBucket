@@ -19,7 +19,14 @@
 
     ScriptsToProcess  = @('Classes\Package.ps1', 'Classes\PackageResult.ps1')
 
-    FormatsToProcess  = @('MarkMichaelis.ScoopBucket.format.ps1xml')
+    # Format data is intentionally NOT loaded via FormatsToProcess. The manifest's
+    # FormatsToProcess triggers a full Update-FormatData rebuild that re-validates
+    # EVERY format file already registered in the session -- including those owned by
+    # unrelated modules (e.g. PSReadLine). If any such foreign file is missing from
+    # disk, the rebuild throws and aborts our entire import. Instead the root .psm1
+    # loads MarkMichaelis.ScoopBucket.format.ps1xml via a guarded Update-FormatData
+    # so a broken foreign format file only degrades our colorized output rather than
+    # blocking the module from loading. See issue #346.
 
     FunctionsToExport = @(
         'Install-Package',
