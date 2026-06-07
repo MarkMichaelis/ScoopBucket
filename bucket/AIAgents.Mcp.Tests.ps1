@@ -203,6 +203,24 @@ exit /b 1
         }
     }
 
+    Context 'Get-AIAgentsNpmInstallArgument' {
+        It 'suppresses warn-level deprecation/EBADENGINE noise and funding banners' {
+            # The whole point of #348: a successful global install must not be
+            # buried in npm warn/funding chatter. These flags are the behavior.
+            $args = Get-AIAgentsNpmInstallArgument -Package '@upstash/context7-mcp@latest'
+            $args | Should -Contain '--loglevel=error'
+            $args | Should -Contain '--no-fund'
+            $args | Should -Contain '--no-audit'
+        }
+
+        It 'still performs a global install of the requested package' {
+            $args = Get-AIAgentsNpmInstallArgument -Package '@playwright/test'
+            $args[0] | Should -Be 'install'
+            $args | Should -Contain '--global'
+            $args | Should -Contain '@playwright/test'
+        }
+    }
+
     Context 'Resolve-NpmBin' {
         BeforeEach {
             $script:TmpRoot = New-TempDir
