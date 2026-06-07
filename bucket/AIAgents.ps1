@@ -356,10 +356,16 @@ Register-ArgumentCompleter -Native -CommandName copilot -ScriptBlock {
         Notes     = 'Idempotent MCP-server wiring for every MCP-capable agent. Re-applied on every install/update; refresh on demand with Update-Package "MCP Server Configuration".'
         # Engine no-op: the configuration IS the work, performed in ConfigScript.
         CustomInstallScript = { }
-        ConfigScript = {
-            . (Join-Path $PSScriptRoot 'AIAgents.Mcp.ps1')
-            Install-AIAgentsMcpConfiguration
-        }
+        # Resolve the helper path eagerly (at $Packages-assignment time) and bake
+        # it into the ConfigScript as a literal. $PSScriptRoot is correct here on
+        # a real bundle dot-source AND under the Get-BundlePackageObjects AST
+        # harvest, which seeds $PSScriptRoot for the assignment scope. A deferred
+        # `{ ... $PSScriptRoot ... }` body would instead see an EMPTY automatic
+        # $PSScriptRoot when Update-Package runs the harvested scriptblock (the
+        # ::Create scriptblock has no source file), breaking the dot-source.
+        ConfigScript = [scriptblock]::Create(
+            ". '" + ((Join-Path $PSScriptRoot 'AIAgents.Mcp.ps1') -replace "'", "''") + "'`n" +
+            'Install-AIAgentsMcpConfiguration')
     }
 )
 

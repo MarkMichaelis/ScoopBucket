@@ -63,6 +63,28 @@ Describe 'AIAgents bundle: MCP configuration is declarative' -Tag 'Light','Bundl
     It 'depends on Node.js so npx-based MCP servers resolve at agent start-up' {
         $script:mcpCfgPkg.DependsOn | Should -Contain 'Node.js'
     }
+
+    It 'resolves the helper dot-source under harvest with an empty $PSScriptRoot (#341)' {
+        # Regression: a deferred `{ . (Join-Path $PSScriptRoot ...) }` body sees an
+        # EMPTY automatic $PSScriptRoot when Update-Package invokes the harvested
+        # scriptblock (a [scriptblock]::Create has no source file), so Join-Path
+        # throws "Cannot bind argument to parameter 'Path' because it is an empty
+        # string". The fix bakes the resolved helper path in eagerly at harvest
+        # time. Isolate the dot-source (AIAgents.Mcp.ps1 is side-effect free on
+        # dot-source) by dropping the Install call; the rebuilt probe is itself a
+        # ::Create scriptblock, so its $PSScriptRoot is empty -- faithfully
+        # reproducing the harvested run-time scope.
+        $dotSourceOnly = ($script:mcpCfgPkg.ConfigScript.ToString() -split "`r?`n" |
+                Where-Object { $_ -notmatch 'Install-AIAgentsMcpConfiguration' }) -join "`n"
+        $probe = [scriptblock]::Create($dotSourceOnly)
+
+        { & $probe } | Should -Not -Throw
+        # Observable proof the helper actually loaded: dot-source the probe into
+        # this scope and confirm a function defined only in AIAgents.Mcp.ps1 is
+        # now available.
+        . $probe
+        Get-Command Get-PoshMcpServerEntry -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+    }
 }
 
 Describe 'AIAgents bundle: Gemini desktop -> Gemini CLI Companions' -Tag 'Light','Bundle' {
