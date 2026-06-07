@@ -24,7 +24,7 @@ BeforeAll {
     $script:mod = Get-Module MarkMichaelis.ScoopBucket
 }
 
-Describe 'Invoke-ConfigScriptCaptured' {
+Describe 'Invoke-ConfigScriptCaptured' -Tag 'Light','Module' {
     It 'captures Write-Host and native-style stdout into the buffer without polluting the success pipeline' {
         $buf = New-Object System.Collections.Generic.List[string]
         $sb = { param($p) Write-Host 'npm: added 3 packages'; Write-Output 'tool-stdout-line' }
@@ -70,7 +70,7 @@ Describe 'Invoke-ConfigScriptCaptured' {
     }
 }
 
-Describe 'ConvertTo-CapturedLine' {
+Describe 'ConvertTo-CapturedLine' -Tag 'Light','Module' {
     It 'renders a warning record as its message text' {
         $rec = [System.Management.Automation.WarningRecord]::new('hello warn')
         $line = & $script:mod { param($r) ConvertTo-CapturedLine $r } $rec
@@ -83,7 +83,7 @@ Describe 'ConvertTo-CapturedLine' {
     }
 }
 
-Describe 'Get-FailureLogFileName' {
+Describe 'Get-FailureLogFileName' -Tag 'Light','Module' {
     It 'produces the sortable ScoopBucket-<Verb>-Package-<timestamp>-failures.log name' {
         $ts = [datetime]'2026-01-02T03:04:05'
         $name = & $script:mod { param($t) Get-FailureLogFileName -Verb 'Update' -Timestamp $t } $ts
@@ -97,7 +97,7 @@ Describe 'Get-FailureLogFileName' {
     }
 }
 
-Describe 'Get-FailureLogPath' {
+Describe 'Get-FailureLogPath' -Tag 'Light','Module' {
     It 'uses the preferred directory when it is writable' {
         $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("sb-pref-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $tmp -Force | Out-Null
@@ -120,7 +120,7 @@ Describe 'Get-FailureLogPath' {
     }
 }
 
-Describe 'Write-FailureLog' {
+Describe 'Write-FailureLog' -Tag 'Light','Module' {
     It 'writes a UTF-8 (no BOM) log containing each failed package full output' {
         $dir = Join-Path ([System.IO.Path]::GetTempPath()) ("sb-log-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $dir -Force | Out-Null

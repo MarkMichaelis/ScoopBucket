@@ -23,7 +23,7 @@ BeforeAll {
     $script:ESC = [char]27
 }
 
-Describe 'Resolve-LiveOutputMode' {
+Describe 'Resolve-LiveOutputMode' -Tag 'Light','Module' {
     It 'returns Off when the progress preference is silenced' {
         $m = & $script:mod {
             Resolve-LiveOutputMode -ProgressPreferenceValue 'SilentlyContinue' `
@@ -76,7 +76,7 @@ Describe 'Resolve-LiveOutputMode' {
     }
 }
 
-Describe 'Get-LivePaneFrame' {
+Describe 'Get-LivePaneFrame' -Tag 'Light','Module' {
     It 'draws all lines and reports the count on the first paint (no cursor move)' {
         $f = & $script:mod { Get-LivePaneFrame -Lines @('a', 'b') -PreviousLineCount 0 }
         $f.Text | Should -Be "a`nb"
@@ -98,7 +98,7 @@ Describe 'Get-LivePaneFrame' {
     }
 }
 
-Describe 'Get-LivePaneClear' {
+Describe 'Get-LivePaneClear' -Tag 'Light','Module' {
     It 'returns an empty string when nothing was drawn' {
         (& $script:mod { Get-LivePaneClear -PreviousLineCount 0 }) | Should -Be ''
     }
@@ -109,7 +109,7 @@ Describe 'Get-LivePaneClear' {
     }
 }
 
-Describe 'Write-LivePane' {
+Describe 'Write-LivePane' -Tag 'Light','Module' {
     It 'mirrors the status to the verbose stream even when the visual mode is Off' {
         $v = & $script:mod {
             $VerbosePreference = 'Continue'
