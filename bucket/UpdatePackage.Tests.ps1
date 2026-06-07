@@ -513,6 +513,37 @@ Describe 'Invoke-PackageUpdate pipeline' -Tag 'Light','Module' {
         $ours.Count | Should -Be 1
     }
 
+    It 'does not leak ConfigScript console output onto the result pipeline (#352)' {
+        $pkgs = [Package[]]@(
+            [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'
+                        ConfigScript = { Write-Host 'SENTINEL-npm-noise-line' } }
+        )
+        $r = @(Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion 6>$null)
+        # Every emitted object is a structured result, never the captured line.
+        $r | ForEach-Object { $_ | Should -BeOfType ([PackageResult]) }
+        ($r | Where-Object { "$_" -match 'SENTINEL-npm-noise-line' }) | Should -BeNullOrEmpty
+    }
+
+    It 'writes a per-run failure log to the current directory when a ConfigScript fails (#352)' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("sb-cfgfail-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+        Push-Location $tmp
+        try {
+            $pkgs = [Package[]]@(
+                [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'
+                            ConfigScript = { Write-Host 'pre-throw-line'; throw 'cfgboom' } }
+            )
+            $null = Invoke-PackageUpdate -Packages $pkgs -Bundle 'Test' -SkipCompletion `
+                -ErrorAction SilentlyContinue 6>$null 3>$null
+            $log = Get-ChildItem -Path $tmp -Filter 'ScoopBucket-Update-Package-*-failures.log'
+            @($log).Count | Should -Be 1
+            (Get-Content -LiteralPath $log.FullName -Raw) | Should -Match 'pre-throw-line'
+        } finally {
+            Pop-Location
+            Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     It 'does not run ConfigScript under -WhatIf' {
         Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage { throw 'engine must not run under -WhatIf' }
         Mock -ModuleName MarkMichaelis.ScoopBucket Get-PackageUpdateIndex {

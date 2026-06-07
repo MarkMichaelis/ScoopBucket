@@ -765,7 +765,7 @@ function Install-AIAgentsMcpConfiguration {
         }
         else {
             Write-Host 'Installing PoshMcp dotnet global tool...'
-            & dotnet tool install -g poshmcp 2>&1 | Tee-Object -Variable poshOut | Out-Host
+            & dotnet tool install -g poshmcp 2>&1 | Tee-Object -Variable poshOut | ForEach-Object { Write-Host "$_" }
         }
         $installExit = $LASTEXITCODE
 
@@ -812,7 +812,7 @@ function Install-AIAgentsMcpConfiguration {
         foreach ($pkg in $mcpNpmPackages) {
             Write-Host "Installing $pkg globally (latest)..."
             $npmArgs = Get-AIAgentsNpmInstallArgument -Package "$pkg@latest"
-            & npm.cmd @npmArgs 2>&1 | Out-Host
+            & npm.cmd @npmArgs 2>&1 | ForEach-Object { Write-Host "$_" }
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "npm install -g $pkg failed; that MCP entry will fall back to 'npx -y'."
             }
@@ -938,7 +938,7 @@ function Reset-AIAgentsMcpConfiguration {
     if (Get-Command npm -ErrorAction SilentlyContinue) {
         Write-Host '-Reset: uninstalling MCP npm packages globally...'
         foreach ($pkg in $mcpNpmPackages) {
-            & npm.cmd uninstall --global $pkg 2>&1 | Out-Host
+            & npm.cmd uninstall --global $pkg 2>&1 | ForEach-Object { Write-Host "$_" }
         }
     }
 }

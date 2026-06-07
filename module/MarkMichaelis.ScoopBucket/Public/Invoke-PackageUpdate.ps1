@@ -90,6 +90,8 @@ function Invoke-PackageUpdate {
     } else { @{} }
 
     $states = New-Object System.Collections.Generic.List[object]
+    $configFailures = New-Object System.Collections.Generic.List[object]
+    $runStart = Get-Date
     $total  = $ordered.Count
     $idx    = 0
     $isCi   = [bool]$env:CI
@@ -130,11 +132,24 @@ function Invoke-PackageUpdate {
             Write-UpdateStatus "  [WhatIf] ConfigScript ($($p.Name))"
             return $true
         }
+        # Capture the ConfigScript's underlying-tool output (npm/dotnet/Write-Host)
+        # into the transient channel + a recoverable buffer instead of letting it
+        # flood the scrollback (#352). On a throw we flush the buffer to the host so
+        # the cause stays visible, fold a tail into the Failed row, and retain the
+        # output for the per-run failure log.
+        $buf = New-Object System.Collections.Generic.List[string]
         try {
-            [void](& $p.ConfigScript $p 2>$null)
+            Invoke-ConfigScriptCaptured -ConfigScript $p.ConfigScript -Package $p -Buffer $buf -Activity 'Update-Package'
             return $true
         } catch {
-            & $failPackage $p "ConfigScript threw: $($_.Exception.Message)"
+            $reason = "ConfigScript threw: $($_.Exception.Message)$(Get-CapturedOutputTail (($buf) -join [Environment]::NewLine))"
+            & $failPackage $p $reason
+            Out-CapturedFailure -Name $p.Name -Lines $buf
+            $configFailures.Add([pscustomobject]@{
+                    Name   = $p.Name
+                    Reason = "ConfigScript threw: $($_.Exception.Message)"
+                    Output = ($buf -join [Environment]::NewLine)
+                })
             return $false
         }
     }
@@ -338,6 +353,19 @@ function Invoke-PackageUpdate {
     # Tear down the transient progress line before emitting results so the
     # two don't fight over the host's rendering.
     Write-UpdateStatus -Completed
+
+    # When any package's ConfigScript failed, persist its full captured output to a
+    # per-run log so the cause survives the transient pane (#352).
+    if ($configFailures.Count -gt 0 -and -not $isWhatIf) {
+        try {
+            $logName = Get-FailureLogFileName -Verb 'Update' -Timestamp $runStart
+            $logPath = Get-FailureLogPath -FileName $logName -PreferredDirectory (Get-Location).Path -FallbackDirectory $env:TEMP
+            $written = Write-FailureLog -Path $logPath -Verb 'Update' -Failures $configFailures.ToArray()
+            Write-Host "Update-Package: wrote failure log to $written" -ForegroundColor Yellow
+        } catch {
+            Write-Warning "Update-Package: could not write failure log: $($_.Exception.Message)"
+        }
+    }
 
     # Emit one PackageResult per package on the success stream. The
     # format.ps1xml view renders Status as a colored glyph for interactive
