@@ -7,11 +7,12 @@
     The multiline pane is the portability risk, so its decision logic and frame
     strings are pure and pinned here:
 
-      * Resolve-LiveOutputMode defaults to the safe single-line Write-Progress
-        region for every interactive console, and only resolves Multiline when
-        $env:SCOOPBUCKET_LIVE_PANE explicitly opts in AND the host is a capable,
-        VT-capable, non-VS-Code, non-CI, non-redirected, non-ISE console; a silenced
-        progress preference is Off.
+      * Resolve-LiveOutputMode defaults to the multiline pane on any capable,
+        VT-capable, non-VS-Code, non-CI, non-redirected, non-ISE interactive console,
+        and degrades to the single-line Write-Progress region everywhere the host
+        cannot drive it. $env:SCOOPBUCKET_LIVE_PANE is an override/off-switch: a
+        falsy value (0/false/no/off/single) forces Single even on a capable console; a
+        silenced progress preference is Off.
       * Get-LivePaneFrame / Get-LivePaneClear emit the exact cursor-move + clear
         sequences, split embedded newlines, truncate to a supplied width, and
         account for the drawn line count.
@@ -70,28 +71,49 @@ Describe 'Resolve-LiveOutputMode' -Tag 'Light','Module' {
         $m | Should -Be 'Single'
     }
 
-    It 'returns Single for a capable interactive console when the pane is not opted in' {
+    It 'returns Sticky by default for a capable interactive console (no override)' {
         $m = & $script:mod {
             Resolve-LiveOutputMode -TermProgram 'WindowsTerminal' -Ci '' -OutputRedirected $false `
                 -HostName 'ConsoleHost' -SupportsVirtualTerminal $true -ProgressPreferenceValue 'Continue' `
-                -LivePaneOptIn ''
+                -LivePaneOverride '' -WindowHeight 30
+        }
+        $m | Should -Be 'Sticky'
+    }
+
+    It 'returns Single for a capable interactive console when the override forces it off' {
+        foreach ($off in '0', 'false', 'no', 'off', 'single') {
+            $m = & $script:mod {
+                param($off)
+                Resolve-LiveOutputMode -TermProgram 'WindowsTerminal' -Ci '' -OutputRedirected $false `
+                    -HostName 'ConsoleHost' -SupportsVirtualTerminal $true -ProgressPreferenceValue 'Continue' `
+                    -LivePaneOverride $off -WindowHeight 30
+            } $off
+            $m | Should -Be 'Single' -Because "override '$off' must force the single-line region"
+        }
+    }
+
+    It 'still returns Sticky for a capable console when the override explicitly requests it' {
+        $m = & $script:mod {
+            Resolve-LiveOutputMode -TermProgram 'WindowsTerminal' -Ci '' -OutputRedirected $false `
+                -HostName 'ConsoleHost' -SupportsVirtualTerminal $true -ProgressPreferenceValue 'Continue' `
+                -LivePaneOverride 'multiline' -WindowHeight 30
+        }
+        $m | Should -Be 'Sticky'
+    }
+
+    It 'falls back to Single on a capable console when the window is too short for a sticky bar' {
+        $m = & $script:mod {
+            Resolve-LiveOutputMode -TermProgram 'WindowsTerminal' -Ci '' -OutputRedirected $false `
+                -HostName 'ConsoleHost' -SupportsVirtualTerminal $true -ProgressPreferenceValue 'Continue' `
+                -LivePaneOverride '' -WindowHeight 4
         }
         $m | Should -Be 'Single'
     }
 
-    It 'returns Multiline only for a capable interactive console that opts in' {
-        $m = & $script:mod {
-            Resolve-LiveOutputMode -TermProgram 'WindowsTerminal' -Ci '' -OutputRedirected $false `
-                -HostName 'ConsoleHost' -SupportsVirtualTerminal $true -ProgressPreferenceValue 'Continue' `
-                -LivePaneOptIn 'multiline'
-        }
-        $m | Should -Be 'Multiline'
-    }
-
-    It 'keeps Single even when opted in if the host is not capable (redirected)' {
+    It 'keeps Single when the host is not capable (redirected) even with no override' {
         $m = & $script:mod {
             Resolve-LiveOutputMode -Ci '' -OutputRedirected $true -SupportsVirtualTerminal $true `
-                -ProgressPreferenceValue 'Continue' -LivePaneOptIn 'true'
+                -ProgressPreferenceValue 'Continue' -LivePaneOverride '' -WindowHeight 30
         }
         $m | Should -Be 'Single'
     }
@@ -144,6 +166,56 @@ Describe 'Get-LivePaneClear' -Tag 'Light','Module' {
     }
 }
 
+Describe 'Sticky scroll-region helpers' -Tag 'Light','Module' {
+    It 'Get-StickyRegionEnter sets the scroll region above the bar and parks the cursor' {
+        # Height 30, 1 bar row => scroll region rows 1..29, cursor parked at 29;1.
+        $s = & $script:mod { Get-StickyRegionEnter -Height 30 -BarRows 1 }
+        $s | Should -Be "$($script:ESC)[1;29r$($script:ESC)[29;1H"
+    }
+
+    It 'Get-StickyRegionEnter accounts for a taller bar' {
+        $s = & $script:mod { Get-StickyRegionEnter -Height 30 -BarRows 2 }
+        $s | Should -Be "$($script:ESC)[1;28r$($script:ESC)[28;1H"
+    }
+
+    It 'Get-StickyStatusFrame saves the cursor, paints the bar row, and restores' {
+        # Bar row for Height 30 / 1 bar row is row 30.
+        $s = & $script:mod { Get-StickyStatusFrame -Status 'Updating X' -Height 30 -BarRows 1 -Width 80 }
+        # ESC7 save, move to 30;1, clear line, inverse status, reset, ESC8 restore.
+        $expected = "$($script:ESC)7$($script:ESC)[30;1H$($script:ESC)[2K$($script:ESC)[7mUpdating X$($script:ESC)[0m$($script:ESC)8"
+        $s | Should -Be $expected
+    }
+
+    It 'Get-StickyStatusFrame clips the status to Width so the bar never wraps' {
+        $s = & $script:mod { Get-StickyStatusFrame -Status 'abcdefghij' -Height 10 -BarRows 1 -Width 4 }
+        $s | Should -Match ([regex]::Escape("$($script:ESC)[7mabcd$($script:ESC)[0m"))
+        $s | Should -Not -Match 'efghij'
+    }
+
+    It 'Get-StickyLogLine writes the first line in place and later lines after a newline' {
+        $first = & $script:mod { Get-StickyLogLine -Text 'first' -Width 80 -IsFirst $true }
+        $first | Should -Be 'first'
+        $next = & $script:mod { Get-StickyLogLine -Text 'second' -Width 80 -IsFirst $false }
+        $next | Should -Be "`nsecond"
+    }
+
+    It 'Get-StickyLogLine splits an embedded-newline record into separate scrolled rows' {
+        $s = & $script:mod { Get-StickyLogLine -Text "a`nb" -Width 80 -IsFirst $false }
+        $s | Should -Be "`na`nb"
+    }
+
+    It 'Get-StickyLogLine clips each row to Width' {
+        $s = & $script:mod { Get-StickyLogLine -Text 'abcdefghij' -Width 4 -IsFirst $true }
+        $s | Should -Be 'abcd'
+    }
+
+    It 'Get-StickyRegionLeave resets the region and clears the bar, leaving the log above' {
+        # Height 30 / 1 bar row: reset region, move to first bar row (30), clear to end.
+        $s = & $script:mod { Get-StickyRegionLeave -Height 30 -BarRows 1 }
+        $s | Should -Be "$($script:ESC)[r$($script:ESC)[30;1H$($script:ESC)[0J"
+    }
+}
+
 Describe 'Write-LivePane' -Tag 'Light','Module' {
     It 'mirrors the status to the verbose stream even when the visual mode is Off' {
         $v = & $script:mod {
@@ -165,5 +237,51 @@ Describe 'Write-LivePane' -Tag 'Light','Module' {
         } 6>$null
         $counts.After | Should -Be 2
         $counts.Reset | Should -Be 0
+    }
+
+    It 'activates the sticky region on the first Sticky write and tears it down on completion' {
+        $state = & $script:mod {
+            $script:StickyActive = $false
+            $script:StickyStarted = $false
+            Write-LivePane -Status 'one' -Mode 'Sticky'
+            $activeAfterFirst = $script:StickyActive
+            $startedAfterFirst = $script:StickyStarted
+            Write-LivePane -Status 'two' -Mode 'Sticky'
+            Write-LivePane -Completed -Mode 'Sticky'
+            [pscustomobject]@{
+                ActiveAfterFirst  = $activeAfterFirst
+                StartedAfterFirst = $startedAfterFirst
+                ActiveAfterDone   = $script:StickyActive
+            }
+        } 6>$null
+        $state.ActiveAfterFirst  | Should -BeTrue
+        $state.StartedAfterFirst | Should -BeTrue
+        $state.ActiveAfterDone   | Should -BeFalse
+    }
+
+    It 'mirrors Sticky status lines to the verbose stream (recoverable transcript)' {
+        $v = & $script:mod {
+            $script:StickyActive = $false
+            $script:StickyStarted = $false
+            $VerbosePreference = 'Continue'
+            Write-LivePane -Status 'sticky-verbose-line' -Mode 'Sticky'
+            Write-LivePane -Completed -Mode 'Sticky'
+        } 4>&1 6>$null
+        @($v | Where-Object { "$_" -match 'sticky-verbose-line' }) | Should -Not -BeNullOrEmpty
+    }
+
+    It 'tears down an active sticky region on completion even when Mode now resolves to Single' {
+        # Guards against a mid-run host-fact shift leaving the VT scroll region leaked:
+        # teardown is driven by the active-region flag, not the freshly-resolved Mode.
+        $active = & $script:mod {
+            $script:StickyActive = $false
+            $script:StickyStarted = $false
+            Write-LivePane -Status 'one' -Mode 'Sticky'
+            $afterFirst = $script:StickyActive
+            Write-LivePane -Completed -Mode 'Single'
+            [pscustomobject]@{ AfterFirst = $afterFirst; AfterDone = $script:StickyActive }
+        } 6>$null
+        $active.AfterFirst | Should -BeTrue
+        $active.AfterDone  | Should -BeFalse
     }
 }

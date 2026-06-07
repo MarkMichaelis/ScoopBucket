@@ -154,6 +154,7 @@ function Invoke-PackageUpdate {
         }
     }
 
+    try {
     foreach ($pkg in $ordered) {
         $state  = 'Pending'
         $reason = $null
@@ -349,10 +350,13 @@ function Invoke-PackageUpdate {
 
         & $addState $pkg $state $reason $null $from $to
     }
-
-    # Tear down the transient progress line before emitting results so the
-    # two don't fight over the host's rendering.
-    Write-UpdateStatus -Completed
+    }
+    finally {
+        # Tear down the transient status bar / progress line before emitting results
+        # so the two don't fight over the host's rendering. In a finally so an aborted
+        # or throwing run never leaves the terminal with a stuck VT scroll region.
+        Write-UpdateStatus -Completed
+    }
 
     # When any package's ConfigScript failed, persist its full captured output to a
     # per-run log so the cause survives the transient pane (#352).
