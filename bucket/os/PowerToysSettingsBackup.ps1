@@ -183,21 +183,40 @@ function Select-PowerToysBackupRelativePath {
 function Stop-PowerToysProcess {
     <#
     .SYNOPSIS
-        Stop any running PowerToys processes so settings can be replaced safely.
+        Stop the PowerToys runner and its helper processes so settings can be
+        replaced safely.
     .DESCRIPTION
-        Terminates each PowerToys process by id (never by name) so a settings
-        restore is not clobbered by the running app rewriting its files.
-        No-op when PowerToys is not running.
+        Terminates the runner ('PowerToys') AND every 'PowerToys.*' helper
+        (Settings, FancyZones, MouseWithoutBorders, KeyboardManagerEngine, ...)
+        by id (never by name) so a settings restore is not clobbered by the
+        running app and so the helpers release the
+        Global\PowerToys-<ver>-Default-1 single-instance object before any
+        restart. After issuing the stops it waits for the killed processes to
+        exit, and warns if any survive (for example when PowerToys runs elevated
+        and the kill is refused). No-op when PowerToys is not running.
     .OUTPUTS
         None.
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param()
-    $procs = Get-Process -Name 'PowerToys' -ErrorAction SilentlyContinue
+    $procs = Get-Process -Name 'PowerToys*' -ErrorAction SilentlyContinue |
+        Where-Object { $_.ProcessName -like 'PowerToys*' }
+    $killed = [System.Collections.Generic.List[int]]::new()
     foreach ($proc in $procs) {
-        if ($PSCmdlet.ShouldProcess("PID $($proc.Id)", 'Stop PowerToys process')) {
+        if ($PSCmdlet.ShouldProcess("PID $($proc.Id) ($($proc.ProcessName))", 'Stop PowerToys process')) {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            $killed.Add($proc.Id)
         }
+    }
+    if ($killed.Count -eq 0) { return }
+    # Block until the killed processes exit so they release the Global
+    # single-instance/IPC object before any restart collides with it.
+    Wait-Process -Id $killed.ToArray() -Timeout 10 -ErrorAction SilentlyContinue
+    # Re-query exactly the ids we tried to kill; any that remain were refused
+    # (for example PowerToys running elevated while this session is not).
+    $survivors = @(Get-Process -Id $killed.ToArray() -ErrorAction SilentlyContinue)
+    if ($survivors.Count -gt 0) {
+        Write-Warning ("PowerToys could not be fully stopped; {0} process(es) still running. Close PowerToys manually or run elevated, then retry." -f $survivors.Count)
     }
 }
 
@@ -206,7 +225,10 @@ function Start-PowerToysProcess {
     .SYNOPSIS
         Relaunch PowerToys from a known install location, best-effort.
     .DESCRIPTION
-        Looks for PowerToys.exe under the per-user and machine install roots
+        No-ops with a warning when any PowerToys process is still running so a
+        second runner is never launched (a duplicate runner collides on the
+        Global single-instance object and crashes with access-denied). Otherwise
+        looks for PowerToys.exe under the per-user and machine install roots
         and starts the first match. Never throws -- restarting is a
         convenience, not a guarantee.
     .OUTPUTS
@@ -214,6 +236,12 @@ function Start-PowerToysProcess {
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param()
+    $running = Get-Process -Name 'PowerToys*' -ErrorAction SilentlyContinue |
+        Where-Object { $_.ProcessName -like 'PowerToys*' }
+    if ($running) {
+        Write-Warning 'PowerToys is already running; not launching a second instance.'
+        return
+    }
     $candidates = @(
         (Join-Path $env:LOCALAPPDATA 'PowerToys\PowerToys.exe')
         (Join-Path $env:ProgramFiles 'PowerToys\PowerToys.exe')
