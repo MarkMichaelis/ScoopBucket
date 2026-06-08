@@ -112,6 +112,7 @@ function Get-Package {
                 HasCustomInstallScript = [bool]$p.HasCustomInstallScript
                 HasVerifyScript        = [bool]$p.HasVerifyScript
                 HasNativeCommandScript = [bool]$p.HasNativeCommandScript
+                HasConfigScript        = [bool]$p.HasConfigScript
             }
             $flat.Add($obj)
         }
