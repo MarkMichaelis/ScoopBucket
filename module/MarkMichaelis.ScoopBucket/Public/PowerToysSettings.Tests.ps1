@@ -194,10 +194,10 @@ Describe 'Stop-PowerToysProcess' -Tag 'Light', 'Module' {
             [pscustomobject]@{ Id = 102; ProcessName = 'PowerToys.FancyZones' }
             [pscustomobject]@{ Id = 200; ProcessName = 'Notepad' }
         )
-        # Enumeration sees the whole family; the post-wait survivor re-query (by
-        # id) sees nothing -- the kill succeeded.
+        # Enumeration (by name) sees the whole family; the post-wait survivor
+        # re-query (by id) sees nothing -- the kill succeeded.
         Mock -ModuleName MarkMichaelis.ScoopBucket Get-Process { $script:fakeProcs } -ParameterFilter { $Name }
-        Mock -ModuleName MarkMichaelis.ScoopBucket Get-Process { @() }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-Process { @() } -ParameterFilter { $Id }
         Mock -ModuleName MarkMichaelis.ScoopBucket Stop-Process { }
         Mock -ModuleName MarkMichaelis.ScoopBucket Wait-Process { }
     }
