@@ -16,7 +16,7 @@ function Export-PowerToysSettings {
         snapshot that could leak a secret into a public repo.
 
         When -Path is supplied the snapshot is also written there as indented
-        JSON (the form committed under the module's Data folder).
+        JSON (the form committed at bucket/os/MarkMichaelisPowerToysSettings.jsonc).
     .PARAMETER SettingsRoot
         Override the live settings folder (defaults to
         %LOCALAPPDATA%\Microsoft\PowerToys).
@@ -25,8 +25,8 @@ function Export-PowerToysSettings {
     .OUTPUTS
         PSCustomObject -- schema, generated, files (relativePath -> object).
     .EXAMPLE
-        Export-PowerToysSettings -Path .\PowerToysSettings.json
-        Captures this machine's scrubbed settings to a JSON file.
+        Export-PowerToysSettings -Path .\bucket\os\MarkMichaelisPowerToysSettings.jsonc
+        Captures this machine's scrubbed settings to the committed snapshot file.
     #>
     [CmdletBinding(SupportsShouldProcess)]
     [OutputType([pscustomobject])]
