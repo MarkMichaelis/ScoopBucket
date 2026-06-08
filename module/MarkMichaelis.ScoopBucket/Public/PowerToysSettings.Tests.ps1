@@ -234,6 +234,7 @@ Describe 'Start-PowerToysProcess' -Tag 'Light', 'Module' {
     BeforeEach {
         Mock -ModuleName MarkMichaelis.ScoopBucket Start-Process { }
         Mock -ModuleName MarkMichaelis.ScoopBucket Test-Path { $true }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Write-Warning { }
     }
 
     It 'does not launch a second instance when PowerToys is already running' {
@@ -242,6 +243,7 @@ Describe 'Start-PowerToysProcess' -Tag 'Light', 'Module' {
         & $script:mod { Start-PowerToysProcess }
 
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Start-Process -Times 0 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Write-Warning -ParameterFilter { $Message -like '*already running*' } -Times 1 -Exactly
     }
 
     It 'launches PowerToys once when none is running and the exe exists' {
