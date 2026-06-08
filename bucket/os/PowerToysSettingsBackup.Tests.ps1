@@ -164,10 +164,10 @@ Describe 'Stop-PowerToysProcess' -Tag 'Light' {
             [pscustomobject]@{ Id = 102; ProcessName = 'PowerToys.FancyZones' }
             [pscustomobject]@{ Id = 200; ProcessName = 'Notepad' }
         )
-        # Enumeration sees the whole family; the post-wait survivor re-query (by
-        # id) sees nothing -- the kill succeeded.
+        # Enumeration (by name) sees the whole family; the post-wait survivor
+        # re-query (by id) sees nothing -- the kill succeeded.
         Mock Get-Process { $script:fakeProcs } -ParameterFilter { $Name }
-        Mock Get-Process { @() }
+        Mock Get-Process { @() } -ParameterFilter { $Id }
         Mock Stop-Process { }
         Mock Wait-Process { }
     }
