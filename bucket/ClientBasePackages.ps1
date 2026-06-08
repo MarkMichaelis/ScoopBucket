@@ -148,7 +148,7 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
     [Package]@{ Name = 'Dropbox';          Installer = 'winget'; Id = 'Dropbox.Dropbox' }
     [Package]@{ Name = 'PowerToys';        Installer = 'winget'; Id = 'Microsoft.PowerToys'
                 Notes = 'Microsoft PowerToys suite; installed for the maintained Mouse Without Borders module (mouse/keyboard/clipboard sharing across machines), which replaces the unmaintained standalone Microsoft.MouseWithoutBorders 2.2.1 build.'
-                ConfigScript = { Import-PowerToysSettings -NoRestart } }
+                ConfigScript = { Import-PowerToysSettings -NoRestart -SnapshotPath (Join-Path $PSScriptRoot 'os\MarkMichaelisPowerToysSettings.jsonc') } }
     [Package]@{ Name = 'Foxit PDF Reader'; Installer = 'winget'; Id = 'Foxit.FoxitReader'
                 Notes = 'choco foxitreader times out downloading upstream installer (#27). winget is preferred per README.' }
     [Package]@{

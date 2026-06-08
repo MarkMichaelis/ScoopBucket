@@ -9,9 +9,16 @@ function Import-PowerToysSettings {
         stopped first (so it does not overwrite the files as they are written)
         and relaunched afterward unless -NoRestart is given.
 
-        Designed to run as the PowerToys package PostInstallScript: with no
-        arguments it reads the snapshot shipped in the module's Data folder and
-        writes into %LOCALAPPDATA%\Microsoft\PowerToys. Honours -WhatIf.
+        Designed to run as the PowerToys package ConfigScript: with no
+        arguments it reads the snapshot committed at
+        bucket/os/MarkMichaelisPowerToysSettings.jsonc and writes into
+        %LOCALAPPDATA%\Microsoft\PowerToys. Honours -WhatIf.
+
+        The committed snapshot lives in the bucket (not inside the module), so
+        the ConfigScript in ClientBasePackages.ps1 passes an explicit
+        -SnapshotPath resolved from its own $PSScriptRoot; the default below
+        resolves the same file when the module is imported directly from the
+        repo.
 
         Secret/identity values were neutralized at capture time, so after a
         restore MouseWithoutBorders must be re-paired (its SecurityKey is
@@ -32,7 +39,7 @@ function Import-PowerToysSettings {
     [CmdletBinding(SupportsShouldProcess)]
     [OutputType([pscustomobject])]
     param(
-        [string]$SnapshotPath = (Join-Path $PSScriptRoot '..\Data\PowerToysSettings.json'),
+        [string]$SnapshotPath = (Join-Path $PSScriptRoot '..\..\..\bucket\os\MarkMichaelisPowerToysSettings.jsonc'),
         [string]$SettingsRoot = (Get-PowerToysSettingsPath),
         [switch]$NoRestart
     )
