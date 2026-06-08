@@ -204,6 +204,7 @@ Describe 'Start-PowerToysProcess' -Tag 'Light' {
     BeforeEach {
         Mock Start-Process { }
         Mock Test-Path { $true }
+        Mock Write-Warning { }
     }
 
     It 'does not launch a second instance when PowerToys is already running' {
@@ -212,6 +213,7 @@ Describe 'Start-PowerToysProcess' -Tag 'Light' {
         Start-PowerToysProcess
 
         Should -Invoke Start-Process -Times 0 -Exactly
+        Should -Invoke Write-Warning -ParameterFilter { $Message -like '*already running*' } -Times 1 -Exactly
     }
 
     It 'launches PowerToys once when none is running and the exe exists' {
