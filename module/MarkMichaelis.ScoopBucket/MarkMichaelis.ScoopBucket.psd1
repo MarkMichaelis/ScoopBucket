@@ -9,7 +9,7 @@
 #
 @{
     RootModule        = 'MarkMichaelis.ScoopBucket.psm1'
-    ModuleVersion     = '1.2.0'
+    ModuleVersion     = '1.3.0'
     GUID              = 'b7e8a4c2-9f3d-4b76-8e6a-1c5d2f7b9e10'
     Author            = 'Mark Michaelis'
     CompanyName       = 'IntelliTect'
@@ -57,7 +57,9 @@
         'Register-CliCompletion',
         'Register-AllCliCompletions',
         'Invoke-CliCompletionsSweep',
-        'Save-Artifact'
+        'Save-Artifact',
+        'Export-PowerToysSettings',
+        'Import-PowerToysSettings'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()

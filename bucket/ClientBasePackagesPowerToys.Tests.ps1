@@ -40,4 +40,11 @@ Describe 'ClientBasePackages: PowerToys (Mouse Without Borders)' -Tag 'Light', '
     It 'targets the Microsoft.PowerToys winget id (ships the maintained Mouse Without Borders)' {
         $script:powerToys.Id | Should -Be 'Microsoft.PowerToys'
     }
+
+    It 'restores the scrubbed PowerToys settings snapshot after install (PostInstallScript)' {
+        # Closes #366: the committed Data/PowerToysSettings.json is reapplied via
+        # Import-PowerToysSettings once PowerToys is installed. Get-Package strips
+        # scriptblocks, exposing only the HasPostInstallScript projection.
+        $script:powerToys.HasPostInstallScript | Should -BeTrue
+    }
 }

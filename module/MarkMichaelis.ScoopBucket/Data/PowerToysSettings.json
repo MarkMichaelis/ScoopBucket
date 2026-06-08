@@ -1,0 +1,2702 @@
+{
+  "schema": 1,
+  "generated": "2026-06-07T17:41:15.7401104-07:00",
+  "files": {
+    "log_settings.json": {
+      "logLevel": "trace"
+    },
+    "oobe_settings.json": {
+      "openedAtFirstLaunch": true
+    },
+    "settings-placement.json": {
+      "Length": 44,
+      "Flags": 0,
+      "ShowCmd": 1,
+      "MinPosition": {
+        "X": -1,
+        "Y": -1
+      },
+      "MaxPosition": {
+        "X": -1,
+        "Y": -1
+      },
+      "NormalPosition": {
+        "Left": 380,
+        "Top": 380,
+        "Right": 3260,
+        "Bottom": 1917
+      }
+    },
+    "settings.json": {
+      "startup": true,
+      "enabled": {
+        "AdvancedPaste": true,
+        "AlwaysOnTop": true,
+        "Awake": false,
+        "CmdNotFound": false,
+        "CmdPal": true,
+        "ColorPicker": false,
+        "CropAndLock": false,
+        "CursorWrap": false,
+        "EnvironmentVariables": false,
+        "FancyZones": true,
+        "File Explorer": true,
+        "File Locksmith": true,
+        "FindMyMouse": true,
+        "GrabAndMove": true,
+        "Hosts": false,
+        "Image Resizer": true,
+        "Keyboard Manager": true,
+        "LightSwitch": false,
+        "Measure Tool": false,
+        "MouseHighlighter": true,
+        "MouseJump": true,
+        "MousePointerCrosshairs": false,
+        "MouseWithoutBorders": true,
+        "NewPlus": false,
+        "Peek": true,
+        "PowerDisplay": true,
+        "PowerRename": true,
+        "PowerToys Run": false,
+        "QuickAccent": false,
+        "RegistryPreview": false,
+        "Shortcut Guide": true,
+        "TextExtractor": false,
+        "Workspaces": false,
+        "ZoomIt": false
+      },
+      "show_tray_icon": true,
+      "show_theme_adaptive_tray_icon": false,
+      "is_elevated": true,
+      "run_elevated": false,
+      "show_new_updates_toast_notification": true,
+      "download_updates_automatically": true,
+      "show_whats_new_after_updates": true,
+      "enable_experimentation": true,
+      "dashboard_sort_order": 0,
+      "is_admin": true,
+      "enable_warnings_elevated_apps": true,
+      "enable_quick_access": true,
+      "quick_access_shortcut": {
+        "win": false,
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "code": 0,
+        "key": ""
+      },
+      "theme": "system",
+      "system_theme": "light",
+      "powertoys_version": "v0.99.1",
+      "ignored_conflict_properties": {
+        "ignored_shortcuts": []
+      }
+    },
+    "AdvancedPaste/settings.json": {
+      "properties": {
+        "IsAIEnabled": {
+          "value": false
+        },
+        "ShowCustomPreview": {
+          "value": true
+        },
+        "CloseAfterLosingFocus": {
+          "value": false
+        },
+        "EnableClipboardPreview": {
+          "value": true
+        },
+        "AutoCopySelectionForCustomActionHotkey": {
+          "value": false
+        },
+        "advanced-paste-ui-hotkey": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 86,
+          "key": ""
+        },
+        "paste-as-plain-hotkey": {
+          "win": true,
+          "ctrl": true,
+          "alt": true,
+          "shift": false,
+          "code": 86,
+          "key": ""
+        },
+        "paste-as-markdown-hotkey": {
+          "win": false,
+          "ctrl": false,
+          "alt": false,
+          "shift": false,
+          "code": 0,
+          "key": ""
+        },
+        "paste-as-json-hotkey": {
+          "win": false,
+          "ctrl": false,
+          "alt": false,
+          "shift": false,
+          "code": 0,
+          "key": ""
+        },
+        "custom-actions": {
+          "value": []
+        },
+        "additional-actions": {
+          "image-to-text": {
+            "shortcut": {
+              "win": false,
+              "ctrl": false,
+              "alt": false,
+              "shift": false,
+              "code": 0,
+              "key": ""
+            },
+            "isShown": false
+          },
+          "paste-as-file": {
+            "isShown": true,
+            "paste-as-txt-file": {
+              "shortcut": {
+                "win": false,
+                "ctrl": false,
+                "alt": false,
+                "shift": false,
+                "code": 0,
+                "key": ""
+              },
+              "isShown": false
+            },
+            "paste-as-png-file": {
+              "shortcut": {
+                "win": false,
+                "ctrl": false,
+                "alt": false,
+                "shift": false,
+                "code": 0,
+                "key": ""
+              },
+              "isShown": false
+            },
+            "paste-as-html-file": {
+              "shortcut": {
+                "win": false,
+                "ctrl": false,
+                "alt": false,
+                "shift": false,
+                "code": 0,
+                "key": ""
+              },
+              "isShown": false
+            }
+          },
+          "transcode": {
+            "isShown": true,
+            "transcode-to-mp3": {
+              "shortcut": {
+                "win": false,
+                "ctrl": false,
+                "alt": false,
+                "shift": false,
+                "code": 0,
+                "key": ""
+              },
+              "isShown": false
+            },
+            "transcode-to-mp4": {
+              "shortcut": {
+                "win": false,
+                "ctrl": false,
+                "alt": false,
+                "shift": false,
+                "code": 0,
+                "key": ""
+              },
+              "isShown": false
+            }
+          }
+        },
+        "paste-ai-configuration": {
+          "active-provider-id": "",
+          "providers": []
+        }
+      },
+      "name": "AdvancedPaste",
+      "version": "1"
+    },
+    "AlwaysOnTop/settings.json": {
+      "properties": {
+        "hotkey": {
+          "value": {
+            "win": true,
+            "ctrl": true,
+            "alt": false,
+            "shift": false,
+            "code": 84,
+            "key": ""
+          }
+        },
+        "increase-opacity-hotkey": {
+          "value": {
+            "win": true,
+            "ctrl": true,
+            "alt": false,
+            "shift": false,
+            "code": 187,
+            "key": ""
+          }
+        },
+        "decrease-opacity-hotkey": {
+          "value": {
+            "win": true,
+            "ctrl": true,
+            "alt": false,
+            "shift": false,
+            "code": 189,
+            "key": ""
+          }
+        },
+        "frame-enabled": {
+          "value": true
+        },
+        "show-in-system-menu": {
+          "value": false
+        },
+        "frame-thickness": {
+          "value": 15
+        },
+        "frame-color": {
+          "value": "#0099cc"
+        },
+        "frame-opacity": {
+          "value": 100
+        },
+        "frame-accent-color": {
+          "value": true
+        },
+        "sound-enabled": {
+          "value": true
+        },
+        "do-not-activate-on-game-mode": {
+          "value": true
+        },
+        "excluded-apps": {
+          "value": ""
+        },
+        "round-corners-enabled": {
+          "value": true
+        }
+      },
+      "name": "AlwaysOnTop",
+      "version": "0.0.1"
+    },
+    "Awake/settings.json": {
+      "properties": {
+        "keepDisplayOn": false,
+        "mode": 0,
+        "intervalHours": 0,
+        "intervalMinutes": 1,
+        "expirationDateTime": "2026-06-07T13:36:18.7346041-07:00",
+        "customTrayTimes": {}
+      },
+      "name": "Awake",
+      "version": "0.99.1.0"
+    },
+    "ColorPicker/settings.json": {
+      "properties": {
+        "DefaultActivationShortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 67,
+          "key": ""
+        },
+        "ActivationShortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 67,
+          "key": ""
+        },
+        "changecursor": {
+          "value": false
+        },
+        "copiedcolorrepresentation": "HEX",
+        "activationaction": 1,
+        "primaryclickaction": 0,
+        "middleclickaction": 1,
+        "secondaryclickaction": 2,
+        "colorhistory": null,
+        "colorhistorylimit": 20,
+        "visiblecolorformats": {
+          "HEX": {
+            "Key": true,
+            "Value": "%Rex%Grx%Blx"
+          },
+          "RGB": {
+            "Key": true,
+            "Value": "rgb(%Re, %Gr, %Bl)"
+          },
+          "HSL": {
+            "Key": true,
+            "Value": "hsl(%Hu, %Sl%, %Ll%)"
+          },
+          "HSV": {
+            "Key": false,
+            "Value": "hsv(%Hu, %Sb%, %Va%)"
+          },
+          "CMYK": {
+            "Key": false,
+            "Value": "cmyk(%Cy%, %Ma%, %Ye%, %Bk%)"
+          },
+          "HSB": {
+            "Key": false,
+            "Value": "hsb(%Hu, %Sb%, %Br%)"
+          },
+          "HSI": {
+            "Key": false,
+            "Value": "hsi(%Hu, %Si%, %In%)"
+          },
+          "HWB": {
+            "Key": false,
+            "Value": "hwb(%Hu, %Wh%, %Bn%)"
+          },
+          "NCol": {
+            "Key": false,
+            "Value": "%Hn, %Wh%, %Bn%"
+          },
+          "CIEXYZ": {
+            "Key": false,
+            "Value": "XYZ(%Xv, %Yv, %Zv)"
+          },
+          "CIELAB": {
+            "Key": false,
+            "Value": "CIELab(%Lc, %Ca, %Cb)"
+          },
+          "Oklab": {
+            "Key": false,
+            "Value": "oklab(%Lo, %Oa, %Ob)"
+          },
+          "Oklch": {
+            "Key": false,
+            "Value": "oklch(%Lo, %Oc, %Oh)"
+          },
+          "VEC4": {
+            "Key": false,
+            "Value": "(%Reff, %Grff, %Blff, 1f)"
+          },
+          "Decimal": {
+            "Key": false,
+            "Value": "%Dv"
+          },
+          "HEX Int": {
+            "Key": false,
+            "Value": "0xFF%ReX%GrX%BlX"
+          }
+        },
+        "showcolorname": {
+          "value": false
+        }
+      },
+      "name": "ColorPicker",
+      "version": "2.1"
+    },
+    "CropAndLock/settings.json": {
+      "properties": {
+        "reparent-hotkey": {
+          "value": {
+            "win": true,
+            "ctrl": true,
+            "alt": false,
+            "shift": true,
+            "code": 82,
+            "key": ""
+          }
+        },
+        "thumbnail-hotkey": {
+          "value": {
+            "win": true,
+            "ctrl": true,
+            "alt": false,
+            "shift": true,
+            "code": 84,
+            "key": ""
+          }
+        },
+        "screenshot-hotkey": {
+          "value": {
+            "win": true,
+            "ctrl": true,
+            "alt": false,
+            "shift": true,
+            "code": 83,
+            "key": ""
+          }
+        }
+      },
+      "name": "CropAndLock",
+      "version": "0.0.1"
+    },
+    "CursorWrap/settings.json": {
+      "properties": {
+        "DefaultActivationShortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": true,
+          "shift": false,
+          "code": 85,
+          "key": ""
+        },
+        "activation_shortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": true,
+          "shift": false,
+          "code": 85,
+          "key": ""
+        },
+        "auto_activate": {
+          "value": false
+        },
+        "disable_wrap_during_drag": {
+          "value": true
+        },
+        "wrap_mode": {
+          "value": 0
+        },
+        "activation_mode": {
+          "value": 0
+        },
+        "disable_cursor_wrap_on_single_monitor": {
+          "value": false
+        }
+      },
+      "name": "CursorWrap",
+      "version": "1.0"
+    },
+    "EnvironmentVariables/settings.json": {
+      "properties": {
+        "LaunchAdministrator": {
+          "value": true
+        }
+      },
+      "name": "EnvironmentVariables",
+      "version": "1.0"
+    },
+    "FancyZones/applied-layouts.json": {
+      "applied-layouts": [
+        {
+          "device": {
+            "monitor": "SAM0D63",
+            "monitor-instance": "5&342a4889&0&UID4355",
+            "serial-number": "HTPH601103",
+            "monitor-number": 2,
+            "virtual-desktop": "{CF361381-595F-4D7A-8F98-2FF46B1F9EE7}"
+          },
+          "applied-layout": {
+            "uuid": "{00000000-0000-0000-0000-000000000000}",
+            "type": "priority-grid",
+            "show-spacing": true,
+            "spacing": 16,
+            "zone-count": 3,
+            "sensitivity-radius": 20
+          }
+        },
+        {
+          "device": {
+            "monitor": "SAM0B80",
+            "monitor-instance": "5&342a4889&0&UID4353",
+            "serial-number": "0",
+            "monitor-number": 1,
+            "virtual-desktop": "{CF361381-595F-4D7A-8F98-2FF46B1F9EE7}"
+          },
+          "applied-layout": {
+            "uuid": "{00000000-0000-0000-0000-000000000000}",
+            "type": "priority-grid",
+            "show-spacing": true,
+            "spacing": 16,
+            "zone-count": 3,
+            "sensitivity-radius": 20
+          }
+        }
+      ]
+    },
+    "FancyZones/last-used-virtual-desktop.json": {
+      "last-used-virtual-desktop": "{CF361381-595F-4D7A-8F98-2FF46B1F9EE7}"
+    },
+    "FancyZones/settings.json": {
+      "properties": {
+        "fancyzones_shiftDrag": {
+          "value": true
+        },
+        "fancyzones_mouseSwitch": {
+          "value": false
+        },
+        "fancyzones_mouseMiddleClickSpanningMultipleZones": {
+          "value": false
+        },
+        "fancyzones_overrideSnapHotkeys": {
+          "value": false
+        },
+        "fancyzones_moveWindowAcrossMonitors": {
+          "value": false
+        },
+        "fancyzones_moveWindowsBasedOnPosition": {
+          "value": false
+        },
+        "fancyzones_overlappingZonesAlgorithm": {
+          "value": 0
+        },
+        "fancyzones_displayOrWorkAreaChange_moveWindows": {
+          "value": true
+        },
+        "fancyzones_zoneSetChange_moveWindows": {
+          "value": false
+        },
+        "fancyzones_appLastZone_moveWindows": {
+          "value": false
+        },
+        "fancyzones_openWindowOnActiveMonitor": {
+          "value": false
+        },
+        "fancyzones_restoreSize": {
+          "value": false
+        },
+        "fancyzones_quickLayoutSwitch": {
+          "value": true
+        },
+        "fancyzones_flashZonesOnQuickSwitch": {
+          "value": true
+        },
+        "use_cursorpos_editor_startupscreen": {
+          "value": true
+        },
+        "fancyzones_show_on_all_monitors": {
+          "value": false
+        },
+        "fancyzones_span_zones_across_monitors": {
+          "value": false
+        },
+        "fancyzones_makeDraggedWindowTransparent": {
+          "value": false
+        },
+        "fancyzones_allowPopupWindowSnap": {
+          "value": false
+        },
+        "fancyzones_allowChildWindowSnap": {
+          "value": false
+        },
+        "fancyzones_disableRoundCornersOnSnap": {
+          "value": false
+        },
+        "fancyzones_zoneHighlightColor": {
+          "value": "#0078D7"
+        },
+        "fancyzones_highlight_opacity": {
+          "value": 50
+        },
+        "fancyzones_editor_hotkey": {
+          "value": {
+            "win": true,
+            "ctrl": false,
+            "alt": false,
+            "shift": true,
+            "code": 192,
+            "key": ""
+          }
+        },
+        "fancyzones_windowSwitching": {
+          "value": true
+        },
+        "fancyzones_nextTab_hotkey": {
+          "value": {
+            "win": true,
+            "ctrl": false,
+            "alt": false,
+            "shift": false,
+            "code": 34,
+            "key": ""
+          }
+        },
+        "fancyzones_prevTab_hotkey": {
+          "value": {
+            "win": true,
+            "ctrl": false,
+            "alt": false,
+            "shift": false,
+            "code": 33,
+            "key": ""
+          }
+        },
+        "fancyzones_excluded_apps": {
+          "value": ""
+        },
+        "fancyzones_zoneBorderColor": {
+          "value": "#FFFFFF"
+        },
+        "fancyzones_zoneColor": {
+          "value": "#F5FCFF"
+        },
+        "fancyzones_zoneNumberColor": {
+          "value": "#000000"
+        },
+        "fancyzones_systemTheme": {
+          "value": true
+        },
+        "fancyzones_showZoneNumber": {
+          "value": true
+        }
+      },
+      "name": "FancyZones",
+      "version": "1.0"
+    },
+    "File Explorer/settings.json": {
+      "properties": {
+        "svg-previewer-toggle-setting": {
+          "value": true
+        },
+        "svg-previewer-background-color-mode": {
+          "value": 0
+        },
+        "svg-previewer-background-solid-color": {
+          "value": "#FFFFFF"
+        },
+        "svg-previewer-background-checkered-shade": {
+          "value": 0
+        },
+        "svg-thumbnail-toggle-setting": {
+          "value": true
+        },
+        "md-previewer-toggle-setting": {
+          "value": true
+        },
+        "monaco-previewer-toggle-setting": {
+          "value": true
+        },
+        "monaco-previewer-toggle-setting-word-wrap": {
+          "value": true
+        },
+        "monaco-previewer-toggle-try-format": {
+          "value": false
+        },
+        "monaco-previewer-max-file-size": {
+          "value": 50
+        },
+        "monaco-previewer-font-size": {
+          "value": 14
+        },
+        "monaco-previewer-sticky-scroll": {
+          "value": true
+        },
+        "monaco-previewer-minimap": {
+          "value": false
+        },
+        "pdf-previewer-toggle-setting": {
+          "value": false
+        },
+        "pdf-thumbnail-toggle-setting": {
+          "value": false
+        },
+        "gcode-previewer-toggle-setting": {
+          "value": true
+        },
+        "bgcode-previewer-toggle-setting": {
+          "value": true
+        },
+        "gcode-thumbnail-toggle-setting": {
+          "value": true
+        },
+        "bgcode-thumbnail-toggle-setting": {
+          "value": true
+        },
+        "stl-thumbnail-toggle-setting": {
+          "value": true
+        },
+        "stl-thumbnail-color-setting": {
+          "value": "#FFC924"
+        },
+        "qoi-previewer-toggle-setting": {
+          "value": true
+        },
+        "qoi-thumbnail-toggle-setting": {
+          "value": true
+        }
+      },
+      "name": "File Explorer",
+      "version": "1"
+    },
+    "File Locksmith/file-locksmith-settings.json": {
+      "showInExtendedContextMenu": false
+    },
+    "FindMyMouse/settings.json": {
+      "properties": {
+        "DefaultActivationShortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 70,
+          "key": ""
+        },
+        "activation_method": {
+          "value": 0
+        },
+        "include_win_key": {
+          "value": false
+        },
+        "activation_shortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 70,
+          "key": ""
+        },
+        "do_not_activate_on_game_mode": {
+          "value": true
+        },
+        "background_color": {
+          "value": "#80000000"
+        },
+        "spotlight_color": {
+          "value": "#80FFFFFF"
+        },
+        "spotlight_radius": {
+          "value": 100
+        },
+        "animation_duration_ms": {
+          "value": 500
+        },
+        "spotlight_initial_zoom": {
+          "value": 9
+        },
+        "excluded_apps": {
+          "value": ""
+        },
+        "shaking_minimum_distance": {
+          "value": 1000
+        },
+        "shaking_interval_ms": {
+          "value": 1000
+        },
+        "shaking_factor": {
+          "value": 400
+        }
+      },
+      "name": "FindMyMouse",
+      "version": "1.1"
+    },
+    "GrabAndMove/settings.json": {
+      "properties": {
+        "modifierKey": {
+          "value": 0
+        },
+        "shouldAbsorbAlt": {
+          "value": true
+        },
+        "showGeometry": {
+          "value": false
+        },
+        "useAltResize": {
+          "value": true
+        },
+        "doNotActivateOnGameMode": {
+          "value": true
+        },
+        "excluded_apps": {
+          "value": ""
+        }
+      },
+      "name": "GrabAndMove",
+      "version": "0.99.1.0"
+    },
+    "Hosts/settings.json": {
+      "properties": {
+        "ShowStartupWarning": {
+          "value": true
+        },
+        "LaunchAdministrator": {
+          "value": true
+        },
+        "LoopbackDuplicates": {
+          "value": false
+        },
+        "AdditionalLinesPosition": 0,
+        "Encoding": 0,
+        "NoLeadingSpaces": {
+          "value": false
+        },
+        "BackupHosts": {
+          "value": true
+        },
+        "BackupPath": "C:\\WINDOWS\\System32\\drivers\\etc",
+        "DeleteBackupsMode": 2,
+        "DeleteBackupsDays": 15,
+        "DeleteBackupsCount": 5
+      },
+      "name": "Hosts",
+      "version": "1.0"
+    },
+    "Image Resizer/image-resizer-settings.json": {},
+    "Image Resizer/settings.json": {
+      "properties": {
+        "imageresizer_selectedSizeIndex": {
+          "value": 0
+        },
+        "imageresizer_shrinkOnly": {
+          "value": false
+        },
+        "imageresizer_replace": {
+          "value": false
+        },
+        "imageresizer_ignoreOrientation": {
+          "value": true
+        },
+        "imageresizer_jpegQualityLevel": {
+          "value": 90
+        },
+        "imageresizer_pngInterlaceOption": {
+          "value": 0
+        },
+        "imageresizer_tiffCompressOption": {
+          "value": 0
+        },
+        "imageresizer_fileName": {
+          "value": "%1 (%2)"
+        },
+        "imageresizer_sizes": {
+          "value": [
+            {
+              "Id": 0,
+              "name": "Small",
+              "fit": 1,
+              "width": 854,
+              "height": 480,
+              "unit": 3
+            },
+            {
+              "Id": 1,
+              "name": "Medium",
+              "fit": 1,
+              "width": 1366,
+              "height": 768,
+              "unit": 3
+            },
+            {
+              "Id": 2,
+              "name": "Large",
+              "fit": 1,
+              "width": 1920,
+              "height": 1080,
+              "unit": 3
+            },
+            {
+              "Id": 3,
+              "name": "Phone",
+              "fit": 1,
+              "width": 320,
+              "height": 568,
+              "unit": 3
+            }
+          ]
+        },
+        "imageresizer_keepDateModified": {
+          "value": false
+        },
+        "imageresizer_fallbackEncoder": {
+          "value": "19e4a5aa-5662-4fc5-a0c0-1758028e1057"
+        },
+        "imageresizer_customSize": {
+          "value": {
+            "Id": 4,
+            "name": "custom",
+            "fit": 1,
+            "width": 1024,
+            "height": 640,
+            "unit": 3
+          }
+        }
+      },
+      "name": "Image Resizer",
+      "version": "1"
+    },
+    "Keyboard Manager/editorSettings.json": {
+      "ShortcutSettingsDictionary": {},
+      "ProfileDictionary": {},
+      "ShortcutsByOperationType": {},
+      "ActiveProfile": ""
+    },
+    "Keyboard Manager/settings.json": {
+      "properties": {
+        "activeConfiguration": {
+          "value": "default"
+        },
+        "keyboardConfigurations": {
+          "value": [
+            "default"
+          ]
+        },
+        "DefaultEditorShortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 81,
+          "key": ""
+        },
+        "EditorShortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 81,
+          "key": ""
+        },
+        "useNewEditor": true
+      },
+      "name": "Keyboard Manager",
+      "version": "1.0"
+    },
+    "LightSwitch/settings.json": {
+      "properties": {
+        "changeSystem": {
+          "value": true
+        },
+        "changeApps": {
+          "value": true
+        },
+        "lightTime": {
+          "value": 480
+        },
+        "darkTime": {
+          "value": 1200
+        },
+        "sunrise_offset": {
+          "value": 0
+        },
+        "sunset_offset": {
+          "value": 0
+        },
+        "latitude": {
+          "value": "0.0"
+        },
+        "longitude": {
+          "value": "0.0"
+        },
+        "scheduleMode": {
+          "value": "Off"
+        },
+        "toggle-theme-hotkey": {
+          "value": {
+            "win": true,
+            "ctrl": true,
+            "alt": false,
+            "shift": true,
+            "code": 68,
+            "key": ""
+          }
+        },
+        "enableDarkModeProfile": {
+          "value": false
+        },
+        "enableLightModeProfile": {
+          "value": false
+        },
+        "darkModeProfile": {
+          "value": ""
+        },
+        "lightModeProfile": {
+          "value": ""
+        }
+      },
+      "name": "LightSwitch",
+      "version": "0.99.1.0"
+    },
+    "Measure Tool/settings.json": {
+      "properties": {
+        "DefaultActivationShortcut": {
+          "win": true,
+          "ctrl": true,
+          "alt": false,
+          "shift": true,
+          "code": 77,
+          "key": ""
+        },
+        "ActivationShortcut": {
+          "win": true,
+          "ctrl": true,
+          "alt": false,
+          "shift": true,
+          "code": 77,
+          "key": ""
+        },
+        "ContinuousCapture": {
+          "value": false
+        },
+        "DrawFeetOnCross": {
+          "value": true
+        },
+        "PerColorChannelEdgeDetection": {
+          "value": false
+        },
+        "UnitsOfMeasure": {
+          "value": 0
+        },
+        "PixelTolerance": {
+          "value": 30
+        },
+        "MeasureCrossColor": {
+          "value": "#FF4500"
+        },
+        "DefaultMeasureStyle": {
+          "value": 0
+        }
+      },
+      "name": "Measure Tool",
+      "version": "1"
+    },
+    "MouseHighlighter/settings.json": {
+      "properties": {
+        "DefaultActivationShortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 72,
+          "key": ""
+        },
+        "activation_shortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 72,
+          "key": ""
+        },
+        "left_button_click_color": {
+          "value": "#a6FFFF00"
+        },
+        "right_button_click_color": {
+          "value": "#a60000FF"
+        },
+        "highlight_opacity": {
+          "value": 166
+        },
+        "always_color": {
+          "value": "#00FF0000"
+        },
+        "highlight_radius": {
+          "value": 20
+        },
+        "highlight_fade_delay_ms": {
+          "value": 500
+        },
+        "highlight_fade_duration_ms": {
+          "value": 250
+        },
+        "auto_activate": {
+          "value": false
+        },
+        "spotlight_mode": {
+          "value": false
+        }
+      },
+      "name": "MouseHighlighter",
+      "version": "1.2"
+    },
+    "MouseJump/settings.json": {
+      "properties": {
+        "DefaultActivationShortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 68,
+          "key": ""
+        },
+        "activation_shortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 68,
+          "key": ""
+        },
+        "thumbnail_size": {
+          "width": 1600,
+          "height": 1200
+        },
+        "preview_type": "Bezelled",
+        "background_color_1": null,
+        "background_color_2": null,
+        "border_thickness": 0,
+        "border_color": null,
+        "border_3d_depth": 0,
+        "border_padding": 0,
+        "bezel_thickness": 0,
+        "bezel_color": null,
+        "bezel_3d_depth": 0,
+        "screen_margin": 0,
+        "screen_color_1": null,
+        "screen_color_2": null
+      },
+      "name": "MouseJump",
+      "version": "1.1"
+    },
+    "MousePointerCrosshairs/settings.json": {
+      "properties": {
+        "DefaultActivationShortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": true,
+          "shift": false,
+          "code": 80,
+          "key": ""
+        },
+        "DefaultGlidingCursorActivationShortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": true,
+          "shift": false,
+          "code": 190,
+          "key": ""
+        },
+        "activation_shortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": true,
+          "shift": false,
+          "code": 80,
+          "key": ""
+        },
+        "gliding_cursor_activation_shortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": true,
+          "shift": false,
+          "code": 190,
+          "key": ""
+        },
+        "crosshairs_color": {
+          "value": "#FF0000"
+        },
+        "crosshairs_opacity": {
+          "value": 75
+        },
+        "crosshairs_radius": {
+          "value": 20
+        },
+        "crosshairs_thickness": {
+          "value": 5
+        },
+        "crosshairs_border_color": {
+          "value": "#FFFFFF"
+        },
+        "crosshairs_border_size": {
+          "value": 1
+        },
+        "crosshairs_orientation": {
+          "value": 0
+        },
+        "crosshairs_auto_hide": {
+          "value": false
+        },
+        "crosshairs_is_fixed_length_enabled": {
+          "value": false
+        },
+        "crosshairs_fixed_length": {
+          "value": 1
+        },
+        "auto_activate": {
+          "value": false
+        },
+        "gliding_travel_speed": {
+          "value": 25
+        },
+        "gliding_delay_speed": {
+          "value": 5
+        }
+      },
+      "name": "MousePointerCrosshairs",
+      "version": "1.0"
+    },
+    "MouseWithoutBorders/settings.json": {
+      "properties": {
+        "SecurityKey": {
+          "value": ""
+        },
+        "UseService": {
+          "value": false
+        },
+        "ShowOriginalUI": {
+          "value": false
+        },
+        "WrapMouse": {
+          "value": true
+        },
+        "ShareClipboard": {
+          "value": true
+        },
+        "TransferFile": {
+          "value": true
+        },
+        "HideMouseAtScreenEdge": {
+          "value": true
+        },
+        "DrawMouseCursor": {
+          "value": true
+        },
+        "ValidateRemoteMachineIP": {
+          "value": false
+        },
+        "SameSubnetOnly": {
+          "value": false
+        },
+        "BlockScreenSaverOnOtherMachines": {
+          "value": true
+        },
+        "MoveMouseRelatively": {
+          "value": false
+        },
+        "BlockMouseAtScreenCorners": {
+          "value": false
+        },
+        "ShowClipboardAndNetworkStatusMessages": {
+          "value": false
+        },
+        "MachineMatrixString": [],
+        "MachinePool": {
+          "value": ""
+        },
+        "MatrixOneRow": {
+          "value": true
+        },
+        "EasyMouse": {
+          "value": 1
+        },
+        "DisableEasyMouseWhenForegroundWindowIsFullscreen": {
+          "value": true
+        },
+        "EasyMouseFullscreenSwitchBlockExcludedApps": {
+          "value": []
+        },
+        "MachineID": {
+          "value": 0
+        },
+        "LastX": {
+          "value": 0
+        },
+        "LastY": {
+          "value": 0
+        },
+        "PackageID": {
+          "value": 0
+        },
+        "FirstRun": {
+          "value": false
+        },
+        "HotKeySwitchMachine": {
+          "value": 112
+        },
+        "ToggleEasyMouseShortcut": {
+          "win": true,
+          "ctrl": true,
+          "alt": true,
+          "shift": false,
+          "code": 69,
+          "key": ""
+        },
+        "LockMachineShortcut": {
+          "win": true,
+          "ctrl": true,
+          "alt": true,
+          "shift": false,
+          "code": 76,
+          "key": ""
+        },
+        "ReconnectShortcut": {
+          "win": true,
+          "ctrl": true,
+          "alt": true,
+          "shift": false,
+          "code": 82,
+          "key": ""
+        },
+        "Switch2AllPCShortcut": {
+          "win": false,
+          "ctrl": false,
+          "alt": false,
+          "shift": false,
+          "code": 0,
+          "key": ""
+        },
+        "TCPPort": {
+          "value": 15100
+        },
+        "DrawMouseEx": {
+          "value": true
+        },
+        "Name2IP": {
+          "value": ""
+        },
+        "FirstCtrlShiftS": {
+          "value": false
+        },
+        "DeviceID": {
+          "value": ""
+        }
+      },
+      "name": "MouseWithoutBorders",
+      "version": "1.1"
+    },
+    "NewPlus/settings.json": {
+      "properties": {
+        "HideFileExtension": {
+          "value": true
+        },
+        "HideStartingDigits": {
+          "value": true
+        },
+        "TemplateLocation": {
+          "value": "C:\\Users\\Mark\\AppData\\Local\\Microsoft\\PowerToys\\NewPlus\\Templates"
+        },
+        "ReplaceVariables": {
+          "value": false
+        },
+        "BuiltInNewHidePreference": {
+          "value": false
+        }
+      },
+      "name": "NewPlus",
+      "version": "1.0"
+    },
+    "Peek/preview-settings.json": {
+      "SourceCodeWrapText": {
+        "value": false
+      },
+      "SourceCodeTryFormat": {
+        "value": false
+      },
+      "SourceCodeFontSize": {
+        "value": 14
+      },
+      "SourceCodeStickyScroll": {
+        "value": true
+      },
+      "SourceCodeMinimap": {
+        "value": false
+      }
+    },
+    "Peek/settings.json": {
+      "properties": {
+        "DefaultActivationShortcut": {
+          "win": false,
+          "ctrl": true,
+          "alt": false,
+          "shift": false,
+          "code": 32,
+          "key": ""
+        },
+        "ActivationShortcut": {
+          "win": false,
+          "ctrl": true,
+          "alt": false,
+          "shift": false,
+          "code": 32,
+          "key": ""
+        },
+        "AlwaysRunNotElevated": {
+          "value": true
+        },
+        "CloseAfterLosingFocus": {
+          "value": false
+        },
+        "ConfirmFileDelete": {
+          "value": true
+        },
+        "EnableSpaceToActivate": {
+          "value": true
+        }
+      },
+      "name": "Peek",
+      "version": "0.0.2"
+    },
+    "PowerDisplay/settings.json": {
+      "properties": {
+        "DefaultActivationShortcut": {
+          "win": true,
+          "ctrl": true,
+          "alt": false,
+          "shift": true,
+          "code": 80,
+          "key": ""
+        },
+        "activation_shortcut": {
+          "win": true,
+          "ctrl": true,
+          "alt": false,
+          "shift": true,
+          "code": 80,
+          "key": ""
+        },
+        "monitor_refresh_delay": 5,
+        "monitors": [
+          {
+            "name": "U28E510",
+            "monitorNumber": 2,
+            "MonitorIconGlyph": "",
+            "id": "DDC_SAM0D63_2",
+            "communicationMethod": "DDC/CI",
+            "currentBrightness": 30,
+            "colorTemperatureVcp": 2,
+            "contrast": 0,
+            "volume": 0,
+            "isHidden": false,
+            "enableContrast": true,
+            "enableVolume": false,
+            "enableInputSource": false,
+            "enableRotation": false,
+            "enableColorTemperature": false,
+            "enablePowerState": false,
+            "capabilitiesRaw": "(prot(monitor)type(lcd)SAMSUNGcmds(01 02 03 07 0C E3 F3)vcp(02 04 05 08 10 12 14(05 08 0B 0C) 16 18 1A 52 60( 11 12 0F) AC AE B2 B6 C6 C8 C9 D6(01 04 05) DC(00 02 03 05 ) DF FD)mccs_ver(2.1)mswhql(1))",
+            "vcpCodesFormatted": [
+              {
+                "code": "0x02",
+                "title": "New Control Value (0x02)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0x04",
+                "title": "Restore Factory Defaults (0x04)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0x05",
+                "title": "Restore Brightness and Contrast (0x05)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0x08",
+                "title": "Restore Color Defaults (0x08)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0x10",
+                "title": "Brightness (0x10)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0x12",
+                "title": "Contrast (0x12)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0x14",
+                "title": "Select Color Preset (0x14)",
+                "values": "Values: 6500K (0x05), 9300K (0x08), User 1 (0x0B), User 2 (0x0C)",
+                "hasValues": true,
+                "valueList": [
+                  {
+                    "value": "0x05",
+                    "name": "6500K"
+                  },
+                  {
+                    "value": "0x08",
+                    "name": "9300K"
+                  },
+                  {
+                    "value": "0x0B",
+                    "name": "User 1"
+                  },
+                  {
+                    "value": "0x0C",
+                    "name": "User 2"
+                  }
+                ]
+              },
+              {
+                "code": "0x16",
+                "title": "Video Gain: Red (0x16)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0x18",
+                "title": "Video Gain: Green (0x18)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0x1A",
+                "title": "Video Gain: Blue (0x1A)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0x52",
+                "title": "Active Control (0x52)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0x60",
+                "title": "Input Source (0x60)",
+                "values": "Values: HDMI-1 (0x11), HDMI-2 (0x12), DisplayPort-1 (0x0F)",
+                "hasValues": true,
+                "valueList": [
+                  {
+                    "value": "0x11",
+                    "name": "HDMI-1"
+                  },
+                  {
+                    "value": "0x12",
+                    "name": "HDMI-2"
+                  },
+                  {
+                    "value": "0x0F",
+                    "name": "DisplayPort-1"
+                  }
+                ]
+              },
+              {
+                "code": "0xAC",
+                "title": "Horizontal Frequency (0xAC)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0xAE",
+                "title": "Vertical Frequency (0xAE)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0xB2",
+                "title": "Flat Panel Sub-Pixel Layout (0xB2)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0xB6",
+                "title": "Display Technology Type (0xB6)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0xC6",
+                "title": "Enable Display of 'Display Descriptor' (0xC6)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0xC8",
+                "title": "Display Controller Type (0xC8)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0xC9",
+                "title": "Display Firmware Level (0xC9)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0xD6",
+                "title": "Power Mode (0xD6)",
+                "values": "Values: On (0x01), Off (DPM) (0x04), Off (Hard) (0x05)",
+                "hasValues": true,
+                "valueList": [
+                  {
+                    "value": "0x01",
+                    "name": "On"
+                  },
+                  {
+                    "value": "0x04",
+                    "name": "Off (DPM)"
+                  },
+                  {
+                    "value": "0x05",
+                    "name": "Off (Hard)"
+                  }
+                ]
+              },
+              {
+                "code": "0xDC",
+                "title": "Display Application (0xDC)",
+                "values": "Values: Standard/Default (0x00), Mixed (0x02), Movie (0x03), Games (0x05)",
+                "hasValues": true,
+                "valueList": [
+                  {
+                    "value": "0x00",
+                    "name": "Standard/Default"
+                  },
+                  {
+                    "value": "0x02",
+                    "name": "Mixed"
+                  },
+                  {
+                    "value": "0x03",
+                    "name": "Movie"
+                  },
+                  {
+                    "value": "0x05",
+                    "name": "Games"
+                  }
+                ]
+              },
+              {
+                "code": "0xDF",
+                "title": "VCP Version (0xDF)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              },
+              {
+                "code": "0xFD",
+                "title": "Manufacturer Specific (0xFD)",
+                "values": "Continuous range",
+                "hasValues": true,
+                "valueList": []
+              }
+            ],
+            "supportsBrightness": true,
+            "supportsContrast": true,
+            "supportsColorTemperature": true,
+            "supportsVolume": false,
+            "supportsInputSource": true,
+            "supportsPowerState": true
+          }
+        ],
+        "restore_settings_on_startup": false,
+        "show_system_tray_icon": true,
+        "show_profile_switcher": true,
+        "show_identify_monitors_button": true,
+        "custom_vcp_mappings": []
+      },
+      "name": "PowerDisplay",
+      "version": "1"
+    },
+    "PowerRename/power-rename-last-run-data.json": {
+      "SearchText": "",
+      "ReplaceText": "",
+      "LastWindowWidth": 1400,
+      "LastWindowHeight": 800
+    },
+    "PowerRename/power-rename-settings.json": {
+      "ShowIcon": true,
+      "ExtendedContextMenuOnly": false,
+      "PersistState": true,
+      "MRUEnabled": true,
+      "MaxMRUSize": 10,
+      "UseBoostLib": false
+    },
+    "PowerToys Run/settings.json": {
+      "properties": {
+        "search_result_preference": "most_recently_used",
+        "search_type_preference": "application_name",
+        "maximum_number_of_results": 4,
+        "open_powerlauncher": {
+          "win": false,
+          "ctrl": false,
+          "alt": true,
+          "shift": false,
+          "code": 32,
+          "key": ""
+        },
+        "open_file_location": {
+          "win": false,
+          "ctrl": false,
+          "alt": false,
+          "shift": false,
+          "code": 0,
+          "key": ""
+        },
+        "copy_path_location": {
+          "win": false,
+          "ctrl": false,
+          "alt": false,
+          "shift": false,
+          "code": 0,
+          "key": ""
+        },
+        "open_console": {
+          "win": false,
+          "ctrl": false,
+          "alt": false,
+          "shift": false,
+          "code": 0,
+          "key": ""
+        },
+        "override_win_r_key": false,
+        "override_win_s_key": false,
+        "ignore_hotkeys_in_fullscreen": false,
+        "clear_input_on_launch": false,
+        "tab_selects_context_buttons": true,
+        "theme": 0,
+        "show_plugins_overview": 0,
+        "title_fontsize": 16,
+        "startupPosition": 0,
+        "use_centralized_keyboard_hook": false,
+        "search_query_results_with_delay": true,
+        "search_input_delay": 150,
+        "search_input_delay_fast": 50,
+        "search_clicked_item_weight": 5,
+        "search_query_tuning_enabled": false,
+        "search_wait_for_slow_results": false,
+        "use_pinyin": false,
+        "generate_thumbnails_from_files": true,
+        "hotkey_changed": true,
+        "DefaultOpenPowerLauncher": {
+          "win": false,
+          "ctrl": false,
+          "alt": true,
+          "shift": false,
+          "code": 32,
+          "key": ""
+        },
+        "DefaultOpenFileLocation": {
+          "win": false,
+          "ctrl": false,
+          "alt": false,
+          "shift": false,
+          "code": 0,
+          "key": ""
+        },
+        "DefaultCopyPathLocation": {
+          "win": false,
+          "ctrl": false,
+          "alt": false,
+          "shift": false,
+          "code": 0,
+          "key": ""
+        }
+      },
+      "plugins": [
+        {
+          "Id": "CEA0FDFC6D3B4085823D60DC76F28855",
+          "Name": "Calculator",
+          "Description": "Calculates mathematical equations (e.g. 5*3-2)",
+          "Version": "0.99.1.0",
+          "Author": "cxfksword",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": true,
+          "ActionKeyword": "=",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Calculator\\Images\\calculator.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Calculator\\Images\\calculator.light.png",
+          "AdditionalOptions": [
+            {
+              "PluginOptionType": 0,
+              "Key": "InputUseEnglishFormat",
+              "DisplayLabel": "Use English (United States) number format for input",
+              "DisplayDescription": "Ignores your system setting and expects numbers in the format '1,000.55'.",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "OutputUseEnglishFormat",
+              "DisplayLabel": "Use English (United States) number format for output",
+              "DisplayDescription": "Ignores your system setting and returns numbers in the format '1000.55'.",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "ReplaceInput",
+              "DisplayLabel": "Replace input if query ends with '='",
+              "DisplayDescription": "When using direct activation, appending '=' to the expression will replace the input with the calculated result (e.g. '=5*3-2=' will change the query to '=13').",
+              "Value": true,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 1,
+              "Key": "TrigMode",
+              "DisplayLabel": "Trigonometry Unit",
+              "DisplayDescription": "Specifies the angle unit to use for trigonometry operations",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "ComboBoxItems": [
+                {
+                  "Key": "Radians",
+                  "Value": "0"
+                },
+                {
+                  "Key": "Degrees",
+                  "Value": "1"
+                },
+                {
+                  "Key": "Gradians",
+                  "Value": "2"
+                }
+              ],
+              "NumberValue": 0
+            }
+          ]
+        },
+        {
+          "Id": "B4D3B69656E14D44865C8D818EAE47C4",
+          "Name": "Folder",
+          "Description": "Navigates folders starting from a drive letter 'C:\\' or from the user home '~'",
+          "Version": "0.99.1.0",
+          "Author": "qianlifeng",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": true,
+          "ActionKeyword": "",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Folder\\Images\\folder.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Folder\\Images\\folder.light.png",
+          "AdditionalOptions": []
+        },
+        {
+          "Id": "C88512156BB74580AADF7252E130BA8D",
+          "Name": "History",
+          "Description": "Accesses previously selected results",
+          "Version": "0.99.1.0",
+          "Author": "jefflord",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": false,
+          "ActionKeyword": "!!",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\History\\Images\\history.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\History\\Images\\history.light.png",
+          "AdditionalOptions": []
+        },
+        {
+          "Id": "2140FC9819AD43A3A616E2735815C27C",
+          "Name": "Windows Search",
+          "Description": "Searches files and folders",
+          "Version": "0.99.1.0",
+          "Author": "Microsoft",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": true,
+          "ActionKeyword": "?",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Indexer\\Images\\indexer.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Indexer\\Images\\indexer.light.png",
+          "AdditionalOptions": [
+            {
+              "PluginOptionType": 0,
+              "Key": "DisableDriveDetectionWarning",
+              "DisplayLabel": "Disable non-indexed files warning",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 4,
+              "Key": "ExcludedPatterns",
+              "DisplayLabel": "Excluded patterns",
+              "DisplayDescription": "Prevents files and folders showing up in search results if pattern is matched. Add one pattern per line.",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "TextValue": "",
+              "PlaceholderText": "Example: *.exe",
+              "NumberValue": 0
+            }
+          ]
+        },
+        {
+          "Id": "0778F0C264114FEC8A3DF59447CF0A74",
+          "Name": "OneNote",
+          "Description": "Searches your local OneNote notebooks. This plugin requires the OneNote desktop app which is included in Microsoft Office",
+          "Version": "0.99.1.0",
+          "Author": "palenshus",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": true,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": true,
+          "ActionKeyword": "o:",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\OneNote\\Images\\oneNote.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\OneNote\\Images\\oneNote.light.png",
+          "AdditionalOptions": []
+        },
+        {
+          "Id": "29DD65DB28C84A37BDEF1D2B43DA368B",
+          "Name": "PowerToys",
+          "Description": "Opens PowerToys utilities and settings",
+          "Version": "0.99.1.0",
+          "Author": "davidegiacometti",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": true,
+          "ActionKeyword": "@",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\PowerToys\\Images\\PowerToys.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\PowerToys\\Images\\PowerToys.light.png",
+          "AdditionalOptions": []
+        },
+        {
+          "Id": "791FC278BA414111B8D1886DFE447410",
+          "Name": "Program",
+          "Description": "Searches programs",
+          "Version": "0.99.1.0",
+          "Author": "qianlifeng",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": true,
+          "ActionKeyword": ".",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Program\\Images\\app.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Program\\Images\\app.light.png",
+          "AdditionalOptions": []
+        },
+        {
+          "Id": "303417D927BF4C97BCFFC78A123BE0C8",
+          "Name": "Registry Plugin",
+          "Description": "Navigates inside the Windows Registry",
+          "Version": "0.99.1.0",
+          "Author": "TobiasSekan",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": false,
+          "ActionKeyword": ":",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Registry\\Images\\reg.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Registry\\Images\\reg.light.png",
+          "AdditionalOptions": []
+        },
+        {
+          "Id": "11A6C36E4E91439CA69F702CBD364EF7",
+          "Name": "Service",
+          "Description": "Manages Windows services",
+          "Version": "0.99.1.0",
+          "Author": "davidegiacometti",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": false,
+          "ActionKeyword": "!",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Service\\Images\\service.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Service\\Images\\service.light.png",
+          "AdditionalOptions": []
+        },
+        {
+          "Id": "D409510CD0D2481F853690A07E6DC426",
+          "Name": "Shell",
+          "Description": "Executes commands (e.g. 'ping', 'cmd')",
+          "Version": "0.99.1.0",
+          "Author": "qianlifeng",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": false,
+          "ActionKeyword": ">",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Shell\\Images\\shell.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Shell\\Images\\shell.light.png",
+          "AdditionalOptions": [
+            {
+              "PluginOptionType": 1,
+              "Key": "ShellCommandExecution",
+              "DisplayLabel": "Command execution",
+              "DisplayDescription": "All entries using the Windows Terminal force the Windows Terminal as the console host regardless of the system settings",
+              "Value": false,
+              "ComboBoxValue": 2,
+              "ComboBoxItems": [
+                {
+                  "Key": "Find and run the executable file",
+                  "Value": "2"
+                },
+                {
+                  "Key": "Run in Command Prompt (cmd.exe)",
+                  "Value": "0"
+                },
+                {
+                  "Key": "Run in PowerShell (PowerShell.exe)",
+                  "Value": "1"
+                },
+                {
+                  "Key": "Run in PowerShell 7 (pwsh.exe)",
+                  "Value": "6"
+                },
+                {
+                  "Key": "Run in Command Prompt (cmd.exe) using Windows Terminal",
+                  "Value": "5"
+                },
+                {
+                  "Key": "Run in PowerShell (PowerShell.exe) using Windows Terminal",
+                  "Value": "3"
+                },
+                {
+                  "Key": "Run in PowerShell 7 (pwsh.exe) using Windows Terminal",
+                  "Value": "4"
+                }
+              ],
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "LeaveShellOpen",
+              "DisplayLabel": "Keep shell open",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            }
+          ]
+        },
+        {
+          "Id": "CEA08895D2544B019B2E9C5009600DF4",
+          "Name": "Windows System Commands",
+          "Description": "Executes system commands (e.g. 'shutdown', 'lock', 'sleep')",
+          "Version": "0.99.1.0",
+          "Author": "Wox",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": true,
+          "ActionKeyword": "",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\System\\Images\\lock.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\System\\Images\\lock.light.png",
+          "AdditionalOptions": [
+            {
+              "PluginOptionType": 0,
+              "Key": "ConfirmSystemCommands",
+              "DisplayLabel": "Show a dialog to confirm system commands",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "ShowSuccessOnEmptyRB",
+              "DisplayLabel": "Show a success message after emptying the Recycle Bin",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "LocalizeSystemCommands",
+              "DisplayLabel": "Use localized system commands instead of English ones",
+              "Value": true,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "SeparateResultEmptyRB",
+              "DisplayLabel": "Show separate result for Empty Recycle Bin command",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "ReduceNetworkResultScore",
+              "DisplayLabel": "Reduce the priority of 'IP' and 'MAC' results to improve the order in the global results",
+              "DisplayDescription": "With this setting enabled, you have to type more characters to find the results.",
+              "Value": true,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            }
+          ]
+        },
+        {
+          "Id": "5D69806A5A474115821C3E4C56B9C793",
+          "Name": "Time and Date",
+          "Description": "Shows time and date values for the system time or a custom time stamp (e.g.'Day', 'Day::6/7/2026', 'Time::3:44:59 PM', 'Calendar week::6/7/2026')",
+          "Version": "0.99.1.0",
+          "Author": "htcfreek",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": true,
+          "ActionKeyword": ")",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\TimeDate\\Images\\timeDate.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\TimeDate\\Images\\timeDate.light.png",
+          "AdditionalOptions": [
+            {
+              "PluginOptionType": 0,
+              "Key": "OnlyDateTimeNowGlobal",
+              "DisplayLabel": "Show only 'Time', 'Date' and 'Now' result for system time on global queries",
+              "DisplayDescription": "Regardless of this setting, for global queries the first word of the query has to be a complete match.",
+              "Value": true,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "TimeWithSeconds",
+              "DisplayLabel": "Show time with seconds",
+              "DisplayDescription": "This setting applies to the 'Time' and 'Now' result.",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "DateWithWeekday",
+              "DisplayLabel": "Show date with weekday and name of month",
+              "DisplayDescription": "This setting applies to the 'Date' and 'Now' result.",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "HideNumberMessageOnGlobalQuery",
+              "DisplayLabel": "Hide 'Invalid number input' error message on global queries",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 1,
+              "Key": "CalendarFirstWeekRule",
+              "DisplayLabel": "First week of the year",
+              "DisplayDescription": "Configure the calendar rule for the first week of the year.",
+              "Value": false,
+              "ComboBoxValue": -1,
+              "ComboBoxItems": [
+                {
+                  "Key": "Use system setting",
+                  "Value": "-1"
+                },
+                {
+                  "Key": "First day of year",
+                  "Value": "0"
+                },
+                {
+                  "Key": "First full week",
+                  "Value": "1"
+                },
+                {
+                  "Key": "First four day week",
+                  "Value": "2"
+                }
+              ],
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 1,
+              "Key": "FirstDayOfWeek",
+              "DisplayLabel": "First day of the week",
+              "Value": false,
+              "ComboBoxValue": -1,
+              "ComboBoxItems": [
+                {
+                  "Key": "Use system setting",
+                  "Value": "-1"
+                },
+                {
+                  "Key": "Sunday",
+                  "Value": "0"
+                },
+                {
+                  "Key": "Monday",
+                  "Value": "1"
+                },
+                {
+                  "Key": "Tuesday",
+                  "Value": "2"
+                },
+                {
+                  "Key": "Wednesday",
+                  "Value": "3"
+                },
+                {
+                  "Key": "Thursday",
+                  "Value": "4"
+                },
+                {
+                  "Key": "Friday",
+                  "Value": "5"
+                },
+                {
+                  "Key": "Saturday",
+                  "Value": "6"
+                }
+              ],
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 4,
+              "Key": "CustomFormats",
+              "DisplayLabel": "Custom formats",
+              "DisplayDescription": "Use date and time string format syntax and DOW (Day of Week), DIM (Days in Month), WOM (Week of Month), WOY (Week of the year), EAB (Era abbreviation), WFT (Windows File Time), UXT (Unix Time), UMS (Unix Time in milliseconds), OAD (OLE Automation date), EXC (Excel's 1900 based date value), EXF (Excel's 1904 based date value). If the format starts with UTC:, then Universal Time (UTC) is used. (Use a backslash to escape format sequences and the backslash character as text.)",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "TextValue": "",
+              "PlaceholderText": "MyFormat=dd-MMM-yyyy\rMySecondFormat=dddd (Da\\y nu\\mber: DOW)\rMyUtcFormat=UTC:hh:mm:ss",
+              "NumberValue": 0
+            }
+          ]
+        },
+        {
+          "Id": "aa0ee9daff654fb7be452c2d77c471b9",
+          "Name": "Unit Converter",
+          "Description": "Provides unit conversion (e.g. 10 ft to m)",
+          "Version": "0.99.1.0",
+          "Author": "ThiefZero",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": false,
+          "ActionKeyword": "%%",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\UnitConverter\\Images\\unitconverter.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\UnitConverter\\Images\\unitconverter.light.png",
+          "AdditionalOptions": []
+        },
+        {
+          "Id": "03276A39D4E9417C8FFD200B0EE5E871",
+          "Name": "URI Handler",
+          "Description": "Opens URLs and UNC network shares",
+          "Version": "0.99.1.0",
+          "Author": "Microsoft",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": true,
+          "ActionKeyword": "//",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Uri\\Images\\uri.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\Uri\\Images\\uri.light.png",
+          "AdditionalOptions": []
+        },
+        {
+          "Id": "a26b1bb4dbd911edafa10242ac120002",
+          "Name": "Value Generator",
+          "Description": "Calculates hashes and generate values",
+          "Version": "0.99.1.0",
+          "Author": "IHorvalds",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": false,
+          "ActionKeyword": "#",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\ValueGenerator\\Images\\ValueGenerator.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\ValueGenerator\\Images\\ValueGenerator.light.png",
+          "AdditionalOptions": []
+        },
+        {
+          "Id": "525995402BEF4A8CA860D92F6D108092",
+          "Name": "Visual Studio Code Workspaces",
+          "Description": "Opens workspaces, remote machines (SSH or Codespaces) and containers, previously opened in VS Code. The VS Code instance needs to be in PATH",
+          "Version": "0.99.1.0",
+          "Author": "ricardosantos9521",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": true,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": false,
+          "ActionKeyword": "{",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\VSCodeWorkspaces\\Images\\code.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\VSCodeWorkspaces\\Images\\code.light.png",
+          "AdditionalOptions": []
+        },
+        {
+          "Id": "9F1B49201C3F4BF781CAAD5CD88EA4DC",
+          "Name": "Web Search",
+          "Description": "Searches the web with your default search engine",
+          "Version": "0.99.1.0",
+          "Author": "cyberrex5",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": true,
+          "ActionKeyword": "??",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\WebSearch\\Images\\WebSearch.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\WebSearch\\Images\\WebSearch.light.png",
+          "AdditionalOptions": [
+            {
+              "PluginOptionType": 0,
+              "Key": "NotGlobalIfUri",
+              "DisplayLabel": "Don't include in global results on queries that are URIs",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            }
+          ]
+        },
+        {
+          "Id": "5043CECEE6A748679CBE02D27D83747A",
+          "Name": "Windows settings",
+          "Description": "Searches Windows settings",
+          "Version": "0.99.1.0",
+          "Author": "TobiasSekan",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": false,
+          "ActionKeyword": "$",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\WindowsSettings\\Images\\WindowsSettings.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\WindowsSettings\\Images\\WindowsSettings.light.png",
+          "AdditionalOptions": []
+        },
+        {
+          "Id": "F59BA85006B14389A72A0EA756695F1D",
+          "Name": "Windows Terminal",
+          "Description": "Opens Windows Terminal profiles",
+          "Version": "0.99.1.0",
+          "Author": "davidegiacometti",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": true,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": true,
+          "ActionKeyword": "_",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\WindowsTerminal\\Images\\WindowsTerminal.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\WindowsTerminal\\Images\\WindowsTerminal.light.png",
+          "AdditionalOptions": [
+            {
+              "PluginOptionType": 0,
+              "Key": "OpenNewTab",
+              "DisplayLabel": "Open profiles in a new tab",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "OpenQuake",
+              "DisplayLabel": "Open profiles in the quake window",
+              "DisplayDescription": "Windows Terminal supports a \"quake\" feature where a terminal window is accessible using a global hotkey. Enable this option to open profiles in a new tab in this window.",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "ShowHiddenProfiles",
+              "DisplayLabel": "Show hidden profiles",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            }
+          ]
+        },
+        {
+          "Id": "F737A9223560B3C6833B5FFB8CDF78E5",
+          "Name": "Window Walker",
+          "Description": "Switches between open windows",
+          "Version": "0.99.1.0",
+          "Author": "betadele",
+          "Website": "https://aka.ms/PowerToys",
+          "Disabled": false,
+          "EnabledPolicyUiState": -1,
+          "IsGlobal": true,
+          "ActionKeyword": "<",
+          "WeightBoost": 0,
+          "IconPathDark": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\WindowWalker\\Images\\windowwalker.dark.png",
+          "IconPathLight": "C:\\Users\\Mark\\AppData\\Local\\PowerToys\\RunPlugins\\WindowWalker\\Images\\windowwalker.light.png",
+          "AdditionalOptions": [
+            {
+              "PluginOptionType": 0,
+              "Key": "ResultsFromVisibleDesktopOnly",
+              "DisplayLabel": "Show only results from visible desktop",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "SubtitleShowPid",
+              "DisplayLabel": "Show process id in the subtitle",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "SubtitleShowDesktopName",
+              "DisplayLabel": "Show desktop name in the subtitle",
+              "DisplayDescription": "This information is only shown in subtitle and tool tip, if you have at least two desktops.",
+              "Value": true,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "ConfirmKillProcess",
+              "DisplayLabel": "Request confirmation when killing a process",
+              "Value": true,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "KillProcessTree",
+              "DisplayLabel": "Kill process and its child processes",
+              "DisplayDescription": "Be careful when activating this. Killing the whole process tree can lead to problematic application crashes.",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "OpenAfterKillAndClose",
+              "DisplayLabel": "Stay open after closing windows and killing processes",
+              "DisplayDescription": "This feature won't work if the kill process confirmation is enabled.",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "HideKillProcessOnElevatedProcesses",
+              "DisplayLabel": "Hide \"kill process\" button if additional permissions required",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            },
+            {
+              "PluginOptionType": 0,
+              "Key": "HideExplorerSettingInfo",
+              "DisplayLabel": "Hide Explorer process information",
+              "DisplayDescription": "This message is only shown when searching with a direct activation command.",
+              "Value": false,
+              "ComboBoxValue": 0,
+              "NumberValue": 0
+            }
+          ]
+        }
+      ],
+      "name": "PowerToys Run",
+      "version": "1.0"
+    },
+    "PowerToys Run/Settings/ImageCache.json": {},
+    "PowerToys Run/Settings/Pinyin.json": {},
+    "PowerToys Run/Settings/PowerToysRunSettings.json": {
+      "PreviousHotkey": "",
+      "Hotkey": "Alt + Space",
+      "UseCentralizedKeyboardHook": false,
+      "SearchQueryResultsWithDelay": true,
+      "SearchInputDelayFast": 50,
+      "SearchInputDelay": 150,
+      "SearchQueryTuningEnabled": false,
+      "SearchWaitForSlowResults": false,
+      "SearchClickedItemWeight": 5,
+      "Theme": 0,
+      "StartupPosition": 0,
+      "PTRunNonDelayedSearchInParallel": true,
+      "PTRSearchQueryFastResultsWithDelay": false,
+      "ShouldUsePinyin": false,
+      "WindowLeft": 960,
+      "WindowTop": 334,
+      "MaxResultsToShow": 4,
+      "ActivateTimes": 1,
+      "HideWhenDeactivated": true,
+      "ClearInputOnLaunch": false,
+      "TabSelectsContextButtons": true,
+      "RememberLastLaunchLocation": false,
+      "ShowPluginsOverview": 0,
+      "TitleFontSize": 16,
+      "IgnoreHotkeysOnFullscreen": false,
+      "StartedFromPowerToysRunner": true,
+      "GenerateThumbnailsFromFiles": true,
+      "LastQueryMode": "Selected"
+    },
+    "PowerToys Run/Settings/QueryHistory.json": {
+      "Items": []
+    },
+    "PowerToys Run/Settings/UserSelectedRecord.json": {
+      "Records": {}
+    },
+    "PowerToys Run/Settings/Plugins/Microsoft.Plugin.Folder/FolderSettings.json": {
+      "FolderLinks": [],
+      "MaxFolderResults": 50,
+      "MaxFileResults": 50
+    },
+    "PowerToys Run/Settings/Plugins/Microsoft.Plugin.Indexer/IndexerSettings.json": {
+      "ContextMenus": [],
+      "MaxSearchCount": 30,
+      "UseLocationAsWorkingDir": false
+    },
+    "PowerToys Run/Settings/Plugins/Microsoft.Plugin.Program/ProgramPluginSettings.json": {
+      "LastIndexTime": "2026-06-07T00:00:00-07:00",
+      "ProgramSources": [],
+      "DisabledProgramSources": [],
+      "ProgramSuffixes": [
+        "bat",
+        "appref-ms",
+        "exe",
+        "lnk",
+        "url"
+      ],
+      "RunCommandSuffixes": [
+        "bat",
+        "appref-ms",
+        "exe",
+        "lnk",
+        "url",
+        "cpl",
+        "msc"
+      ],
+      "EnableStartMenuSource": true,
+      "EnableDesktopSource": true,
+      "EnableRegistrySource": true,
+      "EnablePathEnvironmentVariableSource": true,
+      "MinScoreThreshold": 0.75
+    },
+    "PowerToys Run/Settings/Plugins/Microsoft.Plugin.Shell/ShellPluginSettings.json": {
+      "Shell": 2,
+      "ReplaceWinR": false,
+      "LeaveShellOpen": false,
+      "RunAsAdministrator": false,
+      "Count": {}
+    },
+    "PowerToys Run/Settings/Plugins/Microsoft.Plugin.Uri/UriSettings.json": {
+      "ShowBrowserIcon": true
+    },
+    "QuickAccent/settings.json": {
+      "properties": {
+        "activation_key": 2,
+        "do_not_activate_on_game_mode": true,
+        "toolbar_position": {
+          "value": "Top center"
+        },
+        "input_time_ms": {
+          "value": 300
+        },
+        "selected_lang": {
+          "value": "ALL"
+        },
+        "excluded_apps": {
+          "value": ""
+        },
+        "show_description": false,
+        "sort_by_usage_frequency": false,
+        "start_selection_from_the_left": false
+      },
+      "name": "QuickAccent",
+      "version": "0.0.1"
+    },
+    "RegistryPreview/settings.json": {
+      "properties": {
+        "default_reg_app": false
+      },
+      "name": "RegistryPreview",
+      "version": "1"
+    },
+    "Shortcut Guide/settings.json": {
+      "properties": {
+        "DefaultOpenShortcutGuide": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 191,
+          "key": ""
+        },
+        "open_shortcutguide": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 191,
+          "key": ""
+        },
+        "overlay_opacity": {
+          "value": 90
+        },
+        "use_legacy_press_win_key_behavior": {
+          "value": false
+        },
+        "press_time": {
+          "value": 900
+        },
+        "press_time_for_taskbar_icon_shortcuts": {
+          "value": 900
+        },
+        "theme": {
+          "value": "system"
+        },
+        "disabled_apps": {
+          "value": ""
+        }
+      },
+      "name": "Shortcut Guide",
+      "version": "1.0"
+    },
+    "TextExtractor/settings.json": {
+      "properties": {
+        "DefaultActivationShortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 84,
+          "key": ""
+        },
+        "ActivationShortcut": {
+          "win": true,
+          "ctrl": false,
+          "alt": false,
+          "shift": true,
+          "code": 84,
+          "key": ""
+        },
+        "PreferredLanguage": ""
+      },
+      "name": "TextExtractor",
+      "version": "1"
+    },
+    "Workspaces/settings.json": {
+      "properties": {
+        "hotkey": {
+          "value": {
+            "win": true,
+            "ctrl": true,
+            "alt": false,
+            "shift": false,
+            "code": 192,
+            "key": ""
+          }
+        },
+        "sortby": 0
+      },
+      "name": "Workspaces",
+      "version": "0.0.1"
+    }
+  }
+}
