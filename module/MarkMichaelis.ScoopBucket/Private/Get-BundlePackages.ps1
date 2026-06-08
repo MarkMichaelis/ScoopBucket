@@ -119,6 +119,7 @@ function global:Invoke-PackageInstall {
             HasCustomInstallScript = [bool]`$p.CustomInstallScript
             HasVerifyScript        = [bool]`$p.VerifyScript
             HasNativeCommandScript = [bool]`$p.NativeCommandScript
+            HasConfigScript        = [bool]`$p.ConfigScript
         }
     }
     Write-Output ('__SBPKG__' + (@{ Bundle = `$Bundle; Packages = @(`$exported) } | ConvertTo-Json -Depth 6 -Compress))
