@@ -253,4 +253,14 @@ Describe 'Start-PowerToysProcess' -Tag 'Light', 'Module' {
 
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Start-Process -Times 1 -Exactly
     }
+
+    It 'does not warn when PowerToys.exe is not found (best-effort, non-actionable)' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-Process { @() }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Test-Path { $false }
+
+        & $script:mod { Start-PowerToysProcess }
+
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Start-Process -Times 0 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Write-Warning -Times 0 -Exactly
+    }
 }

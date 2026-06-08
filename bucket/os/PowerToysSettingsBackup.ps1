@@ -248,7 +248,7 @@ function Start-PowerToysProcess {
     )
     $exe = $candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
     if (-not $exe) {
-        Write-Warning 'PowerToys.exe not found in the known install locations; not restarting.'
+        Write-Verbose 'PowerToys.exe not found in the known install locations; not restarting.'
         return
     }
     if ($PSCmdlet.ShouldProcess($exe, 'Start PowerToys')) {
