@@ -183,3 +183,72 @@ Describe 'Import-PowerToysSettings' -Tag 'Light', 'Module' {
             Should -Throw '*snapshot not found*'
     }
 }
+
+Describe 'Stop-PowerToysProcess' -Tag 'Light', 'Module' {
+    BeforeEach {
+        # Runner + two PowerToys.* helpers that hold the Global single-instance
+        # object, plus an unrelated process that must never be touched.
+        $script:fakeProcs = @(
+            [pscustomobject]@{ Id = 100; ProcessName = 'PowerToys' }
+            [pscustomobject]@{ Id = 101; ProcessName = 'PowerToys.Settings' }
+            [pscustomobject]@{ Id = 102; ProcessName = 'PowerToys.FancyZones' }
+            [pscustomobject]@{ Id = 200; ProcessName = 'Notepad' }
+        )
+        # Enumeration sees the whole family; the post-wait survivor re-query (by
+        # id) sees nothing -- the kill succeeded.
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-Process { $script:fakeProcs } -ParameterFilter { $Name }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-Process { @() }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Stop-Process { }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Wait-Process { }
+    }
+
+    It 'stops the runner and its PowerToys.* helpers by id but leaves unrelated processes alone' {
+        & $script:mod { Stop-PowerToysProcess }
+
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Stop-Process -ParameterFilter { $Id -eq 100 } -Times 1 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Stop-Process -ParameterFilter { $Id -eq 101 } -Times 1 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Stop-Process -ParameterFilter { $Id -eq 102 } -Times 1 -Exactly
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Stop-Process -ParameterFilter { $Id -eq 200 } -Times 0 -Exactly
+    }
+
+    It 'waits for the killed PowerToys processes to exit before returning' {
+        & $script:mod { Stop-PowerToysProcess }
+
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Wait-Process -Times 1 -Exactly -ParameterFilter {
+            $Id -contains 100 -and $Id -contains 101 -and $Id -contains 102 -and $Id -notcontains 200
+        }
+    }
+
+    It 'warns when a PowerToys process survives the stop (an elevated kill refusal)' {
+        # The survivor re-query (by id) still finds the runner -- the kill was refused.
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-Process { @([pscustomobject]@{ Id = 100; ProcessName = 'PowerToys' }) } -ParameterFilter { $Id }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Write-Warning { }
+
+        & $script:mod { Stop-PowerToysProcess }
+
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Write-Warning -ParameterFilter { $Message -like '*could not be fully stopped*' } -Times 1 -Exactly
+    }
+}
+
+Describe 'Start-PowerToysProcess' -Tag 'Light', 'Module' {
+    BeforeEach {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Start-Process { }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Test-Path { $true }
+    }
+
+    It 'does not launch a second instance when PowerToys is already running' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-Process { @([pscustomobject]@{ Id = 100; ProcessName = 'PowerToys' }) }
+
+        & $script:mod { Start-PowerToysProcess }
+
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Start-Process -Times 0 -Exactly
+    }
+
+    It 'launches PowerToys once when none is running and the exe exists' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-Process { @() }
+
+        & $script:mod { Start-PowerToysProcess }
+
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Start-Process -Times 1 -Exactly
+    }
+}
