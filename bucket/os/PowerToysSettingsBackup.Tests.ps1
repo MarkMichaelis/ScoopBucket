@@ -223,4 +223,14 @@ Describe 'Start-PowerToysProcess' -Tag 'Light' {
 
         Should -Invoke Start-Process -Times 1 -Exactly
     }
+
+    It 'does not warn when PowerToys.exe is not found (best-effort, non-actionable)' {
+        Mock Get-Process { @() }
+        Mock Test-Path { $false }
+
+        Start-PowerToysProcess
+
+        Should -Invoke Start-Process -Times 0 -Exactly
+        Should -Invoke Write-Warning -Times 0 -Exactly
+    }
 }
