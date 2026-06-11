@@ -1390,8 +1390,9 @@ Describe 'Plan-then-execute architecture' -Tag 'Heavy' {
         Mock -CommandName New-Item
         Mock -CommandName Get-Process -MockWith { $null }
 
-        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false | Out-Null
-        $secondPlan = Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+        $firstRun = Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+        $firstRun | Should -BeNullOrEmpty
+        $secondPlan = Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false -PassThru
 
         Should -Invoke Move-OneDriveFolder -Times 1
         @($secondPlan | Where-Object { $_.Type -eq 'MoveAccount' -and -not $_.Skipped }).Count | Should -Be 0
@@ -1667,6 +1668,45 @@ Describe 'Resolve-FreshSyncAccounts' -Tag 'Light' {
 }
 
 
+Describe 'PassThru output suppression' -Tag 'Heavy' {
+    BeforeEach {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($acct) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-OneDriveSharePointSiteList -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $null }
+        Mock -CommandName Resolve-KfmRebindAction -MockWith {
+            [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+        }
+        Mock -CommandName Get-Process -MockWith { [pscustomobject]@{ Name = 'OneDrive' } }
+        Mock -CommandName Write-Host -MockWith { }
+    }
+
+    It 'does not emit the plan object to the pipeline by default under -WhatIf' {
+        $out = Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -WhatIf
+        $out | Should -BeNullOrEmpty
+    }
+
+    It 'emits the plan object when -PassThru is supplied under -WhatIf' {
+        $out = Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -WhatIf -PassThru
+        @($out).Count | Should -BeGreaterThan 0
+        @($out | Where-Object { $_.Type -eq 'MoveAccount' }).Count | Should -BeGreaterThan 0
+    }
+}
+
 Describe 'Format-OneDriveMigrationPlan' -Tag 'Light' {
     BeforeAll {
         $script:b1 = [pscustomobject]@{
@@ -1754,6 +1794,45 @@ Describe 'Format-OneDriveMigrationPlan' -Tag 'Light' {
             -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
             -FreshSyncAccounts @() -IsElevated $true -HomeDir 'C:\Users\Mark'
         ($script:capturedPlanLines -join "`n") | Should -Match 'Elevation:\s+OK \(Administrator\)'
+    }
+
+    It 'renders the plan listing as a table with shortened paths and no per-item Current line' {
+        $plan = @([pscustomobject]@{
+            Type = 'MoveAccount'; Target = 'C:\OneDrive\OneDrive - Michaelis'
+            CurrentValue = 'C:\Users\Mark\OneDrive - Michaelis'
+            DesiredValue = 'C:\OneDrive\OneDrive - Michaelis'
+            Reason = 'Migrate account folder'; Skipped = $false; SkipReason = $null; Warnings = @()
+        })
+        Format-OneDriveMigrationPlan -Plan $plan -Accounts @() `
+            -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' `
+            -FreshSyncAccounts @() -HomeDir 'C:\Users\Mark'
+        $joined = $script:capturedPlanLines -join "`n"
+        $joined | Should -Match 'Type'
+        $joined | Should -Match 'To'
+        $joined | Should -Match 'MoveAccount'
+        $joined | Should -Match ([regex]::Escape('~\OneDrive - Michaelis'))
+        $joined | Should -Match ([regex]::Escape('.\OneDrive - Michaelis'))
+        $joined | Should -Match ([regex]::Escape('(~ = C:\Users\Mark,  . = C:\OneDrive)'))
+        $joined | Should -Not -Match 'Current:'
+    }
+
+    It 'enforces a path boundary and trims trailing separators when shortening' {
+        $plan = @([pscustomobject]@{
+            Type = 'MoveAccount'; Target = 'C:\OneDrive\Tenant'
+            CurrentValue = 'C:\Users\Markus\OneDrive'
+            DesiredValue = 'C:\OneDrive\Tenant'
+            Reason = 'Migrate account folder'; Skipped = $false; SkipReason = $null; Warnings = @()
+        })
+        Format-OneDriveMigrationPlan -Plan $plan -Accounts @() `
+            -RootDir 'C:\OneDrive\' -KfmOwner 'Michaelis' `
+            -FreshSyncAccounts @() -HomeDir 'C:\Users\Mark'
+        $joined = $script:capturedPlanLines -join "`n"
+        # 'C:\Users\Markus' must NOT be shortened against HomeDir 'C:\Users\Mark'.
+        $joined | Should -Match ([regex]::Escape('C:\Users\Markus\OneDrive'))
+        $joined | Should -Not -Match '~us'
+        # Trailing-slash RootDir still yields a clean '.\Tenant'.
+        $joined | Should -Match ([regex]::Escape('.\Tenant'))
+        $joined | Should -Not -Match ([regex]::Escape('.Tenant '))
     }
 }
 

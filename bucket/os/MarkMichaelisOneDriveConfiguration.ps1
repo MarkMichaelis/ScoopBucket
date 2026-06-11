@@ -142,6 +142,13 @@
     Policy) and you intentionally want to preview or run the remaining
     per-user work from a non-elevated shell.
 
+.PARAMETER PassThru
+    Return the computed migration plan objects to the pipeline. By default
+    the bundle prints the human-readable plan (and, in apply mode, the
+    migration summary) but emits no objects, so an interactive -WhatIf run
+    stays clean. Supply -PassThru when you want to capture or post-process
+    the plan objects programmatically.
+
 .EXAMPLE
     .\MarkMichaelisOneDriveConfiguration.ps1 -WhatIf
 
@@ -217,7 +224,8 @@ param(
     [string[]] $FreshSync = @(),
     [switch] $DeleteSourceOnSuccess,
     [switch] $ForceHydrate,
-    [switch] $SkipElevationCheck
+    [switch] $SkipElevationCheck,
+    [switch] $PassThru
 )
 
 $ErrorActionPreference = 'Stop'
@@ -1700,19 +1708,48 @@ function Format-OneDriveMigrationPlan {
     }
 
     Write-Host 'Planned OneDrive migration:'
-    foreach ($item in $Plan) {
-        $status = if ($item.Skipped) { '[Skip]' } else { '[Plan]' }
-        Write-Host ("  {0} {1}: {2}" -f $status, $item.Type, $item.Target)
-        if ($null -ne $item.CurrentValue -or $null -ne $item.DesiredValue) {
-            Write-Host ("      Current: {0}" -f $item.CurrentValue)
-            Write-Host ("      Desired: {0}" -f $item.DesiredValue)
+    if (@($Plan).Count -gt 0) {
+        function Format-PlanPath {
+            param([string]$Path)
+            if ([string]::IsNullOrEmpty($Path)) { return '' }
+            foreach ($pair in @(
+                @{ Root = $HomeDir; Token = '~' },
+                @{ Root = $RootDir; Token = '.' })) {
+                $root = ([string]$pair.Root).TrimEnd('\')
+                if (-not $root) { continue }
+                if ([string]::Equals($Path, $root, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    return $pair.Token
+                }
+                if ($Path.StartsWith($root + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+                    return $pair.Token + $Path.Substring($root.Length)
+                }
+            }
+            return $Path
         }
-        Write-Host ("      Reason : {0}" -f $item.Reason)
-        if ($item.SkipReason) {
-            Write-Host ("      Skip   : {0}" -f $item.SkipReason)
+
+        $rows = foreach ($item in $Plan) {
+            $to = if ($item.DesiredValue) { $item.DesiredValue } else { $item.Target }
+            [pscustomobject]@{
+                Action = if ($item.Skipped) { 'Skip' } else { 'Plan' }
+                Type   = $item.Type
+                From   = Format-PlanPath -Path ([string]$item.CurrentValue)
+                To     = Format-PlanPath -Path ([string]$to)
+            }
         }
-        foreach ($warning in @($item.Warnings)) {
-            Write-Host ("      Warning: {0}" -f $warning)
+
+        $table = ($rows | Format-Table -AutoSize | Out-String -Width 4096).TrimEnd()
+        Write-Host $table
+        Write-Host ("  (~ = {0},  . = {1})" -f $HomeDir, $RootDir)
+
+        foreach ($item in $Plan) {
+            if ($item.Skipped -and $item.SkipReason) {
+                Write-Host ("  [Skip] {0}: {1}" -f $item.Type, $item.SkipReason)
+            }
+            foreach ($warning in @($item.Warnings)) {
+                if ($warning) {
+                    Write-Host ("  [Warn] {0}: {1}" -f $item.Type, $warning)
+                }
+            }
         }
     }
     Write-Host ''
@@ -2029,7 +2066,8 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         [switch]$DeleteSourceOnSuccess,
         [switch]$ForceHydrate,
         [switch]$SkipElevationCheck,
-        [bool]$IsElevated = $true
+        [bool]$IsElevated = $true,
+        [switch]$PassThru
     )
 
     Write-Warning 'Mutates OneDrive client internal registry state (Accounts\<slot>\UserFolder, ScopeIdToMountPointPathCache*); these are not Microsoft-documented migration APIs.'
@@ -2068,7 +2106,8 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         -IsElevated $IsElevated
 
     if ($WhatIfPreference) {
-        return $plan
+        if ($PassThru) { return $plan }
+        return
     }
 
     $backupPath = ($plan | Where-Object Type -eq 'RegistryBackup' | Select-Object -First 1).Target
@@ -2126,7 +2165,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     }
 
     Write-Warning 'MRU staleness: Office recent docs / Snagit Recent File List / VS recent files may reference old OneDrive paths; reopen as needed.'
-    return $plan
+    if ($PassThru) { return $plan }
 }
 
 # Only run when invoked as a script (Scoop's installer does
@@ -2142,5 +2181,6 @@ if ($MyInvocation.InvocationName -ne '.') {
         -KfmOwnerContains:$KfmOwnerContains -NoKfmRebind:$NoKfmRebind `
         -NoFolderDescriptionsWrite:$NoFolderDescriptionsWrite -FreshSync $FreshSync `
         -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -ForceHydrate:$ForceHydrate `
-        -SkipElevationCheck:$SkipElevationCheck -IsElevated $__mmodIsElevated
+        -SkipElevationCheck:$SkipElevationCheck -IsElevated $__mmodIsElevated `
+        -PassThru:$PassThru
 }
