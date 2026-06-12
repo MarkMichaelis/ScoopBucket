@@ -51,10 +51,10 @@ BeforeAll {
     }
 }
 
-Describe 'Install-Module.ps1 emits lazy v2 stub block (#243)' -Tag 'Light','Module' {
-    It 'profile block is sentinel-marked v2 (not v1 eager Import-Module)' {
+Describe 'Install-Module.ps1 emits lazy v3 stub block (#243, #375)' -Tag 'Light','Module' {
+    It 'profile block is sentinel-marked v3 (not v1 eager Import-Module)' {
         $block = script:Get-EmittedProfileBlock
-        $block | Should -Match '# MarkMichaelis.ScoopBucket:Import:BEGIN v2'
+        $block | Should -Match '# MarkMichaelis.ScoopBucket:Import:BEGIN v3'
         $block | Should -Match '# MarkMichaelis.ScoopBucket:Import:END'
     }
 
@@ -145,7 +145,7 @@ if (Get-Module MarkMichaelis.ScoopBucket) { 'LOADED' } else { 'UNLOADED' }
     }
 }
 
-Describe 'Install-Module.ps1 migrates v1 sentinel block to v2 idempotently' -Tag 'Light','Module' {
+Describe 'Install-Module.ps1 migrates v1/v2 sentinel block to v3 idempotently' -Tag 'Light','Module' {
     It 'replaces a pre-existing v1 sentinel block in-place when re-run' {
         $tempProfile = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-migrate-$([guid]::NewGuid().ToString('N')).ps1"
         try {
@@ -165,7 +165,7 @@ if (-not (Get-Module -Name MarkMichaelis.ScoopBucket)) {
             & $script:helperScript -ProfilePath $tempProfile | Out-Null
             $migrated = Get-Content -Raw -LiteralPath $tempProfile
 
-            $migrated | Should -Match '# MarkMichaelis.ScoopBucket:Import:BEGIN v2'
+            $migrated | Should -Match '# MarkMichaelis.ScoopBucket:Import:BEGIN v3'
             # The v1 BEGIN line had no version suffix; after migration
             # there must be exactly ONE BEGIN marker, the v2 one.
             ([regex]::Matches($migrated, '# MarkMichaelis\.ScoopBucket:Import:BEGIN').Count) | Should -Be 1
@@ -306,6 +306,72 @@ Describe 'Install-Module.ps1 -Uninstall removes a ReadOnly junction (#253)' -Tag
         } finally {
             if (Test-Path -LiteralPath $sentinelFile) {
                 (Get-Item -LiteralPath $sentinelFile -ErrorAction Ignore).IsReadOnly = $false
+            }
+            Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction Ignore
+        }
+    }
+}
+
+Describe 'v3 stub block registers the repo module dir on PSModulePath (#375)' -Tag 'Light','Module' {
+    It 'makes MarkMichaelis.ScoopBucket discoverable after dot-source with no pre-seeded PSModulePath' {
+        # Behavioral contract for #375: the OneDrive-breaking junction is
+        # replaced by a profile block that prepends the repo's module dir to
+        # $env:PSModulePath. With PSModulePath emptied, dot-sourcing the block
+        # must be sufficient for Get-Module -ListAvailable to find the module.
+        $tempProfile = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-psmodulepath-$([guid]::NewGuid().ToString('N')).ps1"
+        try {
+            $block = script:Get-EmittedProfileBlock
+            Set-Content -LiteralPath $tempProfile -Value $block -Encoding utf8
+
+            $probe = @"
+`$env:PSModulePath = ''
+. '$tempProfile'
+if (Get-Module -ListAvailable -Name MarkMichaelis.ScoopBucket) { 'PRESENT' } else { 'ABSENT' }
+"@
+            $result = pwsh -NoProfile -NoLogo -Command $probe
+            ($result -join "`n").Trim() | Should -Be 'PRESENT'
+        } finally {
+            Remove-Item -LiteralPath $tempProfile -ErrorAction Ignore
+        }
+    }
+}
+
+Describe 'Install-Module.ps1 install path removes a legacy junction and creates none (#375)' -Tag 'Light','Module' {
+    It 'removes a pre-existing self-pointing junction at the user module path and leaves no reparse point' {
+        # The pre-#375 installer junctioned the module into the user module
+        # path; on OneDrive Known-Folder-Move machines that path is synced and
+        # backup chokes on the reparse point. Running the installer must now
+        # clean up that legacy junction and must NOT recreate one. The test
+        # redirects the user module path via the internal
+        # $env:SCOOPBUCKET_USER_MODULE_PATH seam so it never touches the host.
+        $installScript = Join-Path (Split-Path -Parent $PSScriptRoot) 'module\Install-Module.ps1'
+        $source        = Join-Path (Split-Path -Parent $PSScriptRoot) 'module\MarkMichaelis.ScoopBucket'
+        $sandbox       = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-legacy-$([guid]::NewGuid().ToString('N'))"
+        $linkPath      = Join-Path $sandbox 'MarkMichaelis.ScoopBucket'
+        $savedEnv      = $env:SCOOPBUCKET_USER_MODULE_PATH
+        try {
+            New-Item -ItemType Directory -Path $sandbox | Out-Null
+            New-Item -ItemType Junction -Path $linkPath -Target $source | Out-Null
+            (Get-Item -LiteralPath $linkPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint | Should -Not -Be 0
+
+            $env:SCOOPBUCKET_USER_MODULE_PATH = $sandbox
+            & $installScript -SkipProfile -WarningAction SilentlyContinue | Out-Null
+
+            # The legacy junction must be gone, and no new reparse point may
+            # exist at that path.
+            if (Test-Path -LiteralPath $linkPath) {
+                (Get-Item -LiteralPath $linkPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint |
+                    Should -Be 0 -Because 'the installer must not recreate a junction under the user module path'
+            }
+            # The real source module must be untouched.
+            Test-Path -LiteralPath $source -PathType Container | Should -BeTrue
+        } finally {
+            $env:SCOOPBUCKET_USER_MODULE_PATH = $savedEnv
+            if (Test-Path -LiteralPath $linkPath) {
+                $i = Get-Item -LiteralPath $linkPath -Force
+                if (($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    [IO.Directory]::Delete($linkPath, $false)
+                }
             }
             Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction Ignore
         }

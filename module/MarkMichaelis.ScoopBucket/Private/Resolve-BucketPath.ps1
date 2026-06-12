@@ -2,8 +2,9 @@ function Resolve-BucketPath {
     <#
     .SYNOPSIS
         Internal: locate the repo's bucket/ directory from the loaded
-        module — robustly even when the module is loaded through a
-        symlink/junction (the common case after Install-Module.ps1).
+        module — robustly whether the module is loaded directly from the
+        repo's module/ folder via PSModulePath (the common case after
+        Install-Module.ps1) or through a legacy symlink/junction.
 
     .DESCRIPTION
         Resolution order:
