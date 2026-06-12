@@ -16,8 +16,10 @@ param(
     MarkMichaelis.ScoopBucket in $ProfilePath.
 
 .DESCRIPTION
-    Emits a v2 sentinel block that DEFERS Import-Module
-    MarkMichaelis.ScoopBucket until either:
+    Emits a v3 sentinel block that prepends the repo's module directory to
+    $env:PSModulePath (so the module is discoverable without a junction under
+    the user's -- often OneDrive-synced -- module path) and DEFERS
+    Import-Module MarkMichaelis.ScoopBucket until either:
       - Tab completion fires on Install-Package / Get-Package -Name
         (handled by a stub argument completer that triggers the import
         then re-runs completion), or
@@ -25,10 +27,10 @@ param(
         PowerShell's built-in module auto-loading from PSModulePath).
 
     The eager v1 block ran Import-Module on every shell start and
-    cost ~1 s. The v2 stub costs <10 ms because it only registers a
-    single argument completer.
+    cost ~1 s. The v2/v3 stub costs <10 ms because it only registers a
+    single argument completer (v3 adds a cheap PSModulePath prepend).
 
-    Idempotent: re-running this script replaces an existing v1 OR v2
+    Idempotent: re-running this script replaces an existing v1, v2, OR v3
     sentinel block in-place; never duplicates.
 
 .NOTES
@@ -37,23 +39,38 @@ param(
           if (-not (Get-Module ...)) { Import-Module ... }
       v2: # MarkMichaelis.ScoopBucket:Import:BEGIN v2
           Register-ArgumentCompleter ... { stub }
+      v3: # MarkMichaelis.ScoopBucket:Import:BEGIN v3
+          $env:PSModulePath prepend + Register-ArgumentCompleter stub
+          (replaces the old junction-under-PSModulePath install, #375)
 #>
 
 $ErrorActionPreference = 'Stop'
 
 $beginV1Marker  = '# MarkMichaelis.ScoopBucket:Import:BEGIN'
-$beginV2Marker  = '# MarkMichaelis.ScoopBucket:Import:BEGIN v2'
+$beginV3Marker  = '# MarkMichaelis.ScoopBucket:Import:BEGIN v3'
 $endMarker      = '# MarkMichaelis.ScoopBucket:Import:END'
+
+# The repo's module directory is this script's own folder (module/), the
+# parent of the MarkMichaelis.ScoopBucket module folder. Baking it into the
+# emitted block lets the profile register it on $env:PSModulePath instead of
+# junctioning the module under the user's (often OneDrive-synced) module path.
+$moduleDir        = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+$moduleDirLiteral = $moduleDir -replace "'", "''"
 
 $block = @"
 
-$beginV2Marker
+$beginV3Marker
 # Lazy-loads MarkMichaelis.ScoopBucket on first use to keep cold pwsh
-# start fast. Cmdlet calls (Install-Package / Get-Package) auto-load
-# the module via PSModulePath. The stub argument completer below
-# triggers the import on the very first Tab keypress and returns real
-# package-name suggestions in the same call.
+# start fast. The repo's module dir is added to PSModulePath so cmdlet
+# calls (Install-Package / Get-Package) auto-load the module; the stub
+# argument completer below triggers the import on the very first Tab
+# keypress and returns real package-name suggestions in the same call.
 # Re-run module/Install-Module.ps1 -SkipProfile to opt out.
+`$__msbModuleDir = '$moduleDirLiteral'
+if ((`$env:PSModulePath -split [System.IO.Path]::PathSeparator) -notcontains `$__msbModuleDir) {
+    `$env:PSModulePath = `$__msbModuleDir + [System.IO.Path]::PathSeparator + `$env:PSModulePath
+}
+Remove-Variable __msbModuleDir -ErrorAction SilentlyContinue
 if (-not `$Global:__MarkMichaelisScoopBucketStubInstalled) {
     `$Global:__MarkMichaelisScoopBucketStubInstalled = `$true
     `$__msbStub = {

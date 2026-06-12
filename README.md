@@ -141,26 +141,33 @@ completer that suggests every package declared in any bundle (prefix
 first, then substring), so you don't need to remember exact spelling.
 For the completer to fire on the *very first* Tab in a fresh
 PowerShell session, `module\Install-Module.ps1` writes an
-idempotent **lazy-import stub (v2)** into `$PROFILE.CurrentUserAllHosts`
-(pass `-SkipProfile` to suppress). The stub adds <10 ms to profile
-load -- it only registers an argument completer; the module itself
+idempotent **lazy-import stub (v3)** into `$PROFILE.CurrentUserAllHosts`
+(pass `-SkipProfile` to make it session-only). The block prepends this
+repo's `module` directory to `$env:PSModulePath` (so the module is
+discoverable -- no junction under your, often OneDrive-synced, user
+module path) and registers an argument completer; the module itself
 loads on the first Tab (or on the first cmdlet call, via PSModulePath
-auto-load), saving ~1 s of cold pwsh startup. Re-running
-`Install-Module.ps1` migrates the legacy v1 eager-`Import-Module`
-block in-place.
+auto-load), adding <10 ms to profile load and saving ~1 s of cold pwsh
+startup. Re-running `Install-Module.ps1` migrates the legacy v1/v2
+block in-place. It also removes any legacy `MarkMichaelis.ScoopBucket`
+junction a previous installer left under your user module path.
 
-**Per-directory-only usage (no global install):** if you only use this
-bucket from inside the repo and don't want *any* profile / PSModulePath
-footprint, run:
+Note: PSModulePath auto-load via the profile block does not apply to
+`-NoProfile` sessions; there, run
+`Import-Module .\module\MarkMichaelis.ScoopBucket` explicitly.
+
+**Per-directory-only usage (no profile footprint):** if you only use this
+bucket from inside the repo and don't want *any* profile / persisted
+PSModulePath footprint, run:
 
 ```powershell
 pwsh -File .\module\Install-Module.ps1 -Uninstall
 ```
 
 `-Uninstall` strips the sentinel block from `$PROFILE.CurrentUserAllHosts`
-and removes the `MarkMichaelis.ScoopBucket` junction from your user
-module path (only if the junction points back to this repo). Then load
-the module on demand:
+and removes any legacy `MarkMichaelis.ScoopBucket` junction from your user
+module path (only if it points back to this repo). Then load the module on
+demand:
 
 ```powershell
 cd C:\path\to\scoop
