@@ -818,6 +818,24 @@ function Invoke-RegExportCommand {
     }
 }
 
+function ConvertTo-OneDriveRegistryProviderPath {
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SubKey
+    )
+
+    if ($SubKey -like 'HKCU\*') {
+        return ('Registry::HKEY_CURRENT_USER\{0}' -f $SubKey.Substring(5))
+    }
+
+    if ($SubKey -like 'HKLM\*') {
+        return ('Registry::HKEY_LOCAL_MACHINE\{0}' -f $SubKey.Substring(5))
+    }
+
+    throw "Unsupported registry hive in backup key '$SubKey'."
+}
+
 function Export-OneDriveRegistryBackup {
     [OutputType([string])]
     [CmdletBinding()]
@@ -843,6 +861,11 @@ function Export-OneDriveRegistryBackup {
     $index = 0
     foreach ($subKey in $subKeys) {
         $index++
+        $providerPath = ConvertTo-OneDriveRegistryProviderPath -SubKey $subKey
+        if (-not (Test-Path -LiteralPath $providerPath)) {
+            continue
+        }
+
         $scratch = Join-Path $dir ("backup-part-{0:00}.reg" -f $index)
         Invoke-RegExportCommand -SubKey $subKey -OutputPath $scratch
         $content = Get-Content -Path $scratch -Raw -ErrorAction Stop

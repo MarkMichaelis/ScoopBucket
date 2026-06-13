@@ -360,6 +360,47 @@ Describe 'Update-OneDriveAccountRegistry' -Tag 'Light' {
     }
 }
 
+Describe 'Export-OneDriveRegistryBackup' -Tag 'Light' {
+    It 'skips absent registry subkeys instead of failing the whole backup' {
+        $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("OneDriveRegistryBackup-{0}" -f [System.Guid]::NewGuid())
+        $outputPath = Join-Path $tempDir 'backup.reg'
+        $missingSubKey = 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions'
+        $exportedSubKeys = New-Object System.Collections.Generic.List[string]
+
+        New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path, $LiteralPath)
+
+            $candidate = if ($PSBoundParameters.ContainsKey('LiteralPath')) { $LiteralPath } else { $Path }
+            if ($candidate -eq $tempDir) { return $true }
+            if ($candidate -like '*\FolderDescriptions') { return $false }
+            if ($candidate -like 'Registry::*') { return $true }
+            return $true
+        }
+        Mock -CommandName Invoke-RegExportCommand -MockWith {
+            param($SubKey, $OutputPath)
+
+            if ($SubKey -eq $missingSubKey) {
+                throw 'missing registry key should have been skipped'
+            }
+
+            $exportedSubKeys.Add($SubKey) | Out-Null
+            Set-Content -Path $OutputPath -Value "Windows Registry Editor Version 5.00`r`n`r`n[$SubKey]`r`n" -Encoding ascii
+        }
+
+        try {
+            Export-OneDriveRegistryBackup -OutputPath $outputPath | Should -Be $outputPath
+
+            $exportedSubKeys | Should -Not -Contain $missingSubKey
+            (Get-Content -Path $outputPath -Raw) | Should -Match ([regex]::Escape('HKCU\Software\Microsoft\OneDrive\Accounts'))
+        }
+        finally {
+            Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 Describe 'Invoke-RobocopyMirror' -Tag 'Light' {
     It 'uses /E plus /ZB so cross-volume copies stay restartable without /MIR deletes' {
         $script:capturedRobocopyArgs = $null
@@ -470,7 +511,12 @@ Describe 'Get-OneDrivePlaceholderCount' -Tag 'Light' {
 
 Describe 'Export-OneDriveRegistryBackup' -Tag 'Light' {
     It 'exports each required registry subtree into the combined backup file' {
-        Mock -CommandName Test-Path -MockWith { $false }
+        Mock -CommandName Test-Path -MockWith {
+            param($Path, $LiteralPath)
+
+            $candidate = if ($PSBoundParameters.ContainsKey('LiteralPath')) { $LiteralPath } else { $Path }
+            return ($candidate -like 'Registry::*')
+        }
         Mock -CommandName New-Item
         Mock -CommandName Set-Content
         Mock -CommandName Add-Content
