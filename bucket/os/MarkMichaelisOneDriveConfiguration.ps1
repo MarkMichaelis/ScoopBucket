@@ -142,6 +142,17 @@
     Policy) and you intentionally want to preview or run the remaining
     per-user work from a non-elevated shell.
 
+.PARAMETER SkipOpenHandleCheck
+    Bypass the open-file-handle pre-flight. By default, before executing
+    the plan the script scans each move-source folder (via Sysinternals
+    'handle') for files held open by other applications -- those open
+    handles would otherwise abort the same-volume rename with a sharing
+    violation mid-run. When blockers are found, a real run stops before
+    any mutation and lists the offending processes; under -WhatIf they
+    are reported as a warning only. Pass this switch to skip the scan
+    (for example when 'handle' is unavailable or you have already closed
+    the apps).
+
 .EXAMPLE
     .\MarkMichaelisOneDriveConfiguration.ps1 -WhatIf
 
@@ -217,7 +228,8 @@ param(
     [string[]] $FreshSync = @(),
     [switch] $DeleteSourceOnSuccess,
     [switch] $ForceHydrate,
-    [switch] $SkipElevationCheck
+    [switch] $SkipElevationCheck,
+    [switch] $SkipOpenHandleCheck
 )
 
 $ErrorActionPreference = 'Stop'
@@ -2017,6 +2029,160 @@ function Write-OneDriveMigrationVerificationSummary {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Open-handle pre-flight: a same-volume folder move is an NTFS directory
+# rename, which fails with a sharing violation if any file under the source is
+# held open by another process (editor, Office, Snagit, an Explorer window, a
+# terminal parked in the tree). The migration stops OneDrive's own processes
+# but cannot close third-party apps, so a stray handle aborts the run mid-way.
+# These helpers enumerate the open handles BEFORE any mutation so the run can
+# fail fast with an actionable list.
+#
+# CRITICAL: detection must NOT open file contents. Opening a Files-On-Demand
+# cloud-only placeholder for read triggers hydration, defeating the script's
+# FOD gate. Sysinternals 'handle' enumerates the system handle table directly,
+# so it never touches file contents.
+# ---------------------------------------------------------------------------
+
+function Test-OneDrivePathUnderRoot {
+    <#
+    .SYNOPSIS
+        Return $true when $Path is the root itself or lives beneath it, using a
+        path-separator boundary so 'C:\x\OneDrive - Foo' is NOT treated as being
+        under 'C:\x\OneDrive'.
+    .OUTPUTS
+        System.Boolean
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Root
+    )
+    $normRoot = $Root.TrimEnd([char]'\', [char]'/')
+    $oic = [System.StringComparison]::OrdinalIgnoreCase
+    if ($Path.Equals($normRoot, $oic)) { return $true }
+    return $Path.StartsWith($normRoot + [char]'\', $oic) -or $Path.StartsWith($normRoot + [char]'/', $oic)
+}
+
+function ConvertFrom-OneDriveHandleOutput {
+    <#
+    .SYNOPSIS
+        Pure parser: turn raw Sysinternals 'handle' output lines into blocker
+        records for the file handles that fall under one of the given roots.
+    .DESCRIPTION
+        Each emitted record is the process name, PID, and object path of an open
+        File handle whose path is under one of $Root (boundary-correct match).
+        OneDrive's own helper processes are excluded by default because the
+        migration stops them itself; pass -IncludeOneDriveProcesses to keep them.
+    .OUTPUTS
+        PSCustomObject (Process, Id, Path) per blocking handle.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Line,
+        [Parameter(Mandatory)][string[]]$Root,
+        [switch]$IncludeOneDriveProcesses
+    )
+
+    $oneDriveProcessNames = @('OneDrive', 'OneDrive.Sync.Service', 'FileCoAuth')
+    $roots = @($Root | Where-Object { $_ })
+
+    foreach ($entry in $Line) {
+        if ($entry -notmatch '^(?<proc>\S+)\s+pid:\s*(?<pid>\d+)\s+type:\s*File\s+\w+:\s*(?<path>.+)$') {
+            continue
+        }
+        $procName = $Matches.proc -replace '\.exe$', ''
+        $path = $Matches.path.Trim()
+
+        $underRoot = $false
+        foreach ($r in $roots) {
+            if (Test-OneDrivePathUnderRoot -Path $path -Root $r) { $underRoot = $true; break }
+        }
+        if (-not $underRoot) { continue }
+        if (-not $IncludeOneDriveProcesses -and $oneDriveProcessNames -contains $procName) { continue }
+
+        [pscustomobject]@{
+            Process = $Matches.proc
+            Id      = [int]$Matches.pid
+            Path    = $path
+        }
+    }
+}
+
+function Resolve-OneDriveHandleExe {
+    <#
+    .SYNOPSIS
+        Resolve the Sysinternals 'handle' executable (handle64.exe / handle.exe)
+        on PATH, or $null when it is not installed.
+    .OUTPUTS
+        System.String (full path) or $null.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    $cmd = Get-Command 'handle64.exe', 'handle.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+
+function Invoke-OneDriveOpenHandleScan {
+    <#
+    .SYNOPSIS
+        Run Sysinternals 'handle' for a search term and return its raw output
+        lines. Isolated as a thin wrapper so unit tests can mock the external
+        call.
+    .OUTPUTS
+        System.String[]
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$HandleExe,
+        [Parameter(Mandatory)][string]$SearchTerm
+    )
+    & $HandleExe -accepteula -nobanner $SearchTerm 2>$null
+}
+
+function Get-OneDriveMoveBlocker {
+    <#
+    .SYNOPSIS
+        Report the processes holding open file handles under one of the OneDrive
+        move-source roots -- the handles that would block a same-volume move.
+    .DESCRIPTION
+        Resolves Sysinternals 'handle', scans the handle table for the shortest
+        common root (handle does a case-insensitive substring match, so one scan
+        covers nested roots), then re-filters every line against the full root
+        list with a path-separator boundary to avoid prefix bleed. Returns
+        nothing -- and warns -- when 'handle' is not installed, so a missing
+        optional tool degrades gracefully instead of aborting the migration.
+    .OUTPUTS
+        PSCustomObject (Process, Id, Path) per blocking handle.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string[]]$Root,
+        [switch]$IncludeOneDriveProcesses
+    )
+
+    $roots = @($Root | Where-Object { $_ })
+    if (-not $roots) { return }
+
+    $handleExe = Resolve-OneDriveHandleExe
+    if (-not $handleExe) {
+        Write-Warning "Open-handle pre-flight skipped: Sysinternals 'handle' was not found on PATH (install with 'scoop install sysinternals'). A file left open under a move source could still abort the migration mid-run. Pass -SkipOpenHandleCheck to silence this warning."
+        return
+    }
+
+    $searchTerm = ($roots | Sort-Object { $_.Length } | Select-Object -First 1)
+    $rawLines = @(Invoke-OneDriveOpenHandleScan -HandleExe $handleExe -SearchTerm $searchTerm |
+            Where-Object { $_ -match 'pid:' })
+
+    ConvertFrom-OneDriveHandleOutput -Line $rawLines -Root $roots -IncludeOneDriveProcesses:$IncludeOneDriveProcesses
+}
+
 function Invoke-MarkMichaelisOneDriveConfiguration {
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -2029,6 +2195,7 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         [switch]$DeleteSourceOnSuccess,
         [switch]$ForceHydrate,
         [switch]$SkipElevationCheck,
+        [switch]$SkipOpenHandleCheck,
         [bool]$IsElevated = $true
     )
 
@@ -2066,6 +2233,30 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         -FreshSyncAccounts $freshSyncAccounts -NoKfmRebind:$NoKfmRebind `
         -WhatIfMode:$WhatIfPreference -SkipElevationCheck:$SkipElevationCheck `
         -IsElevated $IsElevated
+
+    $moveSources = @(
+        $plan |
+            Where-Object { $_.Type -eq 'MoveAccount' -and -not $_.Skipped -and $_.CurrentValue } |
+            ForEach-Object { $_.CurrentValue }
+    ) | Select-Object -Unique
+
+    if (-not $SkipOpenHandleCheck -and $moveSources.Count -gt 0) {
+        $blockers = @(Get-OneDriveMoveBlocker -Root $moveSources)
+        if ($blockers.Count -gt 0) {
+            $procSummary = ($blockers |
+                    Group-Object Process |
+                    Sort-Object Name |
+                    ForEach-Object { '{0} (PID {1})' -f $_.Name, (($_.Group.Id | Sort-Object -Unique) -join ', ') }) -join '; '
+            Write-Warning ('Open file handles under {0} OneDrive move source(s) would block the same-volume folder rename:' -f $moveSources.Count)
+            foreach ($b in ($blockers | Sort-Object Process, Id, Path)) {
+                Write-Warning ('  {0} (PID {1}) -> {2}' -f $b.Process, $b.Id, $b.Path)
+            }
+            Write-Warning 'Close the listed applications (save your work first), or re-run with -SkipOpenHandleCheck to override.'
+            if (-not $WhatIfPreference) {
+                throw "Open file handles block the OneDrive folder move ($($blockers.Count) handle(s) across $($moveSources.Count) source(s)): $procSummary. Close them and re-run, or pass -SkipOpenHandleCheck to override. No changes were made."
+            }
+        }
+    }
 
     if ($WhatIfPreference) {
         return $plan
@@ -2142,5 +2333,5 @@ if ($MyInvocation.InvocationName -ne '.') {
         -KfmOwnerContains:$KfmOwnerContains -NoKfmRebind:$NoKfmRebind `
         -NoFolderDescriptionsWrite:$NoFolderDescriptionsWrite -FreshSync $FreshSync `
         -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -ForceHydrate:$ForceHydrate `
-        -SkipElevationCheck:$SkipElevationCheck -IsElevated $__mmodIsElevated
+        -SkipElevationCheck:$SkipElevationCheck -SkipOpenHandleCheck:$SkipOpenHandleCheck -IsElevated $__mmodIsElevated
 }
