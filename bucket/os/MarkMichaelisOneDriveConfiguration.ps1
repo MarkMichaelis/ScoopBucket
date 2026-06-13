@@ -142,17 +142,6 @@
     Policy) and you intentionally want to preview or run the remaining
     per-user work from a non-elevated shell.
 
-.PARAMETER SkipOpenHandleCheck
-    Bypass the open-file-handle pre-flight. By default, before executing
-    the plan the script scans each move-source folder (via Sysinternals
-    'handle') for files held open by other applications -- those open
-    handles would otherwise abort the same-volume rename with a sharing
-    violation mid-run. When blockers are found, a real run stops before
-    any mutation and lists the offending processes; under -WhatIf they
-    are reported as a warning only. Pass this switch to skip the scan
-    (for example when 'handle' is unavailable or you have already closed
-    the apps).
-
 .EXAMPLE
     .\MarkMichaelisOneDriveConfiguration.ps1 -WhatIf
 
@@ -228,8 +217,7 @@ param(
     [string[]] $FreshSync = @(),
     [switch] $DeleteSourceOnSuccess,
     [switch] $ForceHydrate,
-    [switch] $SkipElevationCheck,
-    [switch] $SkipOpenHandleCheck
+    [switch] $SkipElevationCheck
 )
 
 $ErrorActionPreference = 'Stop'
@@ -2172,7 +2160,7 @@ function Get-OneDriveMoveBlocker {
 
     $handleExe = Resolve-OneDriveHandleExe
     if (-not $handleExe) {
-        Write-Warning "Open-handle pre-flight skipped: Sysinternals 'handle' was not found on PATH (install with 'scoop install sysinternals'). A file left open under a move source could still abort the migration mid-run. Pass -SkipOpenHandleCheck to silence this warning."
+        Write-Warning "Open-handle pre-flight skipped: Sysinternals 'handle' was not found on PATH (install with 'scoop install sysinternals'). A file left open under a move source could still abort the migration mid-run."
         return
     }
 
@@ -2181,6 +2169,133 @@ function Get-OneDriveMoveBlocker {
             Where-Object { $_ -match 'pid:' })
 
     ConvertFrom-OneDriveHandleOutput -Line $rawLines -Root $roots -IncludeOneDriveProcesses:$IncludeOneDriveProcesses
+}
+
+function Get-OneDriveBlockerProcess {
+    <#
+    .SYNOPSIS
+        Collapse the per-handle blocker records into one record per process
+        instance (Process + Id), with the handle count and example paths.
+    .OUTPUTS
+        PSCustomObject (Process, Id, HandleCount, Paths) per blocking process.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][pscustomobject[]]$Blocker
+    )
+
+    $Blocker | Group-Object Id | ForEach-Object {
+        [pscustomobject]@{
+            Process     = $_.Group[0].Process
+            Id          = [int]$_.Name
+            HandleCount = $_.Count
+            Paths       = @($_.Group.Path)
+        }
+    } | Sort-Object Process, Id
+}
+
+function Write-OneDriveBlockerReport {
+    <#
+    .SYNOPSIS
+        Warn about the processes whose open handles would block a same-volume
+        OneDrive folder move, one line per process instance.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][pscustomobject[]]$Process
+    )
+
+    Write-Warning 'Open file handles under the OneDrive move source(s) would block the same-volume folder rename:'
+    foreach ($p in $Process) {
+        $example = $p.Paths | Select-Object -First 1
+        Write-Warning ('  {0} (PID {1}) holds {2} open handle(s), e.g. {3}' -f $p.Process, $p.Id, $p.HandleCount, $example)
+    }
+}
+
+function Read-OneDriveBlockerAction {
+    <#
+    .SYNOPSIS
+        Prompt the user for how to handle the open-handle blockers: stop the
+        listed processes, recheck after closing apps manually, or abort.
+    .OUTPUTS
+        System.String -- one of 'Kill', 'Recheck', 'Abort'.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][pscustomobject[]]$Process
+    )
+
+    $kill = [System.Management.Automation.Host.ChoiceDescription]::new(
+        '&Kill', 'Stop the listed process(es) now, then recheck.')
+    $recheck = [System.Management.Automation.Host.ChoiceDescription]::new(
+        '&Recheck', "Recheck after you've closed the apps yourself.")
+    $abort = [System.Management.Automation.Host.ChoiceDescription]::new(
+        '&Abort', 'Abort the migration without changing anything.')
+    $choices = [System.Management.Automation.Host.ChoiceDescription[]]@($kill, $recheck, $abort)
+
+    $caption = 'Open file handles block the OneDrive folder move'
+    $message = '{0} process(es) hold an open handle. Choose how to proceed:' -f @($Process).Count
+    $selection = $Host.UI.PromptForChoice($caption, $message, $choices, 1)
+
+    switch ($selection) {
+        0 { 'Kill' }
+        1 { 'Recheck' }
+        default { 'Abort' }
+    }
+}
+
+function Invoke-OneDriveMoveBlockerResolution {
+    <#
+    .SYNOPSIS
+        Pre-flight gate: loop until no process holds an open handle under a
+        OneDrive move source, prompting the user to stop the offending
+        processes or recheck, and aborting (throwing) on request.
+    .DESCRIPTION
+        On each pass the open handles are rescanned. When blockers remain the
+        user is prompted: Kill stops each process (guarded by ShouldProcess so
+        it honours -WhatIf / -Confirm), Recheck rescans after the user closes
+        apps manually, and Abort throws before any migration mutation. The loop
+        exits cleanly once the scan is clear.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string[]]$Root
+    )
+
+    $abortMessage = 'Open file handles still block the OneDrive folder move. Close the listed applications and re-run. No changes were made.'
+
+    while ($true) {
+        $blockers = @(Get-OneDriveMoveBlocker -Root $Root)
+        if ($blockers.Count -eq 0) { return }
+
+        $processes = @(Get-OneDriveBlockerProcess -Blocker $blockers)
+        Write-OneDriveBlockerReport -Process $processes
+
+        $action = Read-OneDriveBlockerAction -Process $processes
+        if ($action -eq 'Abort') {
+            throw $abortMessage
+        }
+        if ($action -eq 'Kill') {
+            $stopped = 0
+            foreach ($p in $processes) {
+                $target = '{0} (PID {1})' -f $p.Process, $p.Id
+                if ($PSCmdlet.ShouldProcess($target, 'Stop process holding open handle(s) under a OneDrive move source')) {
+                    try {
+                        Stop-Process -Id $p.Id -Force -ErrorAction Stop
+                        $stopped++
+                    } catch {
+                        Write-Warning ('Failed to stop {0}: {1}' -f $target, $_.Exception.Message)
+                    }
+                }
+            }
+            if ($stopped -eq 0) {
+                throw $abortMessage
+            }
+            Start-Sleep -Milliseconds 500
+        }
+    }
 }
 
 function Invoke-MarkMichaelisOneDriveConfiguration {
@@ -2195,7 +2310,6 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         [switch]$DeleteSourceOnSuccess,
         [switch]$ForceHydrate,
         [switch]$SkipElevationCheck,
-        [switch]$SkipOpenHandleCheck,
         [bool]$IsElevated = $true
     )
 
@@ -2240,21 +2354,15 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
             ForEach-Object { $_.CurrentValue }
     ) | Select-Object -Unique
 
-    if (-not $SkipOpenHandleCheck -and $moveSources.Count -gt 0) {
-        $blockers = @(Get-OneDriveMoveBlocker -Root $moveSources)
-        if ($blockers.Count -gt 0) {
-            $procSummary = ($blockers |
-                    Group-Object Process |
-                    Sort-Object Name |
-                    ForEach-Object { '{0} (PID {1})' -f $_.Name, (($_.Group.Id | Sort-Object -Unique) -join ', ') }) -join '; '
-            Write-Warning ('Open file handles under {0} OneDrive move source(s) would block the same-volume folder rename:' -f $moveSources.Count)
-            foreach ($b in ($blockers | Sort-Object Process, Id, Path)) {
-                Write-Warning ('  {0} (PID {1}) -> {2}' -f $b.Process, $b.Id, $b.Path)
+    if ($moveSources.Count -gt 0) {
+        if ($WhatIfPreference) {
+            $blockers = @(Get-OneDriveMoveBlocker -Root $moveSources)
+            if ($blockers.Count -gt 0) {
+                Write-OneDriveBlockerReport -Process (Get-OneDriveBlockerProcess -Blocker $blockers)
+                Write-Warning 'WhatIf: a real run would prompt to stop these processes or recheck before moving any folder.'
             }
-            Write-Warning 'Close the listed applications (save your work first), or re-run with -SkipOpenHandleCheck to override.'
-            if (-not $WhatIfPreference) {
-                throw "Open file handles block the OneDrive folder move ($($blockers.Count) handle(s) across $($moveSources.Count) source(s)): $procSummary. Close them and re-run, or pass -SkipOpenHandleCheck to override. No changes were made."
-            }
+        } else {
+            Invoke-OneDriveMoveBlockerResolution -Root $moveSources
         }
     }
 
@@ -2333,5 +2441,5 @@ if ($MyInvocation.InvocationName -ne '.') {
         -KfmOwnerContains:$KfmOwnerContains -NoKfmRebind:$NoKfmRebind `
         -NoFolderDescriptionsWrite:$NoFolderDescriptionsWrite -FreshSync $FreshSync `
         -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -ForceHydrate:$ForceHydrate `
-        -SkipElevationCheck:$SkipElevationCheck -SkipOpenHandleCheck:$SkipOpenHandleCheck -IsElevated $__mmodIsElevated
+        -SkipElevationCheck:$SkipElevationCheck -IsElevated $__mmodIsElevated
 }
