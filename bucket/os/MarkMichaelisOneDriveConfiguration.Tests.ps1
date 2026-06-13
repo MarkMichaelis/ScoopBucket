@@ -1969,49 +1969,130 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration open-handle pre-flight' -Tag
         Mock -CommandName Get-Process -MockWith { $null }
     }
 
-    It 'aborts before any mutation when an open handle blocks a planned move' {
-        Mock -CommandName Get-OneDriveMoveBlocker -MockWith {
-            @([pscustomobject]@{ Process = 'SnagitEditor.exe'; Id = 999; Path = 'C:\Users\me\OneDrive - IntelliTect\x.snagx' })
+    It 'aborts before any mutation when the user aborts at the blocker prompt' {
+        Mock -CommandName Invoke-OneDriveMoveBlockerResolution -MockWith {
+            throw 'Open file handles still block the OneDrive folder move. Close the listed applications and re-run. No changes were made.'
         }
 
         {
             Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false -WarningAction SilentlyContinue
-        } | Should -Throw -ExpectedMessage '*SnagitEditor.exe*'
+        } | Should -Throw -ExpectedMessage '*still block the OneDrive folder move*'
 
         Should -Invoke Stop-OneDriveExe -Times 0
         Should -Invoke Move-OneDriveFolder -Times 0
         Should -Invoke Export-OneDriveRegistryBackup -Times 0
     }
 
-    It 'proceeds with the migration when -SkipOpenHandleCheck is passed even if blockers exist' {
-        Mock -CommandName Get-OneDriveMoveBlocker -MockWith {
-            @([pscustomobject]@{ Process = 'SnagitEditor.exe'; Id = 999; Path = 'C:\Users\me\OneDrive - IntelliTect\x.snagx' })
-        }
-
-        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -SkipOpenHandleCheck -Confirm:$false
-
-        Should -Invoke Get-OneDriveMoveBlocker -Times 0
-        Should -Invoke Move-OneDriveFolder -Times 1
-    }
-
-    It 'proceeds normally when no blockers are found' {
-        Mock -CommandName Get-OneDriveMoveBlocker -MockWith { @() }
+    It 'proceeds with the migration after the blocker resolution returns clear' {
+        Mock -CommandName Invoke-OneDriveMoveBlockerResolution
 
         Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
 
-        Should -Invoke Get-OneDriveMoveBlocker -Times 1
+        Should -Invoke Invoke-OneDriveMoveBlockerResolution -Times 1
         Should -Invoke Move-OneDriveFolder -Times 1
     }
 
-    It 'reports blockers informationally under -WhatIf without throwing' {
+    It 'reports blockers informationally under -WhatIf without prompting or throwing' {
         Mock -CommandName Get-OneDriveMoveBlocker -MockWith {
             @([pscustomobject]@{ Process = 'SnagitEditor.exe'; Id = 999; Path = 'C:\Users\me\OneDrive - IntelliTect\x.snagx' })
         }
+        Mock -CommandName Invoke-OneDriveMoveBlockerResolution
 
         {
             Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -WhatIf -WarningAction SilentlyContinue
         } | Should -Not -Throw
 
+        Should -Invoke Invoke-OneDriveMoveBlockerResolution -Times 0
         Should -Invoke Move-OneDriveFolder -Times 0
+    }
+}
+
+Describe 'Invoke-OneDriveMoveBlockerResolution' -Tag 'Light' {
+    BeforeEach {
+        Mock -CommandName Stop-Process
+        Mock -CommandName Start-Sleep
+        Mock -CommandName Read-OneDriveBlockerAction -MockWith { 'Recheck' }
+    }
+
+    It 'returns without prompting when the first scan is clear' {
+        Mock -CommandName Get-OneDriveMoveBlocker -MockWith { @() }
+
+        Invoke-OneDriveMoveBlockerResolution -Root @('C:\Users\me\OneDrive - Foo') -Confirm:$false
+
+        Should -Invoke Read-OneDriveBlockerAction -Times 0
+        Should -Invoke Stop-Process -Times 0
+    }
+
+    It 'stops each blocking process when the user chooses Kill, then returns once clear' {
+        $script:scanCount = 0
+        Mock -CommandName Get-OneDriveMoveBlocker -MockWith {
+            $script:scanCount++
+            if ($script:scanCount -eq 1) {
+                @([pscustomobject]@{ Process = 'SnagitEditor.exe'; Id = 999; Path = 'C:\Users\me\OneDrive - Foo\a.snagx' })
+            } else { @() }
+        }
+        Mock -CommandName Read-OneDriveBlockerAction -MockWith { 'Kill' }
+
+        Invoke-OneDriveMoveBlockerResolution -Root @('C:\Users\me\OneDrive - Foo') -Confirm:$false -WarningAction SilentlyContinue
+
+        Should -Invoke Stop-Process -Times 1 -ParameterFilter { $Id -eq 999 }
+    }
+
+    It 'rescans without killing when the user chooses Recheck' {
+        $script:scanCount = 0
+        Mock -CommandName Get-OneDriveMoveBlocker -MockWith {
+            $script:scanCount++
+            if ($script:scanCount -eq 1) {
+                @([pscustomobject]@{ Process = 'Code.exe'; Id = 222; Path = 'C:\Users\me\OneDrive - Foo\notes.md' })
+            } else { @() }
+        }
+        Mock -CommandName Read-OneDriveBlockerAction -MockWith { 'Recheck' }
+
+        Invoke-OneDriveMoveBlockerResolution -Root @('C:\Users\me\OneDrive - Foo') -Confirm:$false -WarningAction SilentlyContinue
+
+        Should -Invoke Read-OneDriveBlockerAction -Times 1
+        Should -Invoke Stop-Process -Times 0
+    }
+
+    It 'throws when the user chooses Abort' {
+        Mock -CommandName Get-OneDriveMoveBlocker -MockWith {
+            @([pscustomobject]@{ Process = 'WINWORD.EXE'; Id = 333; Path = 'C:\Users\me\OneDrive - Foo\report.docx' })
+        }
+        Mock -CommandName Read-OneDriveBlockerAction -MockWith { 'Abort' }
+
+        {
+            Invoke-OneDriveMoveBlockerResolution -Root @('C:\Users\me\OneDrive - Foo') -Confirm:$false -WarningAction SilentlyContinue
+        } | Should -Throw -ExpectedMessage '*still block the OneDrive folder move*'
+
+        Should -Invoke Stop-Process -Times 0
+    }
+
+    It 'does not stop processes under -WhatIf (ShouldProcess gate)' {
+        Mock -CommandName Get-OneDriveMoveBlocker -MockWith {
+            @([pscustomobject]@{ Process = 'SnagitEditor.exe'; Id = 999; Path = 'C:\Users\me\OneDrive - Foo\a.snagx' })
+        }
+        Mock -CommandName Read-OneDriveBlockerAction -MockWith { 'Kill' }
+
+        {
+            Invoke-OneDriveMoveBlockerResolution -Root @('C:\Users\me\OneDrive - Foo') -WhatIf -WarningAction SilentlyContinue
+        } | Should -Throw
+
+        Should -Invoke Stop-Process -Times 0
+    }
+}
+
+Describe 'Get-OneDriveBlockerProcess' -Tag 'Light' {
+    It 'collapses per-handle records into one record per process with a handle count' {
+        $blockers = @(
+            [pscustomobject]@{ Process = 'SnagitEditor.exe'; Id = 999; Path = 'C:\Users\me\OneDrive - Foo\a.snagx' }
+            [pscustomobject]@{ Process = 'SnagitEditor.exe'; Id = 999; Path = 'C:\Users\me\OneDrive - Foo\b.snagx' }
+            [pscustomobject]@{ Process = 'Code.exe'; Id = 222; Path = 'C:\Users\me\OneDrive - Foo\notes.md' }
+        )
+
+        $result = @(Get-OneDriveBlockerProcess -Blocker $blockers)
+
+        $result.Count | Should -Be 2
+        ($result | Where-Object Id -eq 999).HandleCount | Should -Be 2
+        ($result | Where-Object Id -eq 222).HandleCount | Should -Be 1
     }
 }
