@@ -4,14 +4,20 @@ Standalone maintenance / remediation scripts for this repo and machine.
 
 ## Test-OneDriveMoveBlockers.ps1
 
-Pre-flight for `bucket\os\MarkMichaelisOneDriveConfiguration.ps1`. Lists the
-processes that currently hold open file handles under the OneDrive sync roots
-and would block a same-volume `Move-Item` (NTFS rename) during migration.
+Standalone diagnostic: lists the processes that currently hold open file
+handles under the OneDrive sync roots and would block a same-volume
+`Move-Item` (NTFS rename) of a OneDrive folder.
 
-The migration stops OneDrive.exe itself, but **not** other apps (editors,
-Office, Snagit, an Explorer window or terminal parked in the folder). A held
-handle makes the directory rename throw a sharing violation mid-run, so check
-first and close the offenders.
+> Originally the pre-flight for `MarkMichaelisOneDriveConfiguration.ps1`, which
+> was **abandoned and removed** (see
+> [#382](https://github.com/MarkMichaelis/ScoopBucket/issues/382)). This script
+> is kept because it is independently useful for diagnosing OneDrive
+> folder-move blockers.
+
+OneDrive.exe does not hold these handles -- other apps do (editors, Office,
+Snagit, an Explorer window or terminal parked in the folder). A held handle
+makes a directory rename throw a sharing violation mid-run, so check first and
+close the offenders.
 
 Uses Sysinternals `handle` (`scoop install sysinternals`). Run **elevated**
 for complete coverage.

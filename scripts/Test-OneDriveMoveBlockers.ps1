@@ -2,19 +2,20 @@
 
 <#
 .SYNOPSIS
-    Pre-flight check for MarkMichaelisOneDriveConfiguration.ps1: report the
-    processes that currently hold open file handles under the OneDrive sync
-    roots and would therefore block a same-volume Move-Item (NTFS rename).
+    Report the processes that currently hold open file handles under the
+    OneDrive sync roots and would therefore block a same-volume Move-Item
+    (NTFS rename) of a OneDrive folder. Standalone diagnostic; the
+    MarkMichaelisOneDriveConfiguration bundle it was built for was removed
+    (see https://github.com/MarkMichaelis/ScoopBucket/issues/382).
 
 .DESCRIPTION
     A same-volume directory rename fails with a sharing violation if any file
     or subdirectory under the source is open without FILE_SHARE_DELETE -- which
-    is how virtually every normal application opens files. The OneDrive
-    migration script stops OneDrive.exe itself, but it does NOT close other
-    apps (editors, Office, Snagit, an Explorer window parked in the folder,
-    a terminal cd'd into it). This script lists those blockers up front so you
-    can close them before running the migration, instead of discovering a lock
-    halfway through.
+    is how virtually every normal application opens files. Stopping OneDrive.exe
+    itself does NOT close other apps (editors, Office, Snagit, an Explorer
+    window parked in the folder, a terminal cd'd into it). This script lists
+    those blockers up front so you can close them before moving a OneDrive
+    folder, instead of discovering a lock halfway through.
 
     It uses Sysinternals handle.exe / handle64.exe (available on this machine
     via `scoop install sysinternals`) to enumerate open handles whose object
@@ -55,7 +56,10 @@
     Run elevated for complete coverage (handle can miss other users'/elevated
     processes' handles when run non-elevated).
 
-    Companion to bucket\os\MarkMichaelisOneDriveConfiguration.ps1.
+    Originally a companion to the MarkMichaelisOneDriveConfiguration.ps1
+    bundle, which was abandoned and removed
+    (https://github.com/MarkMichaelis/ScoopBucket/issues/382). Kept as a
+    standalone OneDrive folder-move blocker diagnostic.
 #>
 
 [CmdletBinding()]
