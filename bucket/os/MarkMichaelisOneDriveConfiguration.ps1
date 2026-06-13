@@ -26,8 +26,9 @@
        HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir\<tid>
        for each Work tenant, and keeps GPOSetUpdateRing on the
        Production ring in HKLM.
-    4. For each discovered account, either migrates the existing
-       UserFolder to the canonical path or unlinks it for fresh-sync.
+    4. For each discovered account, migrates the existing UserFolder to
+       the canonical path when it can do so without hydrating cloud-only
+       placeholders.
     5. Rewrites Known Folder Move bindings (Documents / Pictures /
        Desktop in User Shell Folders, Shell Folders, and KNOWNFOLDERID
        GUIDs) so KFM follows the -KfmOwner account when its folder
@@ -42,17 +43,18 @@
       - Same-volume migrations use Move-Item (NTFS rename, preserves
         Cloud Files reparse points + ACLs).
       - Cross-volume migrations use robocopy /E /COPYALL /DCOPY:DAT /ZB
-        and normally refuse to hydrate cloud-only placeholders unless
-        you explicitly pass -ForceHydrate.
-      - Rewrites KFM bindings when the owning account moves or needs an
-        explicit rebind.
+        and skip moves with cloud-only placeholders so cloud-only files
+        stay cloud-only.
+      - Rewrites KFM bindings when the owning account moves. If KFM is
+        currently bound to a different account, the script warns and
+        leaves reconfiguration to the OneDrive UI.
       - Extensible per-app fix-up hook ($AppFixUps) ships empty; Snagit
         is deliberately NOT included because its CatalogFolder /
         ExternalOutputDir use the logical Documents path and follow KFM
         transparently.
 
-    Robocopy migration vs -FreshSync (the key cross-volume trade-off)
-    ----------------------------------------------------------------
+    Cross-volume migration and Files-On-Demand
+    ------------------------------------------
     The default action for an account whose UserFolder differs from the
     convention is to migrate the files in place:
 
@@ -60,87 +62,42 @@
                        reparse points + ACLs).
       - Cross-volume:  robocopy /E /COPYALL /DCOPY:DAT /ZB.
 
-    Cross-volume migration can materialize Files-On-Demand placeholders.
-    Use -FreshSync <slot-or-DisplayName>... as the escape hatch for
-    Business accounts whose local tree you would rather discard and
-    recreate from the OneDrive UI at the new canonical path.
+    Cross-volume migration can materialize Files-On-Demand placeholders,
+    so the script refuses those moves when cloud-only files are present.
+    Use the OneDrive UI to re-link the affected account or make the files
+    available offline before re-running.
 
     Why elevation is required
     -------------------------
     The bundle writes HKLM:\SOFTWARE\Policies\Microsoft\OneDrive
     (GPOSetUpdateRing), which requires Administrator. The script fails
-    fast with a clear message if launched without elevation. Pass
-    -SkipElevationCheck only if the HKLM policy is already pre-applied
-    out-of-band.
+    fast with a clear message if launched without elevation.
 
     Known Folder Move (KFM) model
     -----------------------------
     KFM redirects Documents, Desktop, and Pictures into a OneDrive
     sync folder. Only one Work account at a time can own KFM. The
-    -KfmOwner parameter identifies that canonical Business account and
-    KFM is then tracked or rebound to follow that account as needed.
-    Personal accounts are never eligible to own KFM.
+    -KfmOwner parameter identifies that canonical Business account by
+    case-insensitive substring match. KFM is tracked when that account
+    moves. Personal accounts are never eligible to own KFM.
 
 .PARAMETER RootDir
     Parent directory for all OneDrive sync roots. Default: C:\OneDrive.
     When $RootDir is on a different volume than $env:USERPROFILE,
-    file-copy migrations can hydrate Files-On-Demand placeholders.
-    Combine with -FreshSync to opt selected cloud-only accounts out of
-    that hydration, or pass -ForceHydrate to proceed intentionally.
+    file-copy migrations that would hydrate Files-On-Demand placeholders
+    are skipped for safety.
 
 .PARAMETER KfmOwner
     DisplayName identifying the canonical KFM owner - the Business
     account whose Documents / Desktop / Pictures KFM should follow.
-    Default: 'Michaelis'. By default the match is case-insensitive
-    equality against Business* registry-slot DisplayName values. Use
-    -KfmOwnerContains to opt into case-insensitive substring matching.
-    Only the first Business match wins; Personal accounts are never
-    eligible.
-
-.PARAMETER KfmOwnerContains
-    Treat -KfmOwner as a case-insensitive substring match instead of an
-    exact DisplayName match.
-
-.PARAMETER NoKfmRebind
-    Suppress the warning + automatic rebind that fires when KFM is
-    currently bound to a different account than -KfmOwner. The bundle
-    still applies policy and migrates files; only the KFM rewrite is
-    skipped.
-
-.PARAMETER NoFolderDescriptionsWrite
-    Skip the undocumented writes under
-    Explorer\FolderDescriptions\<GUID> and rely only on User Shell
-    Folders updates when rebinding KFM.
-
-.PARAMETER FreshSync
-    Names (slot names such as 'Business2' or DisplayNames such as
-    'IntelliTect') of Business* accounts that should be unlinked
-    instead of file-copy-migrated. For each match, the bundle stops
-    OneDrive, deletes the per-account registry key
-    (HKCU:\Software\Microsoft\OneDrive\Accounts\<Slot>), and renames
-    the local UserFolder to <UserFolder>.freshsync-<yyyyMMdd-HHmmss> by
-    default so a recovery copy is preserved. Pass -DeleteSourceOnSuccess to
-    remove that recovery folder after a successful fresh-sync unlink.
-    The user must re-sign-in via the OneDrive UI; the DefaultRootDir
-    policy still directs the new sync root to the canonical location,
-    and OneDrive recreates cloud-only placeholders without a bulk
-    download. Personal accounts are not supported.
+    Default: 'Michaelis'. The match is case-insensitive substring
+    matching against Business* registry-slot DisplayName values. Only
+    the first Business match wins; Personal accounts are never eligible.
 
 .PARAMETER DeleteSourceOnSuccess
-    For fresh-sync accounts, delete the recovery folder after a
-    successful unlink instead of keeping the renamed
-    .freshsync-<yyyyMMdd-HHmmss> backup.
-
-.PARAMETER ForceHydrate
-    Allow cross-volume moves that would hydrate cloud-only
-    Files-On-Demand placeholders. Without this switch, such moves are
-    skipped for safety and reported in the plan.
-
-.PARAMETER SkipElevationCheck
-    Bypass the top-level Administrator pre-flight. Use only when the
-    HKLM OneDrive policy is already applied (for example by Group
-    Policy) and you intentionally want to preview or run the remaining
-    per-user work from a non-elevated shell.
+    Delete verified cross-volume .migrated-* recovery folders during the
+    run. By default those folders are preserved and the final summary
+    prints exact Remove-Item cleanup commands.
 
 .EXAMPLE
     .\MarkMichaelisOneDriveConfiguration.ps1 -WhatIf
@@ -150,17 +107,10 @@
     Shows every move + registry write without changing any state.
 
 .EXAMPLE
-    .\MarkMichaelisOneDriveConfiguration.ps1 -RootDir D:\OneDrive -FreshSync Business2 -WhatIf
+    .\MarkMichaelisOneDriveConfiguration.ps1 -RootDir D:\OneDrive -WhatIf
 
-    Cross-volume move to D:; Business2 is unlinked instead of copied so
-    cloud-only content is recreated by OneDrive after re-sign-in rather
-    than hydrated during migration.
-
-.EXAMPLE
-    .\MarkMichaelisOneDriveConfiguration.ps1 -NoKfmRebind
-
-    Apply policy + migrate files but leave current KFM bindings alone.
-    Useful when KFM is intentionally bound to a non-default account.
+    Cross-volume preview to D:. Moves with cloud-only placeholders are
+    skipped and reported so those files stay cloud-only.
 
 .EXAMPLE
     .\MarkMichaelisOneDriveConfiguration.ps1
@@ -172,15 +122,13 @@
 .NOTES
     Requires an elevated PowerShell session (Run as Administrator):
     the bundle writes HKLM:\SOFTWARE\Policies\Microsoft\OneDrive
-    (GPOSetUpdateRing). Pass -SkipElevationCheck only if the HKLM
-    policy is already pre-applied via Group Policy.
+    (GPOSetUpdateRing).
 
-    Restarts OneDrive.exe whenever a migration or fresh-sync unlink
-    occurs (stops with /shutdown, restarts with /background).
+    Restarts OneDrive.exe whenever a migration occurs (stops with
+    /shutdown, restarts with /background).
 
     Cross-volume migrations can hydrate Files-On-Demand placeholders
-    unless -FreshSync is used to unlink the affected account or
-    -ForceHydrate is explicitly accepted.
+    and are skipped when cloud-only files are present.
 
     OneDrive's HKCU:\Software\Microsoft\OneDrive\Accounts\<slot>\UserFolder
     and the various ScopeIdToMountPointPathCache* values are internal
@@ -211,13 +159,7 @@ Confirmed policy shape baked into this script:
 param(
     [string] $RootDir   = 'C:\OneDrive',
     [string] $KfmOwner  = 'Michaelis',
-    [switch] $KfmOwnerContains,
-    [switch] $NoKfmRebind,
-    [switch] $NoFolderDescriptionsWrite,
-    [string[]] $FreshSync = @(),
-    [switch] $DeleteSourceOnSuccess,
-    [switch] $ForceHydrate,
-    [switch] $SkipElevationCheck
+    [switch] $DeleteSourceOnSuccess
 )
 
 $ErrorActionPreference = 'Stop'
@@ -260,8 +202,8 @@ if ($MyInvocation.InvocationName -ne '.') {
     } else {
         Test-IsElevated
     }
-    if (-not $SkipElevationCheck -and -not $__mmodIsElevated) {
-        throw "MarkMichaelisOneDriveConfiguration must be run from an elevated PowerShell session (HKLM policy write requires admin). Re-launch with Run as Administrator, or pass -SkipElevationCheck if you have pre-applied HKLM\SOFTWARE\Policies\Microsoft\OneDrive via Group Policy."
+    if (-not $__mmodIsElevated) {
+        throw "MarkMichaelisOneDriveConfiguration must be run from an elevated PowerShell session (HKLM policy write requires admin). Re-launch with Run as Administrator."
     }
 }
 
@@ -349,19 +291,14 @@ function Test-KfmOwnerMatch {
     [CmdletBinding()]
     param(
         [AllowNull()][string]$DisplayName,
-        [Parameter(Mandatory)][string]$KfmOwner,
-        [switch]$KfmOwnerContains
+        [Parameter(Mandatory)][string]$KfmOwner
     )
 
     if ([string]::IsNullOrWhiteSpace($DisplayName)) {
         return $false
     }
 
-    if ($KfmOwnerContains) {
-        return ($DisplayName.IndexOf($KfmOwner, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)
-    }
-
-    return [string]::Equals($DisplayName, $KfmOwner, [System.StringComparison]::OrdinalIgnoreCase)
+    return ($DisplayName.IndexOf($KfmOwner, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)
 }
 
 function Resolve-KfmRebindAction {
@@ -375,12 +312,8 @@ function Resolve-KfmRebindAction {
           - $KfmCurrentPath: current resolved Documents/Pictures path (or
             $null if KFM is not active).
           - $KfmOwner: the desired owner DisplayName.
-          - $KfmOwnerContains: switch -- use substring matching instead of
-            exact DisplayName equality.
-          - $NoKfmRebind: switch -- if set, suppress rebind.
-
         Outputs an object with:
-          - Action: 'None' | 'Track' | 'Rebind' | 'WarnOnly' | 'OwnerNotSignedIn'
+          - Action: 'None' | 'Track' | 'WarnOnly' | 'OwnerNotSignedIn'
           - OwnerAccount: the resolved account record, or $null
           - Reason: human-readable explanation
     #>
@@ -389,9 +322,7 @@ function Resolve-KfmRebindAction {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Accounts,
         [AllowNull()][string]$KfmCurrentPath,
-        [Parameter(Mandatory)][string]$KfmOwner,
-        [switch]$KfmOwnerContains,
-        [switch]$NoKfmRebind
+        [Parameter(Mandatory)][string]$KfmOwner
     )
 
     if (-not $KfmCurrentPath) {
@@ -403,7 +334,7 @@ function Resolve-KfmRebindAction {
     }
 
     $ownerAcct = $Accounts |
-        Where-Object { $_.AccountType -ne 'Personal' -and (Test-KfmOwnerMatch -DisplayName $_.DisplayName -KfmOwner $KfmOwner -KfmOwnerContains:$KfmOwnerContains) } |
+        Where-Object { $_.AccountType -ne 'Personal' -and (Test-KfmOwnerMatch -DisplayName $_.DisplayName -KfmOwner $KfmOwner) } |
         Select-Object -First 1
 
     if (-not $ownerAcct) {
@@ -415,7 +346,7 @@ function Resolve-KfmRebindAction {
     }
 
     $ownerFolder = $ownerAcct.UserFolder
-    if ($ownerFolder -and $KfmCurrentPath.StartsWith($ownerFolder, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($ownerFolder -and (Test-OneDrivePathUnderRoot -Path $KfmCurrentPath -Root $ownerFolder)) {
         return [pscustomobject]@{
             Action       = 'Track'
             OwnerAccount = $ownerAcct
@@ -423,87 +354,16 @@ function Resolve-KfmRebindAction {
         }
     }
 
-    if ($NoKfmRebind) {
-        return [pscustomobject]@{
-            Action       = 'WarnOnly'
-            OwnerAccount = $ownerAcct
-            Reason       = "KFM is bound to a non-owner account ('$KfmCurrentPath') but -NoKfmRebind was supplied; leaving it alone."
-        }
-    }
-
     return [pscustomobject]@{
-        Action       = 'Rebind'
+        Action       = 'WarnOnly'
         OwnerAccount = $ownerAcct
-        Reason       = "KFM is bound to a non-owner path ('$KfmCurrentPath'); rebind to $($ownerAcct.DisplayName)."
+        Reason       = "KFM is bound to a non-owner path ('$KfmCurrentPath'); leaving it for the OneDrive UI to reconfigure."
     }
-}
-
-function Resolve-FreshSyncAccounts {
-    <#
-    .SYNOPSIS
-        Match -FreshSync entries against discovered accounts and return
-        the resolved account records.
-    .DESCRIPTION
-        Pure function. Each entry in $FreshSync is matched
-        case-insensitively against either the Slot name (e.g.
-        'Business2') or the DisplayName (e.g. 'IntelliTect') of a
-        Business* account. Personal accounts are out of scope and
-        cause a throw. Unmatched entries also cause a throw.
-
-        Returns an array of the matched account objects (possibly
-        empty when $FreshSync is empty).
-    #>
-    [OutputType([object[]])]
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Accounts,
-        [AllowEmptyCollection()][AllowNull()][string[]]$FreshSync
-    )
-
-    if (-not $FreshSync -or $FreshSync.Count -eq 0) {
-        return @()
-    }
-
-    $matched = New-Object System.Collections.Generic.List[object]
-    foreach ($entry in $FreshSync) {
-        if ([string]::IsNullOrWhiteSpace($entry)) { continue }
-        $hit = $Accounts | Where-Object {
-            ($_.Slot -and [string]::Equals($_.Slot, $entry, [System.StringComparison]::OrdinalIgnoreCase)) -or
-            ($_.DisplayName -and [string]::Equals($_.DisplayName, $entry, [System.StringComparison]::OrdinalIgnoreCase))
-        } | Select-Object -First 1
-
-        if (-not $hit) {
-            throw "FreshSync entry '$entry' does not match any discovered OneDrive account (by Slot or DisplayName)."
-        }
-        if ($hit.AccountType -ne 'Business') {
-            throw "FreshSync entry '$entry' matched a $($hit.AccountType) account (Slot=$($hit.Slot)); only Business accounts are supported."
-        }
-        if (-not ($matched | Where-Object { $_.Slot -eq $hit.Slot })) {
-            $matched.Add($hit) | Out-Null
-        }
-    }
-    return $matched.ToArray()
 }
 
 # ---------------------------------------------------------------------------
 # Side-effectful helpers (registry + filesystem). Each wraps every
 # state-changing call in $PSCmdlet.ShouldProcess so -WhatIf works.
-# ---------------------------------------------------------------------------# ---------------------------------------------------------------------------
-# Side-effectful helpers (registry + filesystem). Each wraps every
-# state-changing call in $PSCmdlet.ShouldProcess so -WhatIf works.
-# ---------------------------------------------------------------------------
-
-$KnownFolderGuids = @(
-    '{F42EE2D3-909F-4907-8871-4C22FC0BF756}',  # Documents
-    '{0DDD015D-B06C-45D5-8C4C-F59713854639}',  # Pictures
-    '{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}',  # Desktop
-    '{4BD8D571-6D19-48D3-BE97-422220080E43}',  # Music
-    '{18989B1D-99B5-455B-841C-AB7C74E4DDFC}',  # Videos
-    '{374DE290-123F-4565-9164-39C4925E467B}',  # Downloads
-    '{1777F761-68AD-4D8A-87BD-30B759FA33DD}',  # Favorites
-    '{B7BEDE81-DF94-4682-A7D8-57A52620B86F}'   # Screenshots
-)
-
 function Get-OneDriveAccountList {
     <#
     .SYNOPSIS
@@ -597,74 +457,15 @@ function Resolve-KfmCurrentOwnerRoot {
     return $match
 }
 
-function Set-OneDrivePolicy {
-    <#
-    .SYNOPSIS
-        Apply tenant-redirection policy (DefaultRootDir per Work tenant)
-        and the GPOSetUpdateRing policy in HKLM.
-    .DESCRIPTION
-        Policy shape verified against https://learn.microsoft.com/sharepoint/use-group-policy:
-          - DefaultRootDir is a per-user HKCU policy whose value name is the
-            tenant GUID and whose value data is the final tenant folder.
-          - GPOSetUpdateRing is a machine HKLM policy. Value 5 selects the
-            Production ring (standard update cadence).
-    #>
-    [CmdletBinding(SupportsShouldProcess)]
-    param(
-        [Parameter(Mandatory)][object[]]$Accounts,
-        [Parameter(Mandatory)][string]$RootDir
-    )
-
-    $hkcuPolicy = 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive'
-    $hkcuDefRoot = "$hkcuPolicy\DefaultRootDir"
-    foreach ($key in @($hkcuPolicy, $hkcuDefRoot)) {
-        if (-not (Test-Path $key)) {
-            if ($PSCmdlet.ShouldProcess($key, 'Create registry key')) {
-                New-Item -Path $key -Force | Out-Null
-            }
-        }
-    }
-
-    foreach ($acct in $Accounts) {
-        if ($acct.AccountType -ne 'Business') { continue }
-        if (-not $acct.TenantId)              { continue }
-        if (-not $acct.DisplayName)           { continue }
-        $target = Join-Path $RootDir ("OneDrive - {0}" -f $acct.DisplayName)
-        $existing = (Get-ItemProperty -Path $hkcuDefRoot -Name $acct.TenantId -ErrorAction SilentlyContinue).$($acct.TenantId)
-        if ($existing -eq $target) { continue }
-        if ($PSCmdlet.ShouldProcess("$hkcuDefRoot\$($acct.TenantId)", "Set DefaultRootDir -> $target")) {
-            Set-ItemProperty -Path $hkcuDefRoot -Name $acct.TenantId -Value $target -Type String
-        }
-    }
-
-    $hklmPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive'
-    if (-not (Test-Path $hklmPolicy)) {
-        if ($PSCmdlet.ShouldProcess($hklmPolicy, 'Create registry key')) {
-            try { New-Item -Path $hklmPolicy -Force | Out-Null } catch {
-                Write-Warning "Could not create $hklmPolicy (requires elevation): $($_.Exception.Message)"
-                return
-            }
-        }
-    }
-    $existingRing = (Get-ItemProperty -Path $hklmPolicy -Name 'GPOSetUpdateRing' -ErrorAction SilentlyContinue).GPOSetUpdateRing
-    if ($existingRing -ne 5) {
-        if ($PSCmdlet.ShouldProcess("$hklmPolicy\GPOSetUpdateRing", 'Set DWord = 5 (Production ring; standard update cadence)')) {
-            try {
-                Set-ItemProperty -Path $hklmPolicy -Name 'GPOSetUpdateRing' -Value 5 -Type DWord
-            } catch {
-                Write-Warning "Could not set GPOSetUpdateRing (requires elevation): $($_.Exception.Message)"
-            }
-        }
-    }
-}
-
 function Stop-OneDriveExe {
     [CmdletBinding(SupportsShouldProcess)]
     param()
     $exe = Join-Path $env:LOCALAPPDATA 'Microsoft\OneDrive\OneDrive.exe'
     if (-not (Test-Path $exe)) { $exe = 'OneDrive.exe' }
     if ($PSCmdlet.ShouldProcess('OneDrive.exe', '/shutdown')) {
-        try { & $exe /shutdown 2>$null } catch { }
+        try { & $exe /shutdown 2>$null } catch {
+            Write-Verbose "OneDrive shutdown command failed: $($_.Exception.Message)"
+        }
         # Best-effort wait: poll for process exit up to 10s.
         for ($i = 0; $i -lt 20; $i++) {
             if (-not (Get-Process -Name 'OneDrive' -ErrorAction SilentlyContinue)) { break }
@@ -693,8 +494,8 @@ function Invoke-RobocopyMirror {
         [Parameter(Mandatory)][string]$Destination
     )
 
-    $args = @($Source, $Destination, '/E','/COPYALL','/DCOPY:DAT','/ZB','/R:1','/W:1','/XJ','/NFL','/NDL')
-    & robocopy @args | Out-Null
+    $robocopyArgs = @($Source, $Destination, '/E','/COPYALL','/DCOPY:DAT','/ZB','/R:1','/W:1','/XJ','/NFL','/NDL')
+    & robocopy @robocopyArgs | Out-Null
     return $LASTEXITCODE
 }
 
@@ -719,8 +520,8 @@ function Move-OneDriveFolder {
         Move an account's UserFolder from $Source to $Destination,
         using NTFS rename when possible and robocopy /E /COPYALL
         otherwise. Cross-volume moves rename the original source to a
-        .migrated-* recovery folder and only delete it when explicitly
-        requested via -DeleteSourceOnSuccess.
+        .migrated-* recovery folder, verify the destination, then delete
+        the recovery folder.
     #>
     [OutputType([pscustomobject])]
     [CmdletBinding(SupportsShouldProcess)]
@@ -770,7 +571,7 @@ function Move-OneDriveFolder {
         return $result
     }
 
-    Write-Warning "Cross-volume migration uses robocopy /E /COPYALL first, then renames the original source to a .migrated-* recovery folder. Use -DeleteSourceOnSuccess only after you are comfortable auto-removing that recovery folder."
+    Write-Warning "Cross-volume migration uses robocopy /E /COPYALL first, then renames the original source to a .migrated-* recovery folder. The recovery folder is preserved unless -DeleteSourceOnSuccess is supplied."
     if ($PSCmdlet.ShouldProcess($Source, "robocopy /E /COPYALL -> $Destination (cross volume)")) {
         $rc = Invoke-RobocopyMirror -Source $Source -Destination $Destination
         # robocopy success: 0-7. >=8 is failure.
@@ -826,7 +627,7 @@ function Update-OneDriveAccountRegistry {
             if ($pName -like 'PS*') { continue }
             $cur = $props.$pName
             if ($cur -is [string] -and $Account.UserFolder -and
-                $cur.StartsWith($Account.UserFolder, [System.StringComparison]::OrdinalIgnoreCase)) {
+                (Test-OneDrivePathUnderRoot -Path $cur -Root $Account.UserFolder)) {
                 $new = $NewPath + $cur.Substring($Account.UserFolder.Length)
                 if ($PSCmdlet.ShouldProcess("$cacheKey\$pName", "Rewrite '$cur' -> '$new'")) {
                     Set-ItemProperty -Path $cacheKey -Name $pName -Value $new
@@ -858,7 +659,7 @@ function Get-OneDriveAccountRegistrySnapshot {
             if ($pName -like 'PS*') { continue }
             $cur = $props.$pName
             if ($cur -is [string] -and $Account.UserFolder -and
-                $cur.StartsWith($Account.UserFolder, [System.StringComparison]::OrdinalIgnoreCase)) {
+                (Test-OneDrivePathUnderRoot -Path $cur -Root $Account.UserFolder)) {
                 $snapshot.CacheValues["$cacheKey|$pName"] = $cur
             }
         }
@@ -899,8 +700,7 @@ function Update-KfmBindings {
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][string]$OldRoot,
-        [Parameter(Mandatory)][string]$NewRoot,
-        [switch]$NoFolderDescriptionsWrite
+        [Parameter(Mandatory)][string]$NewRoot
     )
 
     foreach ($leaf in 'User Shell Folders','Shell Folders') {
@@ -911,46 +711,26 @@ function Update-KfmBindings {
         foreach ($pName in $props.PSObject.Properties.Name) {
             if ($pName -like 'PS*') { continue }
             $cur = [string]$props.$pName
-            if ($cur.StartsWith($OldRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            if (Test-OneDrivePathUnderRoot -Path $cur -Root $OldRoot) {
                 $new = $NewRoot + $cur.Substring($OldRoot.Length)
                 if ($PSCmdlet.ShouldProcess("$key\$pName", "Rewrite '$cur' -> '$new'")) {
                     # User Shell Folders uses ExpandString templates; Shell
                     # Folders is plain String. Preserve whichever type the
                     # value already had.
-                    $kind = (Get-Item -LiteralPath $key).GetValueKind($pName)
+                    $keyItem = Get-Item -LiteralPath $key
+                    if ($keyItem.PSObject.Methods.Name -contains 'GetValueKind') {
+                        $kind = $keyItem.GetValueKind($pName)
+                    } elseif (($keyItem.PSObject.Properties.Name -contains 'GetValueKind') -and ($keyItem.GetValueKind -is [scriptblock])) {
+                        $kind = & $keyItem.GetValueKind $pName
+                    } else {
+                        $kind = if ($leaf -eq 'User Shell Folders') { 'ExpandString' } else { 'String' }
+                    }
                     Set-ItemProperty -Path $key -Name $pName -Value $new -Type $kind
                 }
             }
         }
     }
 
-    if ($NoFolderDescriptionsWrite) {
-        return
-    }
-
-    # WARNING: FolderDescriptions\<GUID>\RelativePath and ParsingName are
-    # Windows shell internals, not a Microsoft-documented KFM migration
-    # interface. The supported KFM mechanism is the KFMSilentOptIn policy +
-    # standard User Shell Folders updates. We write here empirically because
-    # some apps (notably Office) cache these for known-folder resolution and
-    # stale entries cause silent breakage. If a future Windows release removes
-    # or relocates these values, drop this block and rely solely on User Shell
-    # Folders.
-    foreach ($guid in $KnownFolderGuids) {
-        $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\$guid"
-        if (-not (Test-Path $key)) { continue }
-        $props = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
-        if (-not $props) { continue }
-        foreach ($pName in 'RelativePath','ParsingName') {
-            $cur = [string]$props.$pName
-            if ($cur -and $cur.StartsWith($OldRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-                $new = $NewRoot + $cur.Substring($OldRoot.Length)
-                if ($PSCmdlet.ShouldProcess("$key\$pName", "Rewrite '$cur' -> '$new'")) {
-                    Set-ItemProperty -Path $key -Name $pName -Value $new
-                }
-            }
-        }
-    }
 }
 
 # ---------------------------------------------------------------------------
@@ -968,50 +748,6 @@ $AppFixUps = @{
     # 'HKCU:\Software\SomeVendor\SomeApp' = @{
     #     'SomeValueName' = { param($old, $new) $current = (Get-ItemProperty $key $name).$name; ... }
     # }
-}
-
-function Remove-OneDriveAccountLink {
-    <#
-    .SYNOPSIS
-        Unlink a OneDrive Business account: delete its registry slot
-        and preserve the local UserFolder as a fresh-sync recovery copy
-        so the user can re-sign-in fresh.
-    .DESCRIPTION
-        Used by -FreshSync to avoid bulk-hydrating Files-On-Demand
-        placeholders during a cross-volume migration. Caller is
-        responsible for stopping OneDrive.exe first. By default the
-        local UserFolder is renamed to <UserFolder>.freshsync-<timestamp>
-        so the user retains a recovery copy. Pass -DeleteRecoveryFolder
-        to remove that renamed recovery folder after the unlink.
-    #>
-    [OutputType([string])]
-    [CmdletBinding(SupportsShouldProcess)]
-    param(
-        [Parameter(Mandatory)][pscustomobject]$Account,
-        [switch]$DeleteRecoveryFolder
-    )
-    $regPath = $Account.RegistryPath
-    if ($regPath -and (Test-Path $regPath)) {
-        if ($PSCmdlet.ShouldProcess($regPath, "Remove OneDrive account registry key (fresh-sync)")) {
-            Remove-Item -LiteralPath $regPath -Recurse -Force
-        }
-    }
-    $folder = $Account.UserFolder
-    $recoveryPath = $null
-    if ($folder -and (Test-Path $folder)) {
-        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-        $recoveryPath = "$folder.freshsync-$timestamp"
-        if ($PSCmdlet.ShouldProcess($folder, "Rename local OneDrive sync folder -> $recoveryPath (fresh-sync recovery)")) {
-            Move-Item -LiteralPath $folder -Destination $recoveryPath
-        }
-        if ($DeleteRecoveryFolder) {
-            if ($PSCmdlet.ShouldProcess($recoveryPath, 'Remove-Item -Recurse (fresh-sync recovery cleanup)')) {
-                Remove-Item -LiteralPath $recoveryPath -Recurse -Force
-                $recoveryPath = $null
-            }
-        }
-    }
-    return $recoveryPath
 }
 
 function Invoke-AppFixUps {
@@ -1180,7 +916,7 @@ function Get-OneDriveSharePointSiteList {
         foreach ($pathValue in $paths) {
             $leafName = Split-Path -Leaf $pathValue
             if ([string]::IsNullOrWhiteSpace($leafName)) { continue }
-            $desiredPath = Join-Path (Join-Path $RootDir $account.DisplayName) $leafName
+            $desiredPath = [System.IO.Path]::Combine($RootDir, $account.DisplayName, $leafName)
             $sites.Add([pscustomobject]@{
                 OwnerAccount = $account
                 CurrentPath  = $pathValue
@@ -1217,7 +953,7 @@ function Update-OneDriveSharePointCache {
 
     foreach ($root in $candidateRoots) {
         foreach ($entry in @(Get-OneDriveRegistryStringValuesUnderPath -Path $root)) {
-            if ($entry.Value.StartsWith($OldPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            if (Test-OneDrivePathUnderRoot -Path $entry.Value -Root $OldPath) {
                 $newValue = $NewPath + $entry.Value.Substring($OldPath.Length)
                 if ($PSCmdlet.ShouldProcess("$($entry.KeyPath)\$($entry.ValueName)", "Rewrite '$($entry.Value)' -> '$newValue'")) {
                     Set-ItemProperty -Path $entry.KeyPath -Name $entry.ValueName -Value $newValue -Type String
@@ -1252,16 +988,15 @@ function Invoke-OneDriveMigrationVerification {
 
     $checks = New-Object System.Collections.Generic.List[object]
     $accounts = @(Get-OneDriveAccountList)
-    $freshSyncSlots = @($Plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.FreshSync } | ForEach-Object { $_.Account.Slot })
     $rootDirItem = $Plan | Where-Object { $_.Type -eq 'CreateDir' -and -not $_.Account } | Select-Object -First 1
     $rootDir = if ($rootDirItem) { $rootDirItem.DesiredValue } else { $null }
 
     $accountFailures = New-Object System.Collections.Generic.List[string]
-    $verifiableAccounts = @($accounts | Where-Object { $_.AccountType -in @('Business','Personal') -and ($freshSyncSlots -notcontains $_.Slot) })
+    $verifiableAccounts = @($accounts | Where-Object { $_.AccountType -in @('Business','Personal') })
     if (-not $rootDir) {
         $checks.Add((New-OneDriveVerificationCheck -Name 'A. Account UserFolder registry targets' -Status 'Skip' -Detail 'RootDir could not be inferred from the plan.')) | Out-Null
     } elseif ($verifiableAccounts.Count -eq 0) {
-        $checks.Add((New-OneDriveVerificationCheck -Name 'A. Account UserFolder registry targets' -Status 'Skip' -Detail 'No non-FreshSync accounts require verification.')) | Out-Null
+        $checks.Add((New-OneDriveVerificationCheck -Name 'A. Account UserFolder registry targets' -Status 'Skip' -Detail 'No OneDrive accounts require verification.')) | Out-Null
     } else {
         foreach ($account in $verifiableAccounts) {
             $desired = Get-OneDriveTargetPath -Account $account -RootDir $rootDir
@@ -1285,10 +1020,10 @@ function Invoke-OneDriveMigrationVerification {
 
     $rewriteKfmItem = $Plan | Where-Object { $_.Type -eq 'RewriteKfm' } | Select-Object -First 1
     if (-not $rewriteKfmItem -or -not $rewriteKfmItem.DesiredValue) {
-        $checks.Add((New-OneDriveVerificationCheck -Name 'C. KFM owner binding' -Status 'Skip' -Detail 'KFM track/rebind verification was not applicable.')) | Out-Null
+        $checks.Add((New-OneDriveVerificationCheck -Name 'C. KFM owner binding' -Status 'Skip' -Detail 'KFM tracking verification was not applicable.')) | Out-Null
     } else {
         $documentsPath = (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders' -Name 'Personal' -ErrorAction SilentlyContinue).Personal
-        $kfmPass = $documentsPath -and $documentsPath.StartsWith($rewriteKfmItem.DesiredValue.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)
+        $kfmPass = $documentsPath -and (Test-OneDrivePathUnderRoot -Path $documentsPath -Root $rewriteKfmItem.DesiredValue)
         $checks.Add((New-OneDriveVerificationCheck -Name 'C. KFM owner binding' -Status $(if ($kfmPass) { 'Pass' } else { 'Fail' }) -Detail $(if ($kfmPass) { "Documents resolves under '$($rewriteKfmItem.DesiredValue)'." } else { "Documents path '$documentsPath' does not resolve under '$($rewriteKfmItem.DesiredValue)'." }))) | Out-Null
     }
 
@@ -1316,7 +1051,7 @@ function Invoke-OneDriveMigrationVerification {
                 foreach ($cacheLeaf in 'ScopeIdToMountPointPathCache','ScopeIdToMountPointPathCacheRoot') {
                     $cacheKey = Join-Path $account.RegistryPath $cacheLeaf
                     foreach ($entry in @(Get-OneDriveRegistryStringValuesUnderPath -Path $cacheKey)) {
-                        if ($entry.Value.StartsWith($move.CurrentValue, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        if (Test-OneDrivePathUnderRoot -Path $entry.Value -Root $move.CurrentValue) {
                             $cacheFailures.Add("$($entry.KeyPath)\\$($entry.ValueName) still references '$($move.CurrentValue)' via '$($entry.Value)'") | Out-Null
                         }
                     }
@@ -1401,7 +1136,7 @@ function Set-OneDriveTenantDefaultRootDirPolicy {
         }
     }
 
-    $target = Join-Path $RootDir ("OneDrive - {0}" -f $Account.DisplayName)
+    $target = [System.IO.Path]::Combine($RootDir, ("OneDrive - {0}" -f $Account.DisplayName))
     if ($PSCmdlet.ShouldProcess("$hkcuDefRoot\$($Account.TenantId)", "Set DefaultRootDir -> $target")) {
         Set-ItemProperty -Path $hkcuDefRoot -Name $Account.TenantId -Value $target -Type String
     }
@@ -1435,17 +1170,14 @@ function New-OneDriveMigrationPlan {
     param(
         [Parameter(Mandatory)][string]$RootDir,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Accounts,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$FreshSyncAccounts,
         [AllowEmptyCollection()][object[]]$SharePointSites = @(),
         [AllowNull()][string]$KfmCurrentPath,
         [Parameter(Mandatory)][pscustomobject]$KfmDecision,
-        [bool]$WasRunning,
-        [switch]$ForceHydrate
+        [bool]$WasRunning
     )
 
     $plan = New-Object System.Collections.Generic.List[object]
     $executionItems = New-Object System.Collections.Generic.List[object]
-    $freshSyncSlots = @($FreshSyncAccounts | ForEach-Object { $_.Slot })
     $moveItemsBySlot = @{}
 
     $rootExists = Test-Path $RootDir
@@ -1453,9 +1185,8 @@ function New-OneDriveMigrationPlan {
     $plan.Add((New-OneDriveMigrationPlanItem -Type 'HardenRootDirAcl' -Target $RootDir -CurrentValue $RootDir -DesiredValue $RootDir -SameVolume $null -Account $null -Reason 'Re-assert the home-directory ACL on the canonical OneDrive root. Runs even when the root already exists, in case it inherited a world-readable drive-root ACL.')) | Out-Null
 
     foreach ($a in $Accounts) {
-        if ($freshSyncSlots -contains $a.Slot) { continue }
         if ($a.AccountType -ne 'Business' -or [string]::IsNullOrWhiteSpace($a.DisplayName)) { continue }
-        $tenantDir = Join-Path $RootDir $a.DisplayName
+        $tenantDir = [System.IO.Path]::Combine($RootDir, $a.DisplayName)
         $tenantExists = Test-Path $tenantDir
         $plan.Add((New-OneDriveMigrationPlanItem -Type 'CreateDir' -Target $tenantDir -CurrentValue $(if ($tenantExists) { $tenantDir } else { $null }) -DesiredValue $tenantDir -SameVolume $null -Account $a -Reason 'Create the bare tenant directory used for SharePoint sibling nesting.' -Skipped:$tenantExists -SkipReason $(if ($tenantExists) { 'Directory already exists.' } else { $null }))) | Out-Null
     }
@@ -1463,7 +1194,7 @@ function New-OneDriveMigrationPlan {
     $hkcuDefRoot = 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir'
     foreach ($acct in $Accounts) {
         if ($acct.AccountType -ne 'Business' -or -not $acct.TenantId -or -not $acct.DisplayName) { continue }
-        $target = Join-Path $RootDir ("OneDrive - {0}" -f $acct.DisplayName)
+        $target = [System.IO.Path]::Combine($RootDir, ("OneDrive - {0}" -f $acct.DisplayName))
         $current = (Get-ItemProperty -Path $hkcuDefRoot -Name $acct.TenantId -ErrorAction SilentlyContinue).$($acct.TenantId)
         $item = New-OneDriveMigrationPlanItem -Type 'WritePolicy' -Target "$hkcuDefRoot\$($acct.TenantId)" -CurrentValue $current -DesiredValue $target -SameVolume $null -Account $acct -Reason 'Keep OneDrive tenant redirection pinned to the canonical target path.' -Skipped:($current -eq $target) -SkipReason $(if ($current -eq $target) { 'Policy already matches desired tenant target.' } else { $null })
         $item | Add-Member -NotePropertyName PolicyKind -NotePropertyValue 'DefaultRootDir'
@@ -1478,15 +1209,6 @@ function New-OneDriveMigrationPlan {
 
     foreach ($a in $Accounts) {
         $target = Get-OneDriveTargetPath -Account $a -RootDir $RootDir
-        if ($freshSyncSlots -contains $a.Slot) {
-            $hasFolder = $a.UserFolder -and (Test-Path $a.UserFolder)
-            $moveItem = New-OneDriveMigrationPlanItem -Type 'MoveAccount' -Target $a.UserFolder -CurrentValue $a.UserFolder -DesiredValue $null -SameVolume $null -Account $a -Reason 'Fresh-sync unlink instead of migrating the existing local OneDrive tree.' -Skipped:(-not $hasFolder) -SkipReason $(if (-not $hasFolder) { 'Fresh-sync account has no local folder to remove.' } else { $null })
-            $moveItem | Add-Member -NotePropertyName FreshSync -NotePropertyValue $true
-            $moveItem | Add-Member -NotePropertyName SharePointSite -NotePropertyValue $false
-            $executionItems.Add($moveItem) | Out-Null
-            continue
-        }
-
         $sourceExists = $a.UserFolder -and (Test-Path $a.UserFolder)
         $alreadyTarget = $a.UserFolder -and ($a.UserFolder.TrimEnd('\') -ieq $target.TrimEnd('\'))
         $sameVolume = if ($sourceExists) { Test-IsSameVolume -Source $a.UserFolder -Destination $target } else { $null }
@@ -1502,16 +1224,11 @@ function New-OneDriveMigrationPlan {
         if (-not $moveSkipReason -and -not $sameVolume) {
             $placeholderCount = Get-OneDrivePlaceholderCount -Path $a.UserFolder
             if ($placeholderCount -gt 0) {
-                if ($ForceHydrate) {
-                    $moveWarnings += "Will hydrate $placeholderCount cloud-only files (~size unknown)."
-                } else {
-                    $moveSkipReason = "Refusing cross-volume move of $placeholderCount cloud-only files; re-run with -ForceHydrate to proceed."
-                }
+                $moveSkipReason = "Refusing cross-volume move of $placeholderCount cloud-only files; use OneDrive UI re-link or make the files available offline first."
             }
         }
 
         $moveItem = New-OneDriveMigrationPlanItem -Type 'MoveAccount' -Target $target -CurrentValue $a.UserFolder -DesiredValue $target -SameVolume $sameVolume -Account $a -Reason 'Move the account sync root to the canonical target path.' -Skipped:([bool]$moveSkipReason) -SkipReason $moveSkipReason -Warnings $moveWarnings
-        $moveItem | Add-Member -NotePropertyName FreshSync -NotePropertyValue $false
         $moveItem | Add-Member -NotePropertyName SharePointSite -NotePropertyValue $false
         $executionItems.Add($moveItem) | Out-Null
         $moveItemsBySlot[$a.Slot] = $moveItem
@@ -1532,9 +1249,7 @@ function New-OneDriveMigrationPlan {
             $executionItems.Add((New-OneDriveMigrationPlanItem -Type 'AppFixUp' -Target $target -CurrentValue $a.UserFolder -DesiredValue $target -SameVolume $sameVolume -Account $a -Reason 'Run application-specific path fix-ups after the move.' -Skipped:$moveItem.Skipped -SkipReason $moveItem.SkipReason)) | Out-Null
         }
     }
-
     foreach ($site in $SharePointSites) {
-        if ($freshSyncSlots -contains $site.OwnerAccount.Slot) { continue }
         $sourceExists = $site.CurrentPath -and (Test-Path $site.CurrentPath)
         $alreadyTarget = $site.CurrentPath -and ($site.CurrentPath.TrimEnd('\') -ieq $site.DesiredPath.TrimEnd('\'))
         $sameVolume = if ($sourceExists) { Test-IsSameVolume -Source $site.CurrentPath -Destination $site.DesiredPath } else { $null }
@@ -1550,16 +1265,11 @@ function New-OneDriveMigrationPlan {
         if (-not $moveSkipReason -and -not $sameVolume) {
             $placeholderCount = Get-OneDrivePlaceholderCount -Path $site.CurrentPath
             if ($placeholderCount -gt 0) {
-                if ($ForceHydrate) {
-                    $moveWarnings += "Will hydrate $placeholderCount cloud-only files (~size unknown)."
-                } else {
-                    $moveSkipReason = "Refusing cross-volume move of $placeholderCount cloud-only files; re-run with -ForceHydrate to proceed."
-                }
+                $moveSkipReason = "Refusing cross-volume move of $placeholderCount cloud-only files; use OneDrive UI re-link or make the files available offline first."
             }
         }
-
         $moveItem = New-OneDriveMigrationPlanItem -Type 'MoveAccount' -Target $site.DesiredPath -CurrentValue $site.CurrentPath -DesiredValue $site.DesiredPath -SameVolume $sameVolume -Account $site.OwnerAccount -Reason 'Move the SharePoint site/library mount to the canonical tenant sibling path.' -Skipped:([bool]$moveSkipReason) -SkipReason $moveSkipReason -Warnings $moveWarnings
-        $moveItem | Add-Member -NotePropertyName FreshSync -NotePropertyValue $false
+        $moveItem = New-OneDriveMigrationPlanItem -Type 'MoveAccount' -Target $site.DesiredPath -CurrentValue $site.CurrentPath -DesiredValue $site.DesiredPath -SameVolume $sameVolume -Account $site.OwnerAccount -Reason 'Move the SharePoint site/library mount to the canonical tenant sibling path.' -Skipped:([bool]$moveSkipReason) -SkipReason $moveSkipReason -Warnings $moveWarnings
         $moveItem | Add-Member -NotePropertyName SharePointSite -NotePropertyValue $true
         $moveItem | Add-Member -NotePropertyName Site -NotePropertyValue $site
         $executionItems.Add($moveItem) | Out-Null
@@ -1571,10 +1281,7 @@ function New-OneDriveMigrationPlan {
         $executionItems.Add($rewriteItem) | Out-Null
     }
 
-    $ownerInFreshSync = $KfmDecision.OwnerAccount -and ($freshSyncSlots -contains $KfmDecision.OwnerAccount.Slot)
-    if ($ownerInFreshSync) {
-        $executionItems.Add((New-OneDriveMigrationPlanItem -Type 'RewriteKfm' -Target 'KFM' -CurrentValue $KfmCurrentPath -DesiredValue $null -SameVolume $null -Account $KfmDecision.OwnerAccount -Reason 'Skip KFM rewrite because the configured owner is being fresh-synced.' -Skipped:$true -SkipReason 'KFM owner is in -FreshSync.' -Warnings @("KFM owner account '$($KfmDecision.OwnerAccount.DisplayName)' is in -FreshSync; reconfigure Known Folder Move after re-sign-in."))) | Out-Null
-    } elseif ($KfmDecision.Action -eq 'Track' -and $KfmDecision.OwnerAccount) {
+    if ($KfmDecision.Action -eq 'Track' -and $KfmDecision.OwnerAccount) {
         $ownerTarget = Get-OneDriveTargetPath -Account $KfmDecision.OwnerAccount -RootDir $RootDir
         $ownerMoveItem = $moveItemsBySlot[$KfmDecision.OwnerAccount.Slot]
         $skipReason = if (-not $ownerMoveItem) {
@@ -1585,21 +1292,8 @@ function New-OneDriveMigrationPlan {
             $null
         }
         $executionItems.Add((New-OneDriveMigrationPlanItem -Type 'RewriteKfm' -Target $ownerTarget -CurrentValue $KfmDecision.OwnerAccount.UserFolder -DesiredValue $ownerTarget -SameVolume $ownerMoveItem.SameVolume -Account $KfmDecision.OwnerAccount -Reason 'Keep KFM bound to the owner account after that account moves.' -Skipped:([bool]$skipReason) -SkipReason $skipReason)) | Out-Null
-    } elseif ($KfmDecision.Action -eq 'Rebind' -and $KfmDecision.OwnerAccount) {
-        $ownerTarget = Get-OneDriveTargetPath -Account $KfmDecision.OwnerAccount -RootDir $RootDir
-        $kfmCurrentOwner = Resolve-KfmCurrentOwnerRoot -Accounts $Accounts -KfmCurrentPath $KfmCurrentPath
-        if (-not $kfmCurrentOwner) {
-            $executionItems.Add((New-OneDriveMigrationPlanItem -Type 'RewriteKfm' -Target $ownerTarget -CurrentValue $KfmCurrentPath -DesiredValue $ownerTarget -SameVolume $null -Account $KfmDecision.OwnerAccount -Reason 'Automatic KFM rebind requested.' -Skipped:$true -SkipReason 'Current KFM path is orphaned outside discovered OneDrive roots.' -Warnings @("KFM is currently bound to '$KfmCurrentPath', which is not under any discovered OneDrive account UserFolder. Skipping automatic rebind."))) | Out-Null
-        } else {
-            $skipReason = if ($KfmCurrentPath -and $KfmCurrentPath.StartsWith($ownerTarget, [System.StringComparison]::OrdinalIgnoreCase)) {
-                'KFM already resolves under the desired owner root.'
-            } else {
-                $null
-            }
-            $executionItems.Add((New-OneDriveMigrationPlanItem -Type 'RewriteKfm' -Target $ownerTarget -CurrentValue $kfmCurrentOwner.UserFolder -DesiredValue $ownerTarget -SameVolume $null -Account $KfmDecision.OwnerAccount -Reason 'Rebind KFM from the current owning account root to the desired owner root.' -Skipped:([bool]$skipReason) -SkipReason $skipReason)) | Out-Null
-        }
     } elseif ($KfmDecision.Action -eq 'WarnOnly') {
-        $executionItems.Add((New-OneDriveMigrationPlanItem -Type 'RewriteKfm' -Target 'KFM' -CurrentValue $KfmCurrentPath -DesiredValue $null -SameVolume $null -Account $KfmDecision.OwnerAccount -Reason 'Respect -NoKfmRebind and leave KFM on its current non-owner path.' -Skipped:$true -SkipReason $KfmDecision.Reason -Warnings @($KfmDecision.Reason))) | Out-Null
+        $executionItems.Add((New-OneDriveMigrationPlanItem -Type 'RewriteKfm' -Target 'KFM' -CurrentValue $KfmCurrentPath -DesiredValue $null -SameVolume $null -Account $KfmDecision.OwnerAccount -Reason 'Leave KFM on its current non-owner path for the OneDrive UI to reconfigure.' -Skipped:$true -SkipReason $KfmDecision.Reason -Warnings @($KfmDecision.Reason))) | Out-Null
     } else {
         $executionItems.Add((New-OneDriveMigrationPlanItem -Type 'RewriteKfm' -Target 'KFM' -CurrentValue $KfmCurrentPath -DesiredValue $null -SameVolume $null -Account $KfmDecision.OwnerAccount -Reason 'No KFM rewrite required.' -Skipped:$true -SkipReason $KfmDecision.Reason)) | Out-Null
     }
@@ -1633,24 +1327,17 @@ function Format-OneDriveMigrationPlan {
         [AllowEmptyCollection()][AllowNull()][object[]]$Accounts = @(),
         [AllowNull()][string]$RootDir,
         [AllowNull()][string]$KfmOwner,
-        [AllowEmptyCollection()][AllowNull()][object[]]$FreshSyncAccounts = @(),
-        [switch]$NoKfmRebind,
         [switch]$WhatIfMode,
-        [switch]$SkipElevationCheck,
         [bool]$IsElevated = $true,
         [string]$HomeDir = $env:USERPROFILE
     )
 
-    $freshSyncSlots = @($FreshSyncAccounts | ForEach-Object { $_.Slot })
     $headerTag = if ($WhatIfMode) { '[PLAN | -WhatIf]' } else { '[APPLY]' }
 
     Write-Host ''
     Write-Host ("=== MarkMichaelisOneDriveConfiguration  {0} ===" -f $headerTag)
     if ($IsElevated) {
         Write-Host 'Elevation:     OK (Administrator)'
-    } elseif ($SkipElevationCheck) {
-        Write-Host 'Elevation:     NOT ELEVATED (bypassed via -SkipElevationCheck)'
-        Write-Host '  WARNING: HKLM policy writes will fail unless Group Policy already applied them.'
     } else {
         Write-Host 'Elevation:     NOT ELEVATED'
     }
@@ -1661,7 +1348,7 @@ function Format-OneDriveMigrationPlan {
             $homeRoot = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($HomeDir))
             $rootRoot = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($RootDir))
             if ($homeRoot -and $rootRoot -and -not [string]::Equals($homeRoot, $rootRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-                $rootLine += "   (cross-volume from $homeRoot -- migrations hydrate cloud-only files unless -FreshSync or -ForceHydrate)"
+                $rootLine += "   (cross-volume from $homeRoot -- cloud-only files are skipped)"
             }
         }
         Write-Host $rootLine
@@ -1669,9 +1356,6 @@ function Format-OneDriveMigrationPlan {
 
     if ($KfmOwner) {
         Write-Host ("KFM owner:     {0}  (Documents/Desktop/Pictures follow this account)" -f $KfmOwner)
-        if ($NoKfmRebind) {
-            Write-Host 'KFM:           suppressed (-NoKfmRebind)'
-        }
     }
     Write-Host 'Update ring:   Production (HKLM)'
 
@@ -1680,10 +1364,6 @@ function Format-OneDriveMigrationPlan {
         foreach ($account in $Accounts) {
             $name = if ($account.DisplayName) { $account.DisplayName } elseif ($account.UserEmail) { $account.UserEmail } else { $account.Slot }
             $target = if ($RootDir) { Get-OneDriveTargetPath -Account $account -RootDir $RootDir } else { $null }
-            if ($freshSyncSlots -contains $account.Slot) {
-                Write-Host ("  [{0}] {1,-18} -> FRESH-SYNC (unlink)  {2}  ->  {3}" -f $account.AccountType, $name, $account.UserFolder, $target)
-                continue
-            }
 
             $action = 'PLAN'
             if ($target -and $account.UserFolder) {
@@ -1722,12 +1402,10 @@ function Invoke-OneDriveMigrationPlan {
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
-        [switch]$DeleteSourceOnSuccess,
-        [switch]$NoFolderDescriptionsWrite
+        [switch]$DeleteSourceOnSuccess
     )
-
     $deferredCleanupPaths = New-Object System.Collections.Generic.List[string]
-    $freshSyncRecoveryPaths = New-Object System.Collections.Generic.List[string]
+    $deferredCleanupPaths = New-Object System.Collections.Generic.List[string]
     foreach ($item in $Plan) {
         if ($item.Skipped) {
             $item.Status = 'Skipped'
@@ -1766,26 +1444,18 @@ function Invoke-OneDriveMigrationPlan {
                     Stop-OneDriveExe
                 }
                 'MoveAccount' {
-                    if ($item.FreshSync) {
-                        $freshSyncRecoveryPath = Remove-OneDriveAccountLink -Account $item.Account -DeleteRecoveryFolder:$DeleteSourceOnSuccess
-                        if ($freshSyncRecoveryPath) {
-                            $freshSyncRecoveryPaths.Add($freshSyncRecoveryPath) | Out-Null
-                            $item.Warnings += "FreshSync recovery folder preserved at: $freshSyncRecoveryPath"
-                        }
-                    } else {
-                        $sameVolume = Test-IsSameVolume -Source $item.CurrentValue -Destination $item.DesiredValue
-                        $registrySnapshot = $null
-                        if ($sameVolume -and -not $item.SharePointSite) {
-                            $registrySnapshot = Get-OneDriveAccountRegistrySnapshot -Account $item.Account
-                        }
-                        $moveResult = Move-OneDriveFolder -Source $item.CurrentValue -Destination $item.DesiredValue -DeleteSourceOnSuccess:$DeleteSourceOnSuccess
-                        if ($moveResult -and $moveResult.DeferredDeletePath) {
-                            $deferredCleanupPaths.Add($moveResult.DeferredDeletePath) | Out-Null
-                            $item.Warnings += "Manual cleanup pending: $($moveResult.DeferredDeletePath)"
-                        }
-                        $item | Add-Member -NotePropertyName SameVolume -NotePropertyValue $sameVolume -Force
-                        $item | Add-Member -NotePropertyName RegistrySnapshot -NotePropertyValue $registrySnapshot -Force
+                    $sameVolume = Test-IsSameVolume -Source $item.CurrentValue -Destination $item.DesiredValue
+                    $registrySnapshot = $null
+                    if ($sameVolume -and -not $item.SharePointSite) {
+                        $registrySnapshot = Get-OneDriveAccountRegistrySnapshot -Account $item.Account
                     }
+                    $moveResult = Move-OneDriveFolder -Source $item.CurrentValue -Destination $item.DesiredValue -DeleteSourceOnSuccess:$DeleteSourceOnSuccess
+                    if ($moveResult -and $moveResult.DeferredDeletePath) {
+                        $deferredCleanupPaths.Add($moveResult.DeferredDeletePath) | Out-Null
+                        $item.Warnings += "Manual cleanup pending: $($moveResult.DeferredDeletePath)"
+                    }
+                    $item | Add-Member -NotePropertyName SameVolume -NotePropertyValue $sameVolume -Force
+                    $item | Add-Member -NotePropertyName RegistrySnapshot -NotePropertyValue $registrySnapshot -Force
                 }
                 'UpdateAccountRegistry' {
                     Update-OneDriveAccountRegistry -Account $item.Account -NewPath $item.DesiredValue
@@ -1795,7 +1465,7 @@ function Invoke-OneDriveMigrationPlan {
                 }
                 'RewriteKfm' {
                     if ($item.CurrentValue -and $item.DesiredValue) {
-                        Update-KfmBindings -OldRoot $item.CurrentValue -NewRoot $item.DesiredValue -NoFolderDescriptionsWrite:$NoFolderDescriptionsWrite
+                        Update-KfmBindings -OldRoot $item.CurrentValue -NewRoot $item.DesiredValue
                     }
                     foreach ($warning in @($item.Warnings)) {
                         Write-Warning $warning
@@ -1823,7 +1493,7 @@ function Invoke-OneDriveMigrationPlan {
                 $moveItem = if ($item.PSObject.Properties.Name -contains 'MoveItem') {
                     $item.MoveItem
                 } else {
-                    $Plan | Where-Object { $_.Type -eq 'MoveAccount' -and -not $_.FreshSync -and $_.Account -and $_.Account.Slot -eq $item.Account.Slot } | Select-Object -First 1
+                    $Plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.Account -and $_.Account.Slot -eq $item.Account.Slot } | Select-Object -First 1
                 }
                 if ($moveItem -and (Test-Path $moveItem.DesiredValue) -and -not (Test-Path $moveItem.CurrentValue)) {
                     Move-Item -LiteralPath $moveItem.DesiredValue -Destination $moveItem.CurrentValue
@@ -1837,9 +1507,8 @@ function Invoke-OneDriveMigrationPlan {
     }
 
     return [pscustomobject]@{
-        DeferredCleanupPaths   = $deferredCleanupPaths
-        FreshSyncRecoveryPaths = $freshSyncRecoveryPaths
-        Plan                   = $Plan
+        DeferredCleanupPaths = $deferredCleanupPaths
+        Plan                 = $Plan
     }
 }
 
@@ -1876,23 +1545,15 @@ function Get-OneDriveMigrationSummaryLines {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Accounts,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$SharePointSites,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
-        [AllowEmptyCollection()][string[]]$DeferredCleanupPaths = @(),
-        [AllowEmptyCollection()][string[]]$FreshSyncRecoveryPaths = @()
+        [AllowEmptyCollection()][string[]]$DeferredCleanupPaths = @()
     )
 
     $lines = New-Object System.Collections.Generic.List[string]
-    $freshSyncItems = @($Plan | Where-Object { $_.Type -eq 'MoveAccount' -and ($_.PSObject.Properties.Name -contains 'FreshSync') -and $_.FreshSync })
-    $migratedItems = @($Plan | Where-Object { $_.Type -eq 'MoveAccount' -and (-not ($_.PSObject.Properties.Name -contains 'FreshSync') -or -not $_.FreshSync) })
+    $migratedItems = @($Plan | Where-Object { $_.Type -eq 'MoveAccount' })
 
     $lines.Add('MarkMichaelisOneDriveConfiguration summary:') | Out-Null
     $lines.Add('Execution Summary:') | Out-Null
     $lines.Add(("  - Migrated items planned/executed: {0}" -f $migratedItems.Count)) | Out-Null
-    if ($freshSyncItems.Count -eq 0) {
-        $lines.Add('  - FreshSync: none') | Out-Null
-    } else {
-        $freshSyncNames = ($freshSyncItems | ForEach-Object { if ($_.Account.DisplayName) { $_.Account.DisplayName } else { $_.Account.Slot } } | Sort-Object -Unique) -join ', '
-        $lines.Add(("  - FreshSync: {0} account(s) -- ACTION REQUIRED: re-sign-in via OneDrive UI ({1})" -f $freshSyncItems.Count, $freshSyncNames)) | Out-Null
-    }
 
     $lines.Add('Discovered Accounts:') | Out-Null
     if ($Accounts.Count -eq 0) {
@@ -1954,18 +1615,13 @@ function Get-OneDriveMigrationSummaryLines {
     if (@($DeferredCleanupPaths).Count -eq 0) {
         $lines.Add('  - none') | Out-Null
     } else {
+        $lines.Add('  - Review these folders after OneDrive restarts and the verification checks pass.') | Out-Null
+        $lines.Add('  - Cleanup commands:') | Out-Null
         foreach ($path in @($DeferredCleanupPaths)) {
-            $lines.Add(("  - {0}" -f $path)) | Out-Null
+            $escapedPath = $path -replace "'", "''"
+            $lines.Add(("    Remove-Item -LiteralPath '{0}' -Recurse -Force" -f $escapedPath)) | Out-Null
         }
-    }
-
-    $lines.Add('FreshSync recovery folders preserved at:') | Out-Null
-    if (@($FreshSyncRecoveryPaths).Count -eq 0) {
-        $lines.Add('  - none') | Out-Null
-    } else {
-        foreach ($path in @($FreshSyncRecoveryPaths)) {
-            $lines.Add(("  - {0}" -f $path)) | Out-Null
-        }
+        $lines.Add('  - If you need to recover instead, stop OneDrive, inspect the new target, move the .migrated-* folder back manually, restore the registry backup above, then restart OneDrive.') | Out-Null
     }
 
     return $lines.ToArray()
@@ -2303,49 +1959,27 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
     param(
         [Parameter(Mandatory)][string]$RootDir,
         [Parameter(Mandatory)][string]$KfmOwner,
-        [switch]$KfmOwnerContains,
-        [switch]$NoKfmRebind,
-        [switch]$NoFolderDescriptionsWrite,
-        [AllowEmptyCollection()][AllowNull()][string[]]$FreshSync,
         [switch]$DeleteSourceOnSuccess,
-        [switch]$ForceHydrate,
-        [switch]$SkipElevationCheck,
         [bool]$IsElevated = $true
     )
 
     Write-Warning 'Mutates OneDrive client internal registry state (Accounts\<slot>\UserFolder, ScopeIdToMountPointPathCache*); these are not Microsoft-documented migration APIs.'
     Write-Host "MarkMichaelisOneDriveConfiguration: RootDir=$RootDir, KfmOwner=$KfmOwner"
-    if ($KfmOwnerContains) {
-        Write-Host '  KfmOwnerContains requested: using substring owner matching'
-    }
-    if ($FreshSync -and $FreshSync.Count -gt 0) {
-        Write-Host "  FreshSync requested: $($FreshSync -join ', ')"
-    }
-    if ($ForceHydrate) {
-        Write-Host '  ForceHydrate requested: cross-volume placeholder hydration is allowed'
-    }
-    if ($NoFolderDescriptionsWrite) {
-        Write-Host '  NoFolderDescriptionsWrite requested: skipping FolderDescriptions internal rewrites'
-    }
-
     $accounts = Get-OneDriveAccountList
-    $freshSyncAccounts = Resolve-FreshSyncAccounts -Accounts $accounts -FreshSync $FreshSync
     $sharePointSites = Get-OneDriveSharePointSiteList -Accounts $accounts -RootDir $RootDir
 
-    Write-Verbose ("Discovered {0} account(s); {1} fresh-sync." -f $accounts.Count, $freshSyncAccounts.Count)
+    Write-Verbose ("Discovered {0} account(s)." -f $accounts.Count)
 
     $kfmCurrent = Get-CurrentKfmPath
-    $kfmDecision = Resolve-KfmRebindAction -Accounts $accounts -KfmCurrentPath $kfmCurrent -KfmOwner $KfmOwner -KfmOwnerContains:$KfmOwnerContains -NoKfmRebind:$NoKfmRebind
+    $kfmDecision = Resolve-KfmRebindAction -Accounts $accounts -KfmCurrentPath $kfmCurrent -KfmOwner $KfmOwner
     Write-Host "  KFM: [$($kfmDecision.Action)] $($kfmDecision.Reason)"
     if ($kfmDecision.Action -eq 'OwnerNotSignedIn') {
         throw "KFM owner '$KfmOwner' is not signed in. Sign in to the matching Work account in OneDrive and re-run."
     }
-
     $wasRunning = [bool](Get-Process -Name 'OneDrive' -ErrorAction SilentlyContinue)
-    $plan = New-OneDriveMigrationPlan -RootDir $RootDir -Accounts $accounts -FreshSyncAccounts @($freshSyncAccounts) -SharePointSites @($sharePointSites) -KfmCurrentPath $kfmCurrent -KfmDecision $kfmDecision -WasRunning:$wasRunning -ForceHydrate:$ForceHydrate
+    $plan = New-OneDriveMigrationPlan -RootDir $RootDir -Accounts $accounts -SharePointSites @($sharePointSites) -KfmCurrentPath $kfmCurrent -KfmDecision $kfmDecision -WasRunning:$wasRunning
     Format-OneDriveMigrationPlan -Plan $plan -Accounts $accounts -RootDir $RootDir -KfmOwner $KfmOwner `
-        -FreshSyncAccounts $freshSyncAccounts -NoKfmRebind:$NoKfmRebind `
-        -WhatIfMode:$WhatIfPreference -SkipElevationCheck:$SkipElevationCheck `
+        -WhatIfMode:$WhatIfPreference `
         -IsElevated $IsElevated
 
     $moveSources = @(
@@ -2372,22 +2006,21 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
 
     $backupPath = ($plan | Where-Object Type -eq 'RegistryBackup' | Select-Object -First 1).Target
     $deferredCleanupPaths = @()
-    $freshSyncRecoveryPaths = @()
     try {
-        $execution = Invoke-OneDriveMigrationPlan -Plan $plan -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -NoFolderDescriptionsWrite:$NoFolderDescriptionsWrite -Confirm:$false
+        $execution = Invoke-OneDriveMigrationPlan -Plan $plan -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -Confirm:$false
         $deferredCleanupPaths = @($execution.DeferredCleanupPaths)
-        $freshSyncRecoveryPaths = @($execution.FreshSyncRecoveryPaths)
     } catch {
         $failedItem = $plan | Where-Object { $_.Status -eq 'Failed' } | Select-Object -First 1
+        $restartInstruction = "After inspection, restart OneDrive with: Start-Process `"$env:LOCALAPPDATA\Microsoft\OneDrive\OneDrive.exe`" -ArgumentList '/background'"
         if ($failedItem -and $failedItem.Type -eq 'UpdateAccountRegistry' -and $failedItem.Account) {
-            Write-Error "Migration failed for $($failedItem.Account.DisplayName): $($failedItem.FailureReason) Best-effort rollback attempted. Inspect the old and new paths and verify OneDrive account registry under '$($failedItem.Account.RegistryPath)' before restarting OneDrive. Registry backup: $backupPath. OneDrive NOT restarted automatically."
+            Write-Error "Migration failed for $($failedItem.Account.DisplayName): $($failedItem.FailureReason) Best-effort rollback attempted. Inspect the old and new paths and verify OneDrive account registry under '$($failedItem.Account.RegistryPath)' before restarting OneDrive. Registry backup: $backupPath. OneDrive NOT restarted automatically. $restartInstruction"
         } elseif ($failedItem) {
-            Write-Error "Migration failed during $($failedItem.Type): $($failedItem.FailureReason). Registry backup: $backupPath. OneDrive NOT restarted automatically."
+            Write-Error "Migration failed during $($failedItem.Type): $($failedItem.FailureReason). Registry backup: $backupPath. OneDrive NOT restarted automatically. $restartInstruction"
         }
         throw
     }
 
-    $summaryLines = Get-OneDriveMigrationSummaryLines -Accounts $accounts -SharePointSites @($sharePointSites) -Plan $plan -DeferredCleanupPaths @($deferredCleanupPaths) -FreshSyncRecoveryPaths @($freshSyncRecoveryPaths)
+    $summaryLines = Get-OneDriveMigrationSummaryLines -Accounts $accounts -SharePointSites @($sharePointSites) -Plan $plan -DeferredCleanupPaths @($deferredCleanupPaths)
     Write-OneDriveMigrationSummary -Lines $summaryLines
 
     $verifyItem = $plan | Where-Object Type -eq 'Verify' | Select-Object -First 1
@@ -2395,32 +2028,13 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
         Write-OneDriveMigrationVerificationSummary -VerifyResult $verifyItem.VerifyResult
         if ($verifyItem.VerifyResult.FailedChecks.Count -gt 0) {
             $failedChecksSummary = ($verifyItem.VerifyResult.FailedChecks | ForEach-Object { "[$($_.Name)] $($_.Detail)" }) -join '; '
-            throw "Post-migration verification failed: $failedChecksSummary. Registry backup: $backupPath. Data was already migrated; investigate manually (no rollback performed)."
+            throw "Post-migration verification failed: $failedChecksSummary. Registry backup: $backupPath. Data was already migrated; investigate manually (no rollback performed). Restart OneDrive after inspection with: Start-Process `"$env:LOCALAPPDATA\Microsoft\OneDrive\OneDrive.exe`" -ArgumentList '/background'"
         }
-    }
-
-    if ($freshSyncAccounts.Count -gt 0) {
-        Write-Host ''
-        Write-Host 'FRESH-SYNC accounts unlinked:'
-        foreach ($fa in $freshSyncAccounts) {
-            Write-Host ("  - {0} ({1})" -f $fa.DisplayName, $fa.Slot)
-        }
-        Write-Host ''
-        Write-Host 'To complete the fresh-sync flow:'
-        Write-Host "  1. Open OneDrive Settings (right-click cloud icon -> Settings -> Account)"
-        Write-Host "  2. Click 'Add an account'"
-        foreach ($fa in $freshSyncAccounts) {
-            $newTarget = Get-OneDriveTargetPath -Account $fa -RootDir $RootDir
-            Write-Host ("  3. Sign in to: {0}" -f $fa.UserEmail)
-            Write-Host ("     Policy will direct the new sync root to: {0}" -f $newTarget)
-        }
-        Write-Host '  4. OneDrive will create cloud-only placeholders (no bulk download).'
-        Write-Host ''
     }
 
     $fodGatedItems = @($plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.SkipReason -like 'Refusing cross-volume move of *cloud-only files*' })
     if ($fodGatedItems.Count -gt 0) {
-        Write-Warning ("Files-On-Demand gate blocked {0} cross-volume move(s). Re-run with -ForceHydrate to proceed after accepting hydration." -f $fodGatedItems.Count)
+        Write-Warning ("Files-On-Demand gate blocked {0} cross-volume move(s). Use OneDrive UI re-link or make the files available offline first." -f $fodGatedItems.Count)
         throw "Files-On-Demand gate blocked $($fodGatedItems.Count) move(s). Registry backup: $backupPath."
     }
 
@@ -2437,9 +2051,5 @@ if ($MyInvocation.InvocationName -ne '.') {
     # plan array would be echoed to the success stream and auto-formatted into
     # a second, raw object dump on the console. The function still returns the
     # plan for programmatic and test callers that capture it.
-    $null = Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner `
-        -KfmOwnerContains:$KfmOwnerContains -NoKfmRebind:$NoKfmRebind `
-        -NoFolderDescriptionsWrite:$NoFolderDescriptionsWrite -FreshSync $FreshSync `
-        -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -ForceHydrate:$ForceHydrate `
-        -SkipElevationCheck:$SkipElevationCheck -IsElevated $__mmodIsElevated
+    $null = Invoke-MarkMichaelisOneDriveConfiguration -RootDir $RootDir -KfmOwner $KfmOwner -DeleteSourceOnSuccess:$DeleteSourceOnSuccess -IsElevated $__mmodIsElevated
 }
