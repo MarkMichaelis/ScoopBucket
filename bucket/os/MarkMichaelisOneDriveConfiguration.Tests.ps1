@@ -1073,6 +1073,61 @@ Describe 'Invoke-MarkMichaelisOneDriveConfiguration running state' -Tag 'Heavy' 
     }
 }
 
+Describe 'Invoke-MarkMichaelisOneDriveConfiguration Files-On-Demand gate' -Tag 'Heavy' {
+    It 'preserves cloud-only files without backup, blocker resolution, or OneDrive shutdown side effects' {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($acct) }
+        Mock -CommandName Get-OneDriveSharePointSiteList -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $null }
+        Mock -CommandName Resolve-KfmRebindAction -MockWith {
+            [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+        }
+        Mock -CommandName Get-OneDrivePlaceholderCount -MockWith { 7 }
+        Mock -CommandName Test-IsSameVolume -MockWith { $true }
+        Mock -CommandName Get-ItemProperty -MockWith {
+            param($Path, $Name)
+            if ($Path -eq 'HKCU:\SOFTWARE\Policies\Microsoft\OneDrive\DefaultRootDir' -and $Name -eq 'tid-1') {
+                return [pscustomobject]@{ 'tid-1' = 'C:\OneDrive\OneDrive - IntelliTect' }
+            }
+            if ($Path -eq 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive' -and $Name -eq 'GPOSetUpdateRing') {
+                return [pscustomobject]@{ GPOSetUpdateRing = 5 }
+            }
+            if ($Path -eq 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1' -and $Name -eq 'UserFolder') {
+                return [pscustomobject]@{ UserFolder = 'C:\Users\me\OneDrive - IntelliTect' }
+            }
+            return [pscustomobject]@{}
+        }
+        Mock -CommandName Get-Process -MockWith { [pscustomobject]@{ Name = 'OneDrive' } }
+        Mock -CommandName Invoke-OneDriveMoveBlockerResolution
+        Mock -CommandName Export-OneDriveRegistryBackup
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Move-OneDriveFolder
+        Mock -CommandName Set-RootDirAclFromHome
+
+        $plan = Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -Confirm:$false -WarningAction SilentlyContinue
+
+        ($plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.Skipped }).Count | Should -Be 1
+        ($plan | Where-Object { $_.Type -eq 'HydrateCloudFiles' }).Count | Should -Be 0
+        Should -Invoke Invoke-OneDriveMoveBlockerResolution -Times 0
+        Should -Invoke Export-OneDriveRegistryBackup -Times 0
+        Should -Invoke Stop-OneDriveExe -Times 0
+        Should -Invoke Move-OneDriveFolder -Times 0
+    }
+}
+
 Describe 'Invoke-MarkMichaelisOneDriveConfiguration verification failure' -Tag 'Heavy' {
     It 'throws with the registry backup path when post-migration verification fails' {
         $rootDir = 'C:\OneDrive'
@@ -1440,7 +1495,7 @@ Describe 'Plan-then-execute architecture' -Tag 'Heavy' {
         ($plan | Where-Object { $_.Type -eq 'RewriteSPCache' -and $_.CurrentValue -eq 'C:\Users\Mark\IntelliTect - Engineering' -and $_.DesiredValue -eq 'C:\OneDrive\IntelliTect\IntelliTect - Engineering' }).Count | Should -Be 1
     }
 
-    It 'gates cross-volume placeholder moves because cloud-only files must remain cloud-only' {
+    It 'gates placeholder moves because cloud-only files must remain cloud-only' {
         $acct = [pscustomobject]@{
             Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
             UserEmail = 'user@example.com'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
@@ -1462,7 +1517,36 @@ Describe 'Plan-then-execute architecture' -Tag 'Heavy' {
 
         $plan = New-OneDriveMigrationPlan -RootDir 'D:\OneDrive' -Accounts @($acct) -KfmCurrentPath $null -KfmDecision $decision -WasRunning:$false
 
-        ($plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.SkipReason -like 'Refusing cross-volume move of 3 cloud-only files*' }).Count | Should -Be 1
+        ($plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.SkipReason -like 'Preserving 3 cloud-only files*' }).Count | Should -Be 1
+        ($plan | Where-Object { $_.Type -eq 'HydrateCloudFiles' }).Count | Should -Be 0
+    }
+
+    It 'gates same-volume placeholder moves before OneDrive is stopped' {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        $decision = [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Test-IsSameVolume -MockWith { $true }
+        Mock -CommandName Get-OneDrivePlaceholderCount -MockWith { 2 }
+        Mock -CommandName Get-ItemProperty -MockWith { [pscustomobject]@{} }
+
+        $plan = New-OneDriveMigrationPlan -RootDir 'C:\OneDrive' -Accounts @($acct) -KfmCurrentPath $null -KfmDecision $decision -WasRunning:$true
+
+        $moveItem = $plan | Where-Object { $_.Type -eq 'MoveAccount' } | Select-Object -First 1
+        $moveItem.SameVolume | Should -BeTrue
+        $moveItem.SkipReason | Should -BeLike 'Preserving 2 cloud-only files*'
+        ($plan | Where-Object { $_.Type -eq 'HydrateCloudFiles' }).Count | Should -Be 0
     }
 
     It 'plans ACL hardening for a newly created RootDir' {
@@ -1573,6 +1657,21 @@ Describe 'Get-OneDriveMigrationSummaryLines' -Tag 'Light' {
         $summary | Should -Not -Match 'FreshSync'
         $summary | Should -Not -Match 'ACTION REQUIRED'
         $summary | Should -Match 'Michaelis'
+    }
+
+    It 'reports skipped cloud-only moves separately from executed moves' {
+        $acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'
+        }
+        $plan = @(
+            [pscustomobject]@{ Type='MoveAccount'; Target='C:\OneDrive\OneDrive - IntelliTect'; CurrentValue='C:\Users\me\OneDrive - IntelliTect'; DesiredValue='C:\OneDrive\OneDrive - IntelliTect'; Status='Skipped'; SkipReason='Preserving 7 cloud-only files'; FailureReason=$null; Account=$acct }
+        )
+
+        $summary = (Get-OneDriveMigrationSummaryLines -Accounts @($acct) -SharePointSites @() -Plan $plan) -join "`n"
+
+        $summary | Should -Match 'Move items: total=1; done=0; skipped=1; failed=0'
+        $summary | Should -Not -Match 'Cloud File Hydration:'
+        $summary | Should -Not -Match 'planned/executed'
     }
 }
 

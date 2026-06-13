@@ -28,7 +28,8 @@
        Production ring in HKLM.
     4. For each discovered account, migrates the existing UserFolder to
        the canonical path when it can do so without hydrating cloud-only
-       placeholders.
+       placeholders. Cloud-only files remain cloud-only; use OneDrive UI
+       re-link if you want to move an account that still has placeholders.
     5. Rewrites Known Folder Move bindings (Documents / Pictures /
        Desktop in User Shell Folders, Shell Folders, and KNOWNFOLDERID
        GUIDs) so KFM follows the -KfmOwner account when its folder
@@ -41,10 +42,9 @@
       - Supports -WhatIf / -Confirm via $PSCmdlet.ShouldProcess on every
         state-changing operation.
       - Same-volume migrations use Move-Item (NTFS rename, preserves
-        Cloud Files reparse points + ACLs).
+        ACLs) when no cloud-only placeholders are present.
       - Cross-volume migrations use robocopy /E /COPYALL /DCOPY:DAT /ZB
-        and skip moves with cloud-only placeholders so cloud-only files
-        stay cloud-only.
+        when no cloud-only placeholders are present.
       - Rewrites KFM bindings when the owning account moves. If KFM is
         currently bound to a different account, the script warns and
         leaves reconfiguration to the OneDrive UI.
@@ -53,19 +53,18 @@
         ExternalOutputDir use the logical Documents path and follow KFM
         transparently.
 
-    Cross-volume migration and Files-On-Demand
-    ------------------------------------------
+    Files-On-Demand migration gate
+    ------------------------------
     The default action for an account whose UserFolder differs from the
     convention is to migrate the files in place:
 
-      - Same-volume:   Move-Item (NTFS rename, preserves Cloud Files
-                       reparse points + ACLs).
+      - Same-volume:   Move-Item (NTFS rename, preserves ACLs).
       - Cross-volume:  robocopy /E /COPYALL /DCOPY:DAT /ZB.
 
-    Cross-volume migration can materialize Files-On-Demand placeholders,
-    so the script refuses those moves when cloud-only files are present.
-    Use the OneDrive UI to re-link the affected account or make the files
-    available offline before re-running.
+    OneDrive is stopped before the sync-root move and registry rewrite.
+    Stopped OneDrive cannot reliably move dehydrated Files-On-Demand
+    placeholders, and cross-volume copy can materialize them. The script
+    skips moves with cloud-only files so they remain cloud-only.
 
     Why elevation is required
     -------------------------
@@ -83,9 +82,8 @@
 
 .PARAMETER RootDir
     Parent directory for all OneDrive sync roots. Default: C:\OneDrive.
-    When $RootDir is on a different volume than $env:USERPROFILE,
-    file-copy migrations that would hydrate Files-On-Demand placeholders
-    are skipped for safety.
+    Moves with Files-On-Demand placeholders are skipped so cloud-only
+    files stay cloud-only.
 
 .PARAMETER KfmOwner
     DisplayName identifying the canonical KFM owner - the Business
@@ -127,8 +125,8 @@
     Restarts OneDrive.exe whenever a migration occurs (stops with
     /shutdown, restarts with /background).
 
-    Cross-volume migrations can hydrate Files-On-Demand placeholders
-    and are skipped when cloud-only files are present.
+    Moves with Files-On-Demand placeholders are skipped so cloud-only
+    files stay cloud-only.
 
     OneDrive's HKCU:\Software\Microsoft\OneDrive\Accounts\<slot>\UserFolder
     and the various ScopeIdToMountPointPathCache* values are internal
@@ -1244,10 +1242,10 @@ function New-OneDriveMigrationPlan {
         } elseif (-not $sourceExists) {
             $moveSkipReason = 'Source folder is missing; migration skipped for safety.'
         }
-        if (-not $moveSkipReason -and -not $sameVolume) {
+        if (-not $moveSkipReason) {
             $placeholderCount = Get-OneDrivePlaceholderCount -Path $a.UserFolder
             if ($placeholderCount -gt 0) {
-                $moveSkipReason = "Refusing cross-volume move of $placeholderCount cloud-only files; use OneDrive UI re-link or make the files available offline first."
+                $moveSkipReason = "Preserving $placeholderCount cloud-only files; use OneDrive UI re-link to move this account without downloading them."
             }
         }
 
@@ -1285,13 +1283,12 @@ function New-OneDriveMigrationPlan {
         } elseif (-not $sourceExists) {
             $moveSkipReason = 'SharePoint site source folder is missing; migration skipped for safety.'
         }
-        if (-not $moveSkipReason -and -not $sameVolume) {
+        if (-not $moveSkipReason) {
             $placeholderCount = Get-OneDrivePlaceholderCount -Path $site.CurrentPath
             if ($placeholderCount -gt 0) {
-                $moveSkipReason = "Refusing cross-volume move of $placeholderCount cloud-only files; use OneDrive UI re-link or make the files available offline first."
+                $moveSkipReason = "Preserving $placeholderCount cloud-only files; use OneDrive UI re-link to move this site/library without downloading them."
             }
         }
-        $moveItem = New-OneDriveMigrationPlanItem -Type 'MoveAccount' -Target $site.DesiredPath -CurrentValue $site.CurrentPath -DesiredValue $site.DesiredPath -SameVolume $sameVolume -Account $site.OwnerAccount -Reason 'Move the SharePoint site/library mount to the canonical tenant sibling path.' -Skipped:([bool]$moveSkipReason) -SkipReason $moveSkipReason -Warnings $moveWarnings
         $moveItem = New-OneDriveMigrationPlanItem -Type 'MoveAccount' -Target $site.DesiredPath -CurrentValue $site.CurrentPath -DesiredValue $site.DesiredPath -SameVolume $sameVolume -Account $site.OwnerAccount -Reason 'Move the SharePoint site/library mount to the canonical tenant sibling path.' -Skipped:([bool]$moveSkipReason) -SkipReason $moveSkipReason -Warnings $moveWarnings
         $moveItem | Add-Member -NotePropertyName SharePointSite -NotePropertyValue $true
         $moveItem | Add-Member -NotePropertyName Site -NotePropertyValue $site
@@ -1427,7 +1424,6 @@ function Invoke-OneDriveMigrationPlan {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
         [switch]$DeleteSourceOnSuccess
     )
-    $deferredCleanupPaths = New-Object System.Collections.Generic.List[string]
     $deferredCleanupPaths = New-Object System.Collections.Generic.List[string]
     foreach ($item in $Plan) {
         if ($item.Skipped) {
@@ -1573,10 +1569,13 @@ function Get-OneDriveMigrationSummaryLines {
 
     $lines = New-Object System.Collections.Generic.List[string]
     $migratedItems = @($Plan | Where-Object { $_.Type -eq 'MoveAccount' })
+    $doneMoveCount = @($migratedItems | Where-Object { $_.Status -eq 'Done' }).Count
+    $skippedMoveCount = @($migratedItems | Where-Object { $_.Status -eq 'Skipped' }).Count
+    $failedMoveCount = @($migratedItems | Where-Object { $_.Status -eq 'Failed' }).Count
 
     $lines.Add('MarkMichaelisOneDriveConfiguration summary:') | Out-Null
     $lines.Add('Execution Summary:') | Out-Null
-    $lines.Add(("  - Migrated items planned/executed: {0}" -f $migratedItems.Count)) | Out-Null
+    $lines.Add(("  - Move items: total={0}; done={1}; skipped={2}; failed={3}" -f $migratedItems.Count, $doneMoveCount, $skippedMoveCount, $failedMoveCount)) | Out-Null
 
     $lines.Add('Discovered Accounts:') | Out-Null
     if ($Accounts.Count -eq 0) {
@@ -2011,20 +2010,24 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
             ForEach-Object { $_.CurrentValue }
     ) | Select-Object -Unique
 
-    if ($moveSources.Count -gt 0) {
-        if ($WhatIfPreference) {
+    if ($WhatIfPreference) {
+        if ($moveSources.Count -gt 0) {
             $blockers = @(Get-OneDriveMoveBlocker -Root $moveSources)
             if ($blockers.Count -gt 0) {
                 Write-OneDriveBlockerReport -Process (Get-OneDriveBlockerProcess -Blocker $blockers)
                 Write-Warning 'WhatIf: a real run would prompt to stop these processes or recheck before moving any folder.'
             }
-        } else {
-            Invoke-OneDriveMoveBlockerResolution -Root $moveSources
         }
+        return $plan
     }
 
-    if ($WhatIfPreference) {
-        return $plan
+    $fodGatedItems = @($plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.SkipReason -like 'Preserving *cloud-only files*' })
+    if ($fodGatedItems.Count -gt 0) {
+        Write-Warning ("Files-On-Demand gate skipped {0} move(s) to preserve cloud-only files. Use OneDrive UI re-link to move those accounts without downloading placeholders." -f $fodGatedItems.Count)
+    }
+
+    if ($moveSources.Count -gt 0) {
+        Invoke-OneDriveMoveBlockerResolution -Root $moveSources
     }
 
     $backupPath = ($plan | Where-Object Type -eq 'RegistryBackup' | Select-Object -First 1).Target
@@ -2053,12 +2056,6 @@ function Invoke-MarkMichaelisOneDriveConfiguration {
             $failedChecksSummary = ($verifyItem.VerifyResult.FailedChecks | ForEach-Object { "[$($_.Name)] $($_.Detail)" }) -join '; '
             throw "Post-migration verification failed: $failedChecksSummary. Registry backup: $backupPath. Data was already migrated; investigate manually (no rollback performed). Restart OneDrive after inspection with: Start-Process `"$env:LOCALAPPDATA\Microsoft\OneDrive\OneDrive.exe`" -ArgumentList '/background'"
         }
-    }
-
-    $fodGatedItems = @($plan | Where-Object { $_.Type -eq 'MoveAccount' -and $_.SkipReason -like 'Refusing cross-volume move of *cloud-only files*' })
-    if ($fodGatedItems.Count -gt 0) {
-        Write-Warning ("Files-On-Demand gate blocked {0} cross-volume move(s). Use OneDrive UI re-link or make the files available offline first." -f $fodGatedItems.Count)
-        throw "Files-On-Demand gate blocked $($fodGatedItems.Count) move(s). Registry backup: $backupPath."
     }
 
     Write-Warning 'MRU staleness: Office recent docs / Snagit Recent File List / VS recent files may reference old OneDrive paths; reopen as needed.'
