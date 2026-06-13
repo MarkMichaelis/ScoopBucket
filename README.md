@@ -208,43 +208,23 @@ scoop install MarkMichaelis/ClientBasePackages
 scoop install MarkMichaelis/MicrosoftOffice365
 scoop install MarkMichaelis/AIAgents
 
-# 2. Personal post-install customization LAST.
-scoop install MarkMichaelis/MarkMichaelisOneDriveConfiguration
+# 2. Personal post-install customization runs LAST
+#    (no published members at present -- see "Current members" below).
 ```
 
-Current members:
+Current members: none.
 
-- **`MarkMichaelisOneDriveConfiguration`** -- pins every signed-in
-  OneDrive account's sync root under a single configurable parent
-  (default `C:\OneDrive`), applies tenant-redirection policy so future
-  sign-ins land in the right place, and rewrites KFM bindings (Known
-  Folder Move: Documents / Pictures / Desktop) to follow the canonical
-  Work account when its folder moves. Supports `-WhatIf` for dry-run
-  preview before a real migration. On creation, the `RootDir` ACL is
-  hardened to match home-directory permissions so sync roots on
-  alternate volumes are not readable by other local accounts.
-
-  **Requires an elevated PowerShell session** (Run as Administrator):
-  the bundle writes `HKLM:\SOFTWARE\Policies\Microsoft\OneDrive`
-  (`DefaultRootDir`, `KFMSilentOptIn`), which is HKLM and admin-only.
-  The script fails fast with a clear message if launched without
-  elevation. If you have already pre-applied the HKLM policy via
-  Group Policy and only want the per-user reshape, pass
-  `-SkipElevationCheck` to bypass the pre-flight.
-
-  For Business tenants with large cloud-only datasets (where a
-  cross-volume robocopy migration would hydrate every Files-On-Demand
-  placeholder), pass `-FreshSync <Slot-or-DisplayName>...`. Matching
-  accounts are unlinked instead -- the per-account registry slot and
-  local sync folder are deleted, the `DefaultRootDir` policy is still
-  applied, and the user re-signs-in via the OneDrive UI so OneDrive
-  recreates cloud-only placeholders at the policy-directed path. If
-  the KFM owner is in `-FreshSync`, KFM rewrite is skipped and the
-  user reconfigures KFM via OneDrive Settings -> Backup -> Manage
-  backup after re-sign-in.
-
-  Run `Get-Help .\bucket\MarkMichaelisOneDriveConfiguration.ps1 -Full`
-  for the full parameter reference and worked examples.
+- **`MarkMichaelisOneDriveConfiguration`** (removed) -- aimed to pin every
+  signed-in OneDrive account's sync root under a single configurable parent
+  (default `C:\OneDrive`), apply tenant-redirection policy, and rewrite KFM
+  bindings to follow the canonical Work account. **Abandoned and removed from
+  this bucket**: OneDrive reverts external sync-root path rewrites from its
+  internal settings DB, and the only working relocation path (the OneDrive UI
+  "Change location" re-link) cannot be automated and hangs on the author's
+  machine. See
+  [#382](https://github.com/MarkMichaelis/ScoopBucket/issues/382) for the full
+  rationale. The implementation (with its passing test suite) is preserved on
+  branch `archive/onedrive-config-abandoned`.
 
 ## Authoring guidelines
 

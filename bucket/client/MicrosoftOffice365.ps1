@@ -446,8 +446,8 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
 
 Invoke-PackageInstall -Packages $Packages -Bundle 'MicrosoftOffice365'
 
-# OneDrive tenant-redirection policy and KFM rewriting moved to the
-# personal post-install customization bundle
-# MarkMichaelisOneDriveConfiguration. That bundle runs AFTER all install
-# bundles to reshape state (sync roots, KFM, per-app settings) and is
-# the first member of the MarkMichaelis* run-last category.
+# OneDrive tenant-redirection policy and KFM rewriting were planned for the
+# personal post-install bundle MarkMichaelisOneDriveConfiguration, which was
+# abandoned and removed (see issue #382). OneDrive sync-root relocation is not
+# performed by this bucket: OneDrive reverts external path rewrites from its
+# internal settings DB, and the only working re-link path cannot be automated.
