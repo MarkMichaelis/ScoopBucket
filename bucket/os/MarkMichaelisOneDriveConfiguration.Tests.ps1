@@ -1831,3 +1831,187 @@ Describe 'Script entry output (#334)' -Tag 'Heavy' {
         @($successOutput).Count | Should -Be 0
     }
 }
+
+Describe 'Test-OneDrivePathUnderRoot' -Tag 'Light' {
+    It 'matches the root itself' {
+        Test-OneDrivePathUnderRoot -Path 'C:\Users\me\OneDrive - Foo' -Root 'C:\Users\me\OneDrive - Foo' |
+            Should -BeTrue
+    }
+
+    It 'matches a descendant of the root' {
+        Test-OneDrivePathUnderRoot -Path 'C:\Users\me\OneDrive - Foo\Docs\a.txt' -Root 'C:\Users\me\OneDrive - Foo' |
+            Should -BeTrue
+    }
+
+    It 'is case-insensitive' {
+        Test-OneDrivePathUnderRoot -Path 'c:\users\ME\onedrive - foo\a.txt' -Root 'C:\Users\me\OneDrive - Foo' |
+            Should -BeTrue
+    }
+
+    It 'does NOT treat a sibling sharing a name prefix as being under the root' {
+        # 'OneDrive - Michaelis' must not be considered under 'OneDrive'.
+        Test-OneDrivePathUnderRoot -Path 'C:\Users\me\OneDrive - Michaelis\a.txt' -Root 'C:\Users\me\OneDrive' |
+            Should -BeFalse
+    }
+}
+
+Describe 'ConvertFrom-OneDriveHandleOutput' -Tag 'Light' {
+    It 'returns a blocker for a process holding a file under a root' {
+        $lines = @(
+            'SnagitEditor.exe   pid: 42672  type: File           424: C:\Users\me\OneDrive - Foo\shot.snagx'
+        )
+        $result = @(ConvertFrom-OneDriveHandleOutput -Line $lines -Root @('C:\Users\me\OneDrive - Foo'))
+
+        $result.Count | Should -Be 1
+        $result[0].Process | Should -Be 'SnagitEditor.exe'
+        $result[0].Id | Should -Be 42672
+        $result[0].Path | Should -Be 'C:\Users\me\OneDrive - Foo\shot.snagx'
+    }
+
+    It 'excludes OneDrive helper processes by default' {
+        $lines = @(
+            'OneDrive.exe              pid: 100  type: File           10: C:\Users\me\OneDrive - Foo\a.txt'
+            'OneDrive.Sync.Service.exe pid: 101  type: File           11: C:\Users\me\OneDrive - Foo\b.txt'
+            'FileCoAuth.exe            pid: 102  type: File           12: C:\Users\me\OneDrive - Foo\c.txt'
+        )
+        @(ConvertFrom-OneDriveHandleOutput -Line $lines -Root @('C:\Users\me\OneDrive - Foo')).Count |
+            Should -Be 0
+    }
+
+    It 'includes OneDrive helper processes when -IncludeOneDriveProcesses is set' {
+        $lines = @(
+            'OneDrive.exe pid: 100  type: File           10: C:\Users\me\OneDrive - Foo\a.txt'
+        )
+        @(ConvertFrom-OneDriveHandleOutput -Line $lines -Root @('C:\Users\me\OneDrive - Foo') -IncludeOneDriveProcesses).Count |
+            Should -Be 1
+    }
+
+    It 'does not report a handle under a name-prefixed sibling root (boundary)' {
+        # Only the personal 'OneDrive' root is being moved; a handle under
+        # 'OneDrive - Michaelis' must NOT be reported as blocking it.
+        $lines = @(
+            'Code.exe pid: 200  type: File           20: C:\Users\me\OneDrive - Michaelis\notes.md'
+        )
+        @(ConvertFrom-OneDriveHandleOutput -Line $lines -Root @('C:\Users\me\OneDrive')).Count |
+            Should -Be 0
+    }
+
+    It 'ignores non-File and malformed handle lines' {
+        $lines = @(
+            'explorer.exe pid: 300  type: Key            30: \REGISTRY\MACHINE\SOFTWARE'
+            'some banner text that is not a handle line'
+            ''
+        )
+        @(ConvertFrom-OneDriveHandleOutput -Line $lines -Root @('C:\Users\me\OneDrive - Foo')).Count |
+            Should -Be 0
+    }
+}
+
+Describe 'Get-OneDriveMoveBlocker' -Tag 'Light' {
+    It 'parses blockers from the scanned handle output' {
+        Mock -CommandName Resolve-OneDriveHandleExe -MockWith { 'C:\tools\handle64.exe' }
+        Mock -CommandName Invoke-OneDriveOpenHandleScan -MockWith {
+            @('WINWORD.EXE pid: 5555  type: File           50: C:\Users\me\OneDrive - Foo\report.docx')
+        }
+
+        $result = @(Get-OneDriveMoveBlocker -Root @('C:\Users\me\OneDrive - Foo'))
+
+        $result.Count | Should -Be 1
+        $result[0].Process | Should -Be 'WINWORD.EXE'
+        $result[0].Id | Should -Be 5555
+    }
+
+    It 'warns and returns nothing when handle.exe is not installed' {
+        Mock -CommandName Resolve-OneDriveHandleExe -MockWith { $null }
+        Mock -CommandName Invoke-OneDriveOpenHandleScan
+
+        $result = @(Get-OneDriveMoveBlocker -Root @('C:\Users\me\OneDrive - Foo') -WarningAction SilentlyContinue)
+
+        $result.Count | Should -Be 0
+        Should -Invoke Invoke-OneDriveOpenHandleScan -Times 0
+    }
+}
+
+Describe 'Invoke-MarkMichaelisOneDriveConfiguration open-handle pre-flight' -Tag 'Heavy' {
+    BeforeEach {
+        $script:acct = [pscustomobject]@{
+            Slot = 'Business1'; AccountType = 'Business'; DisplayName = 'IntelliTect'
+            UserEmail = 'user@example.com'; UserFolder = 'C:\Users\me\OneDrive - IntelliTect'; TenantId = 'tid-1'; RegistryPath = 'HKCU:\Software\Microsoft\OneDrive\Accounts\Business1'
+        }
+        Mock -CommandName Test-Path -MockWith {
+            param($Path)
+            switch ($Path) {
+                'C:\OneDrive' { $true; break }
+                'C:\OneDrive\IntelliTect' { $true; break }
+                'C:\Users\me\OneDrive - IntelliTect' { $true; break }
+                default { $false }
+            }
+        }
+        Mock -CommandName Get-OneDriveAccountList -MockWith { @($script:acct) }
+        Mock -CommandName Resolve-FreshSyncAccounts -MockWith { @() }
+        Mock -CommandName Get-OneDriveSharePointSiteList -MockWith { @() }
+        Mock -CommandName Get-CurrentKfmPath -MockWith { $null }
+        Mock -CommandName Resolve-KfmRebindAction -MockWith {
+            [pscustomobject]@{ Action = 'None'; OwnerAccount = $null; Reason = 'KFM inactive' }
+        }
+        Mock -CommandName Set-OneDriveTenantDefaultRootDirPolicy
+        Mock -CommandName Set-OneDriveUpdateRingPolicy
+        Mock -CommandName Export-OneDriveRegistryBackup -MockWith { 'C:\backup.reg' }
+        Mock -CommandName Stop-OneDriveExe
+        Mock -CommandName Set-RootDirAclFromHome
+        Mock -CommandName Move-OneDriveFolder
+        Mock -CommandName Update-OneDriveAccountRegistry
+        Mock -CommandName Test-OneDriveFolderMoveVerification -MockWith { $true }
+        Mock -CommandName Invoke-AppFixUps
+        Mock -CommandName Start-OneDriveExe
+        Mock -CommandName Invoke-OneDriveMigrationVerification -MockWith { New-PassingVerificationResult }
+        Mock -CommandName New-Item
+        Mock -CommandName Get-Process -MockWith { $null }
+    }
+
+    It 'aborts before any mutation when an open handle blocks a planned move' {
+        Mock -CommandName Get-OneDriveMoveBlocker -MockWith {
+            @([pscustomobject]@{ Process = 'SnagitEditor.exe'; Id = 999; Path = 'C:\Users\me\OneDrive - IntelliTect\x.snagx' })
+        }
+
+        {
+            Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false -WarningAction SilentlyContinue
+        } | Should -Throw -ExpectedMessage '*SnagitEditor.exe*'
+
+        Should -Invoke Stop-OneDriveExe -Times 0
+        Should -Invoke Move-OneDriveFolder -Times 0
+        Should -Invoke Export-OneDriveRegistryBackup -Times 0
+    }
+
+    It 'proceeds with the migration when -SkipOpenHandleCheck is passed even if blockers exist' {
+        Mock -CommandName Get-OneDriveMoveBlocker -MockWith {
+            @([pscustomobject]@{ Process = 'SnagitEditor.exe'; Id = 999; Path = 'C:\Users\me\OneDrive - IntelliTect\x.snagx' })
+        }
+
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -SkipOpenHandleCheck -Confirm:$false
+
+        Should -Invoke Get-OneDriveMoveBlocker -Times 0
+        Should -Invoke Move-OneDriveFolder -Times 1
+    }
+
+    It 'proceeds normally when no blockers are found' {
+        Mock -CommandName Get-OneDriveMoveBlocker -MockWith { @() }
+
+        Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -Confirm:$false
+
+        Should -Invoke Get-OneDriveMoveBlocker -Times 1
+        Should -Invoke Move-OneDriveFolder -Times 1
+    }
+
+    It 'reports blockers informationally under -WhatIf without throwing' {
+        Mock -CommandName Get-OneDriveMoveBlocker -MockWith {
+            @([pscustomobject]@{ Process = 'SnagitEditor.exe'; Id = 999; Path = 'C:\Users\me\OneDrive - IntelliTect\x.snagx' })
+        }
+
+        {
+            Invoke-MarkMichaelisOneDriveConfiguration -RootDir 'C:\OneDrive' -KfmOwner 'Michaelis' -FreshSync @() -WhatIf -WarningAction SilentlyContinue
+        } | Should -Not -Throw
+
+        Should -Invoke Move-OneDriveFolder -Times 0
+    }
+}
