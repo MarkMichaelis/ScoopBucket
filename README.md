@@ -6,6 +6,11 @@ scripts: base packages for client, developer, and AI workflows; an
 and a curated set of MCP servers; and miscellaneous one-shot system
 configurations.
 
+> **Claude Design** has no separate installer: use Claude Code's `/design`
+> (and `/design-sync`) to work on design projects in a local folder, or the web
+> canvas at [`claude.ai/design`](https://claude.ai/design). It also surfaces in
+> the Claude Desktop sidebar once Anthropic enables the rollout for your account.
+
 ## Bootstrap
 
 ```powershell
