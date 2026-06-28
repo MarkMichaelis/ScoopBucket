@@ -245,6 +245,14 @@ foreach (`$pair in @(
             }
         }
     }
+    # Claude Design (claude.ai/design) has NO separate installer -- it is a
+    # surface of the Claude ecosystem, not a package, so there is deliberately
+    # no ClaudeDesign manifest. Its local-project-directory workflow ships
+    # through THIS `claude` CLI: `/design` imports/edits/syncs a design project
+    # inside your codebase and `/design-sync` pulls a design system in. The
+    # visual canvas lives at claude.ai/design and appears in the Claude Desktop
+    # sidebar (Chat / Cowork / Code / Design) once Anthropic enables its gated
+    # rollout for your account. Nothing to install here beyond Claude Code.
     [Package]@{
         Name        = 'Claude Code CLI'
         Installer   = 'scoop'
@@ -252,7 +260,7 @@ foreach (`$pair in @(
         CliCommands = @('claude')
         DependsOn   = @('Node.js')
         Completion  = 'auto'
-        Notes       = 'claude has no completion subcommand and no PSCompletions entry. Hand-curated top-level command list.'
+        Notes       = 'claude has no completion subcommand and no PSCompletions entry. Hand-curated top-level command list. Also the install home for Claude Design''s local-project workflow (/design, /design-sync); claude.ai/design is the web canvas and there is no separate ClaudeDesign package.'
         ExpectedCompletions = @{ claude = @('--help','--version','mcp') }
         NativeCommandScript = {
             @"
