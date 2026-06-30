@@ -97,6 +97,31 @@ Register-ArgumentCompleter -Native -CommandName devenv -ScriptBlock {
     }
 
     [Package]@{
+        Name        = 'Lazygit'
+        Installer   = 'winget'
+        Id          = 'JesseDuffield.lazygit'
+        CliCommands = @('lazygit')
+        Completion  = 'auto'
+        Notes       = 'lazygit is a terminal UI for git; its CLI surface is a small set of setup flags (no `lazygit completion powershell` subcommand and no PSCompletions catalog entry). Hand-curated flag list mirrors bat/fzf/code in the bucket.'
+        ExpectedCompletions = @{ lazygit = @('--help','--version','--config') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName lazygit -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        '--help','-h','--version','-v','--debug','-d','--config','-c',
+        '--print-config-dir','-cd','--use-config-dir','-ucd','--path','-p',
+        '--filter','-f','--git-dir','-g','--work-tree','-w','--screen-mode','-sm',
+        '--profile','-pf','--tail','-t'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
+
+    [Package]@{
         Name        = 'Visual Studio Code'
         Installer   = 'winget'
         Id          = 'Microsoft.VisualStudioCode'
