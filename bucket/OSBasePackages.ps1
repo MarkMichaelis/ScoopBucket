@@ -85,6 +85,8 @@ Register-ArgumentCompleter -Native -CommandName es -ScriptBlock {
     [Package]@{ Name = 'Google Chrome';                 Installer = 'winget'; Id = 'Google.Chrome' }
     [Package]@{ Name = 'WinDirStat';                    Installer = 'winget'; Id = 'WinDirStat.WinDirStat' }
     [Package]@{ Name = 'UniversalSilentSwitchFinder';   Installer = 'winget'; Id = 'WindowsPostInstallWizard.UniversalSilentSwitchFinder' }
+    [Package]@{ Name = 'Tailscale';                     Installer = 'winget'; Id = 'Tailscale.Tailscale' }
+    [Package]@{ Name = 'Parsec';                        Installer = 'winget'; Id = 'Parsec.Parsec' }
     [Package]@{
         Name        = 'bat'
         Installer   = 'winget'
