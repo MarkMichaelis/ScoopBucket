@@ -389,6 +389,22 @@ Describe 'Specific cross-bundle placement contracts' -Tag 'Light','Bundle' {
         $bc.HasPostInstallScript | Should -BeTrue
     }
 
+    It 'Parsec uses a hash-resilient custom installer rather than the rolling-URL winget manifest (#388)' {
+        # The winget Parsec.Parsec manifest pins InstallerSha256 against the
+        # rolling https://builds.parsec.app/package/parsec-windows.exe URL, so
+        # an elevated machine-scope install fails "Installer hash does not
+        # match; this cannot be overridden when running as admin" the moment
+        # Parsec ships a newer build. OSBasePackages therefore installs Parsec
+        # via a custom download + silent-switch script (no hash check), gated
+        # by VerifyScript -- mirroring the Readwise Reader precedent.
+        $parsec = $script:byBundle.OSBasePackages | Where-Object Name -eq 'Parsec'
+        $parsec                        | Should -Not -BeNullOrEmpty
+        $parsec.Installer              | Should -Be 'custom'
+        $parsec.HasCustomInstallScript | Should -BeTrue
+        $parsec.HasVerifyScript        | Should -BeTrue
+        $parsec.Id                     | Should -BeNullOrEmpty -Because 'a custom installer carries no winget/scoop Id'
+    }
+
     It 'Get-Package surfaces WingetExtraArgs through the child-runspace bundle loader (#161)' {
         # Regression: PR #159 added WingetExtraArgs on the [Package] class
         # and to Test-Installs.ps1's CI wrapper, but the curated hashtable

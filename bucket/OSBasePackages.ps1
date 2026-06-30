@@ -86,7 +86,25 @@ Register-ArgumentCompleter -Native -CommandName es -ScriptBlock {
     [Package]@{ Name = 'WinDirStat';                    Installer = 'winget'; Id = 'WinDirStat.WinDirStat' }
     [Package]@{ Name = 'UniversalSilentSwitchFinder';   Installer = 'winget'; Id = 'WindowsPostInstallWizard.UniversalSilentSwitchFinder' }
     [Package]@{ Name = 'Tailscale';                     Installer = 'winget'; Id = 'Tailscale.Tailscale' }
-    [Package]@{ Name = 'Parsec';                        Installer = 'winget'; Id = 'Parsec.Parsec' }
+    [Package]@{
+        Name        = 'Parsec'
+        Installer   = 'custom'
+        Notes       = 'winget Parsec.Parsec pins a SHA256 against the rolling builds.parsec.app installer URL; once Parsec ships a newer build the hash mismatches and an elevated (machine-scope) winget install cannot override it ("Installer hash does not match; this cannot be overridden when running as admin", #388). Download the current parsec-windows.exe and run the documented silent switches instead.'
+        UpdateMode  = 'Reinstall'  # re-run the idempotent download-latest installer; VerifyScript gates it.
+        CustomInstallScript = {
+            $exe = Join-Path $env:ProgramFiles 'Parsec\parsecd.exe'
+            if (Test-Path $exe) { return }
+            $tmp = Join-Path $env:TEMP 'parsec-windows.exe'
+            Invoke-WebRequest -Uri 'https://builds.parsec.app/package/parsec-windows.exe' -OutFile $tmp
+            try {
+                $proc = Start-Process -FilePath $tmp -ArgumentList '/silent', '/norun', '/nocleanuser', '/allusers' -Wait -PassThru
+                if ($proc.ExitCode -ne 0) { throw "Parsec installer exited with code $($proc.ExitCode)." }
+            } finally {
+                Remove-Item $tmp -ErrorAction Ignore
+            }
+        }
+        VerifyScript = { Test-Path (Join-Path $env:ProgramFiles 'Parsec\parsecd.exe') }
+    }
     [Package]@{
         Name        = 'bat'
         Installer   = 'winget'
