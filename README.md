@@ -83,8 +83,16 @@ parsing only for legacy ones).
 Each migrated bundle now looks like:
 
 ```powershell
-$scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
-if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
+#region MarkMichaelis.ScoopBucket bundle module import (scoop-portable; see README)
+$scoopBucketModule = 'MarkMichaelis.ScoopBucket'
+$scoopBucketPsd1 = Join-Path $PSScriptRoot "..\module\$scoopBucketModule\$scoopBucketModule.psd1"
+if (-not (Test-Path $scoopBucketPsd1)) {
+    $scoopBucketRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $PSScriptRoot '..\..\..' }
+    $scoopBucketFound = Get-ChildItem -Path (Join-Path $scoopBucketRoot "buckets\*\module\$scoopBucketModule\$scoopBucketModule.psd1") -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($scoopBucketFound) { $scoopBucketPsd1 = $scoopBucketFound.FullName }
+}
+if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module $scoopBucketModule -Force }
+#endregion MarkMichaelis.ScoopBucket bundle module import
 
 $Packages = [Package[]]@(
     [Package]@{
@@ -97,6 +105,19 @@ $Packages = [Package[]]@(
 
 Invoke-PackageInstall -Packages $Packages -Bundle 'OSBasePackages'
 ```
+
+The import block is deliberately portable across three run contexts, in
+priority order: (1) a repo checkout, where the module lives at
+`..\module\...` next to the bundle; (2) a `scoop install`/`update`, where
+scoop downloads only the single bundle `.ps1` into
+`~\scoop\apps\<bundle>\<version>\` and runs it under `-NoProfile` -- so the
+block searches the bucket clone scoop always keeps on disk at
+`<scoopRoot>\buckets\*\module\MarkMichaelis.ScoopBucket\...` (preferring
+`$env:SCOOP`, else walking up from the app dir); and (3) a by-name
+`Import-Module` fallback for machines where the module is already on the
+`PSModulePath`. Because a manifest `url` points at its bundle `.ps1`, any
+edit to this block requires a minor version bump in the referencing
+manifest(s) (see Manifest versioning below).
 
 The `[Package]` class enforces enums on `Installer` / `Source` / `Scope` /
 `Completion` and rejects misspelled property names at load time. See
@@ -119,6 +140,25 @@ To use the module locally:
 Import-Module MarkMichaelis.ScoopBucket -Force
 Get-Command -Module MarkMichaelis.ScoopBucket
 ```
+
+#### Make the module available on any machine (opt-in)
+
+The bare `Install-Package <name>` wrapper only wins the name clash with
+`PackageManagement\Install-Package` when this module is imported by your
+profile. To register it on a machine -- a junction at
+`<scoopRoot>\modules\MarkMichaelis.ScoopBucket` plus one idempotent
+`Import-Module MarkMichaelis.ScoopBucket` line appended to your
+`CurrentUserAllHosts` profile -- run either:
+
+```powershell
+scoop install MarkMichaelis/RegisterBucketModule    # uses the bucket clone
+.\Register-BucketModule.ps1 -FromLocalRepo -WhatIf  # dev machine: preview first
+```
+
+This is strictly opt-in (no bundle `depends` on it), idempotent, and
+`SupportsShouldProcess` (`-WhatIf`/`-Confirm`). Reverse it with
+`scoop uninstall RegisterBucketModule` or
+`.\Register-BucketModule.ps1 -Remove`.
 
 Top-level helpers for cross-bundle queries:
 
