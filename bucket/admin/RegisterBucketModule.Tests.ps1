@@ -63,6 +63,19 @@ Describe 'Register-BucketModule' -Tag 'Light', 'Admin' {
             Get-ImportLineCount -ProfilePath $script:Prof | Should -Be 1
         }
 
+        It 'rewrites a profile saved as UTF-16 to a single consistent UTF-8 encoding' {
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $script:Prof) | Out-Null
+            Set-Content -LiteralPath $script:Prof -Value '# pre-existing profile line' -Encoding unicode
+            & $script:Script -ModulePath $script:Src.Path -ScoopRoot $script:Scoop -ProfilePath $script:Prof
+            Get-ImportLineCount -ProfilePath $script:Prof | Should -Be 1
+            # The original line must survive intact (not mojibake from a mixed-encoding append).
+            (Get-Content -Raw -LiteralPath $script:Prof) | Should -Match 'pre-existing profile line'
+            # The whole file must be rewritten as UTF-8, never left as UTF-16 (BOM 0xFF 0xFE),
+            # so the profile never ends up with a mixed/inconsistent encoding.
+            $bytes = [System.IO.File]::ReadAllBytes($script:Prof)
+            ($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) | Should -BeFalse -Because 'the profile should be normalized to UTF-8, not left as UTF-16'
+        }
+
         It 'is idempotent: a second run keeps one junction and one Import-Module line' {
             & $script:Script -ModulePath $script:Src.Path -ScoopRoot $script:Scoop -ProfilePath $script:Prof
             & $script:Script -ModulePath $script:Src.Path -ScoopRoot $script:Scoop -ProfilePath $script:Prof

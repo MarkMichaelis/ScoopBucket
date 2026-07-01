@@ -183,7 +183,10 @@ function Add-BucketModuleImport {
     if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
     $block = $script:BeginMarker + "`n" + "Import-Module $($script:ModuleName)" + "`n" + $script:EndMarker
     $prefix = if ($current -and -not $current.EndsWith("`n")) { "`n" } else { '' }
-    Add-Content -LiteralPath $ProfilePath -Value ($prefix + $block) -Encoding utf8
+    # Rewrite the whole profile in one pass (mirrors Remove-BucketModuleImport) so a file
+    # previously saved with a different encoding (e.g. UTF-16) is not corrupted by appending
+    # UTF-8 bytes; the result is a single, consistent UTF-8 encoding. (#391 review)
+    Set-Content -LiteralPath $ProfilePath -Value ($current + $prefix + $block) -Encoding utf8
     Write-Verbose "Added $($script:ModuleName) import block to $ProfilePath"
 }
 
