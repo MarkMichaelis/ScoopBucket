@@ -107,6 +107,14 @@ Describe 'Register-BucketModule' -Tag 'Light', 'Admin' {
             # The old source must remain intact -- the delete must not follow the link.
             Test-Path -LiteralPath (Join-Path $script:Src.Path 'MarkMichaelis.ScoopBucket.psd1') | Should -BeTrue
         }
+
+        It 'rejects a -ModulePath that points at a file rather than a directory' {
+            $filePath = Join-Path $script:Root 'notadir.txt'
+            New-Item -ItemType Directory -Force -Path $script:Root | Out-Null
+            Set-Content -LiteralPath $filePath -Value 'x' -Encoding utf8
+            { & $script:Script -ModulePath $filePath -ScoopRoot $script:Scoop -ProfilePath $script:Prof } | Should -Throw -ExpectedMessage '*ModulePath not found or not a directory*'
+            Test-Path -LiteralPath $script:Link | Should -BeFalse
+        }
     }
 
     Context 'when a non-junction path already occupies the link location' {
