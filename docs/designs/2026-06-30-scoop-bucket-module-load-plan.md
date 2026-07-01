@@ -50,7 +50,9 @@ New repo-root `Register-BucketModule.ps1` (`[CmdletBinding(SupportsShouldProcess
 - Appends exactly one idempotent, sentinel-bracketed `Import-Module MarkMichaelis.ScoopBucket`
   block to `-ProfilePath` (default `$PROFILE.CurrentUserAllHosts`). Distinct sentinel
   (`RegisterBucketModule`) so it never collides with Install-Module.ps1's lazy v3 block.
-- `-Remove` reverses both (junction only if it points at our module; profile block always).
+- `-Remove` reverses both: the junction (only when it is a reparse point at that path -- a
+  real directory there is left untouched with a warning, and only the link is deleted, never
+  the target contents) and the sentinel-bracketed profile block (always).
 
 New opt-in manifest `bucket\admin\RegisterBucketModule.json` (mirrors the admin precedent;
 NO new executable `.ps1` under bucket/ so bundle discovery never executes it):
