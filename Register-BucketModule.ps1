@@ -134,7 +134,7 @@ function Install-BucketModuleJunction {
     if (Test-JunctionTarget -Link $Link -Target $Source) { Write-Verbose "Junction already current: $Link"; return }
     $exists = Test-Path -LiteralPath $Link
     if ($exists -and -not (Test-IsReparsePoint -Path $Link)) {
-        throw "Refusing to replace a real directory (not a junction): $Link"
+        throw "Refusing to replace an existing path that is not a junction (reparse point): $Link"
     }
     if (-not $PSCmdlet.ShouldProcess($Link, "Junction to $Source")) { return }
     if ($exists) {
@@ -158,7 +158,7 @@ function Uninstall-BucketModuleJunction {
     [CmdletBinding(SupportsShouldProcess)]
     param([string]$Link)
     if (-not (Test-Path -LiteralPath $Link)) { Write-Verbose "No junction at $Link."; return }
-    if (-not (Test-IsReparsePoint -Path $Link)) { Write-Warning "Not a junction; leaving as-is: $Link"; return }
+    if (-not (Test-IsReparsePoint -Path $Link)) { Write-Warning "Path exists but is not a junction (reparse point); leaving as-is: $Link"; return }
     if ($PSCmdlet.ShouldProcess($Link, 'Remove junction')) {
         # Strip ReadOnly (New-Item -ItemType Junction sets it on some hosts) then
         # delete only the link (non-recursive) so we never follow the reparse point

@@ -109,6 +109,39 @@ Describe 'Register-BucketModule' -Tag 'Light', 'Admin' {
         }
     }
 
+    Context 'when a non-junction path already occupies the link location' {
+        BeforeEach {
+            $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            $script:Scoop = Join-Path $script:Root 'scoop'
+            $script:Src = New-FakeModuleSource -Path (Join-Path $script:Root 'src\MarkMichaelis.ScoopBucket')
+            $script:Prof = Join-Path $script:Root 'profile\Microsoft.PowerShell_profile.ps1'
+            $script:Link = Join-Path $script:Scoop 'modules\MarkMichaelis.ScoopBucket'
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $script:Link) | Out-Null
+        }
+
+        It 'refuses to replace a real directory at the link path and leaves it intact' {
+            New-Item -ItemType Directory -Force -Path $script:Link | Out-Null
+            Set-Content -LiteralPath (Join-Path $script:Link 'keep.txt') -Value 'precious' -Encoding utf8
+            { & $script:Script -ModulePath $script:Src.Path -ScoopRoot $script:Scoop -ProfilePath $script:Prof } | Should -Throw
+            Test-IsJunction -Path $script:Link | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $script:Link 'keep.txt') | Should -BeTrue
+        }
+
+        It 'refuses to replace a plain file at the link path (the guard is not directory-specific)' {
+            Set-Content -LiteralPath $script:Link -Value 'not a junction' -Encoding utf8
+            { & $script:Script -ModulePath $script:Src.Path -ScoopRoot $script:Scoop -ProfilePath $script:Prof } | Should -Throw
+            (Get-Item -LiteralPath $script:Link -Force).PSIsContainer | Should -BeFalse
+            (Get-Content -Raw -LiteralPath $script:Link).Trim() | Should -Be 'not a junction'
+        }
+
+        It '-Remove leaves a non-junction directory in place and does not throw' {
+            New-Item -ItemType Directory -Force -Path $script:Link | Out-Null
+            Set-Content -LiteralPath (Join-Path $script:Link 'keep.txt') -Value 'precious' -Encoding utf8
+            { & $script:Script -ScoopRoot $script:Scoop -ProfilePath $script:Prof -Remove -WarningAction SilentlyContinue } | Should -Not -Throw
+            Test-Path -LiteralPath (Join-Path $script:Link 'keep.txt') | Should -BeTrue
+        }
+    }
+
     Context 'discovering the module in the scoop bucket clone' {
         It 'junctions to <scoopRoot>\buckets\*\module\MarkMichaelis.ScoopBucket when no source is given' {
             $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
