@@ -98,12 +98,12 @@ function Resolve-ScoopRoot {
 function Resolve-ModuleSource {
     param([string]$ModulePath, [switch]$FromLocalRepo, [string]$ScoopRoot, [string]$ScriptRoot)
     if ($ModulePath) {
-        if (-not (Test-Path -LiteralPath $ModulePath)) { throw "ModulePath not found: $ModulePath" }
+        if (-not (Test-Path -LiteralPath $ModulePath -PathType Container)) { throw "ModulePath not found or not a directory: $ModulePath" }
         return (Resolve-Path -LiteralPath $ModulePath).Path
     }
     if ($FromLocalRepo) {
         $local = Join-Path $ScriptRoot "module\$($script:ModuleName)"
-        if (-not (Test-Path -LiteralPath $local)) { throw "Local repo module not found beside the script: $local" }
+        if (-not (Test-Path -LiteralPath $local -PathType Container)) { throw "Local repo module not found (or not a directory) beside the script: $local" }
         return (Resolve-Path -LiteralPath $local).Path
     }
     $pattern = Join-Path $ScoopRoot "buckets\*\module\$($script:ModuleName)"
