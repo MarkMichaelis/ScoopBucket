@@ -84,7 +84,7 @@ Describe 'All bundle headers use the canonical scoop-portable module import' -Ta
     }
 
     It 'finds the full shipped bundle set (guards the discovery predicate)' {
-        $script:BundleFiles.Count | Should -BeGreaterOrEqual 16 -Because 'the 16 production bundles must all be discovered'
+        $script:BundleFiles.Count | Should -Be 16 -Because 'the discovery predicate must match exactly the 16 production bundles -- update this count deliberately when adding or removing a bundle'
     }
 
     It '<_.Name> uses the canonical region block (only branch-1 depth may differ)' -ForEach $script:BundleCases {
