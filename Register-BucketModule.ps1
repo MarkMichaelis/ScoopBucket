@@ -129,13 +129,14 @@ function Test-JunctionTarget {
 }
 
 function Install-BucketModuleJunction {
-    param([string]$Link, [string]$Source, $Cmdlet)
+    [CmdletBinding(SupportsShouldProcess)]
+    param([string]$Link, [string]$Source)
     if (Test-JunctionTarget -Link $Link -Target $Source) { Write-Verbose "Junction already current: $Link"; return }
     $exists = Test-Path -LiteralPath $Link
     if ($exists -and -not (Test-IsReparsePoint -Path $Link)) {
         throw "Refusing to replace a real directory (not a junction): $Link"
     }
-    if (-not $Cmdlet.ShouldProcess($Link, "Junction to $Source")) { return }
+    if (-not $PSCmdlet.ShouldProcess($Link, "Junction to $Source")) { return }
     if ($exists) { (Get-Item -LiteralPath $Link -Force).Delete() }
     $parent = Split-Path -Parent $Link
     if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
@@ -144,21 +145,23 @@ function Install-BucketModuleJunction {
 }
 
 function Uninstall-BucketModuleJunction {
-    param([string]$Link, $Cmdlet)
+    [CmdletBinding(SupportsShouldProcess)]
+    param([string]$Link)
     if (-not (Test-Path -LiteralPath $Link)) { Write-Verbose "No junction at $Link."; return }
     if (-not (Test-IsReparsePoint -Path $Link)) { Write-Warning "Not a junction; leaving as-is: $Link"; return }
-    if ($Cmdlet.ShouldProcess($Link, 'Remove junction')) {
+    if ($PSCmdlet.ShouldProcess($Link, 'Remove junction')) {
         (Get-Item -LiteralPath $Link -Force).Delete()
         Write-Verbose "Removed junction $Link"
     }
 }
 
 function Add-BucketModuleImport {
-    param([string]$ProfilePath, $Cmdlet)
+    [CmdletBinding(SupportsShouldProcess)]
+    param([string]$ProfilePath)
     $current = if (Test-Path -LiteralPath $ProfilePath) { Get-Content -Raw -LiteralPath $ProfilePath } else { '' }
     if ($null -eq $current) { $current = '' }
     if ($current -match [regex]::Escape($script:BeginMarker)) { Write-Verbose "Import block already present."; return }
-    if (-not $Cmdlet.ShouldProcess($ProfilePath, "Add $($script:ModuleName) import")) { return }
+    if (-not $PSCmdlet.ShouldProcess($ProfilePath, "Add $($script:ModuleName) import")) { return }
     $parent = Split-Path -Parent $ProfilePath
     if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
     $block = $script:BeginMarker + "`n" + "Import-Module $($script:ModuleName)" + "`n" + $script:EndMarker
@@ -168,13 +171,14 @@ function Add-BucketModuleImport {
 }
 
 function Remove-BucketModuleImport {
-    param([string]$ProfilePath, $Cmdlet)
+    [CmdletBinding(SupportsShouldProcess)]
+    param([string]$ProfilePath)
     if (-not (Test-Path -LiteralPath $ProfilePath)) { Write-Verbose "No profile at $ProfilePath."; return }
     $current = Get-Content -Raw -LiteralPath $ProfilePath
     if ($null -eq $current) { return }
     $pattern = '(?s)\r?\n?' + [regex]::Escape($script:BeginMarker) + '.*?' + [regex]::Escape($script:EndMarker) + '\r?\n?'
     if ($current -notmatch $pattern) { Write-Verbose "No import block found in $ProfilePath."; return }
-    if ($Cmdlet.ShouldProcess($ProfilePath, "Remove $($script:ModuleName) import")) {
+    if ($PSCmdlet.ShouldProcess($ProfilePath, "Remove $($script:ModuleName) import")) {
         $updated = [regex]::Replace($current, $pattern, "`n")
         Set-Content -LiteralPath $ProfilePath -Value $updated -Encoding utf8
         Write-Verbose "Removed import block from $ProfilePath"
@@ -186,11 +190,11 @@ $resolvedScoop = Resolve-ScoopRoot -ScoopRoot $ScoopRoot
 $link = Join-Path (Join-Path $resolvedScoop 'modules') $script:ModuleName
 
 if ($Remove) {
-    Uninstall-BucketModuleJunction -Link $link -Cmdlet $PSCmdlet
-    Remove-BucketModuleImport -ProfilePath $ProfilePath -Cmdlet $PSCmdlet
+    Uninstall-BucketModuleJunction -Link $link
+    Remove-BucketModuleImport -ProfilePath $ProfilePath
     return
 }
 
 $source = Resolve-ModuleSource -ModulePath $ModulePath -FromLocalRepo:$FromLocalRepo -ScoopRoot $resolvedScoop -ScriptRoot $PSScriptRoot
-Install-BucketModuleJunction -Link $link -Source $source -Cmdlet $PSCmdlet
-Add-BucketModuleImport -ProfilePath $ProfilePath -Cmdlet $PSCmdlet
+Install-BucketModuleJunction -Link $link -Source $source
+Add-BucketModuleImport -ProfilePath $ProfilePath
