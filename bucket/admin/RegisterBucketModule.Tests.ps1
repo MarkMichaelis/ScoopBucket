@@ -84,6 +84,29 @@ Describe 'Register-BucketModule' -Tag 'Light', 'Admin' {
             # -Remove must delete only the link, never the real module source.
             Test-Path -LiteralPath (Join-Path $script:Src.Path 'MarkMichaelis.ScoopBucket.psd1') | Should -BeTrue
         }
+
+        It '-Remove deletes a junction that carries the ReadOnly attribute (some hosts set it)' {
+            & $script:Script -ModulePath $script:Src.Path -ScoopRoot $script:Scoop -ProfilePath $script:Prof
+            # New-Item -ItemType Junction sets ReadOnly on some hosts; simulate that so a
+            # plain (Get-Item).Delete() would fail with Access denied. See PR #391 review.
+            $item = Get-Item -LiteralPath $script:Link -Force
+            $item.Attributes = $item.Attributes -bor [System.IO.FileAttributes]::ReadOnly
+            & $script:Script -ScoopRoot $script:Scoop -ProfilePath $script:Prof -Remove
+            Test-Path -LiteralPath $script:Link | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $script:Src.Path 'MarkMichaelis.ScoopBucket.psd1') | Should -BeTrue
+        }
+
+        It 're-points a stale ReadOnly junction to a new source without following the reparse point' {
+            & $script:Script -ModulePath $script:Src.Path -ScoopRoot $script:Scoop -ProfilePath $script:Prof
+            $item = Get-Item -LiteralPath $script:Link -Force
+            $item.Attributes = $item.Attributes -bor [System.IO.FileAttributes]::ReadOnly
+            $src2 = New-FakeModuleSource -Path (Join-Path $script:Root 'src2\MarkMichaelis.ScoopBucket')
+            & $script:Script -ModulePath $src2.Path -ScoopRoot $script:Scoop -ProfilePath $script:Prof
+            Test-IsJunction -Path $script:Link | Should -BeTrue
+            Read-ThroughLink -LinkDir $script:Link | Should -Be $src2.Marker
+            # The old source must remain intact -- the delete must not follow the link.
+            Test-Path -LiteralPath (Join-Path $script:Src.Path 'MarkMichaelis.ScoopBucket.psd1') | Should -BeTrue
+        }
     }
 
     Context 'discovering the module in the scoop bucket clone' {

@@ -137,7 +137,17 @@ function Install-BucketModuleJunction {
         throw "Refusing to replace a real directory (not a junction): $Link"
     }
     if (-not $PSCmdlet.ShouldProcess($Link, "Junction to $Source")) { return }
-    if ($exists) { (Get-Item -LiteralPath $Link -Force).Delete() }
+    if ($exists) {
+        # New-Item -ItemType Junction sets the ReadOnly attribute on some hosts,
+        # which makes a plain delete fail with Access denied. Strip ReadOnly, then
+        # delete ONLY the link (non-recursive) so we never follow the reparse point
+        # into the target. Mirrors module\Install-Module.ps1 (#391 review).
+        $stale = Get-Item -LiteralPath $Link -Force
+        if (($stale.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
+            $stale.Attributes = $stale.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+        }
+        [System.IO.Directory]::Delete($Link, $false)
+    }
     $parent = Split-Path -Parent $Link
     if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
     New-Item -ItemType Junction -Path $Link -Value $Source | Out-Null
@@ -150,7 +160,14 @@ function Uninstall-BucketModuleJunction {
     if (-not (Test-Path -LiteralPath $Link)) { Write-Verbose "No junction at $Link."; return }
     if (-not (Test-IsReparsePoint -Path $Link)) { Write-Warning "Not a junction; leaving as-is: $Link"; return }
     if ($PSCmdlet.ShouldProcess($Link, 'Remove junction')) {
-        (Get-Item -LiteralPath $Link -Force).Delete()
+        # Strip ReadOnly (New-Item -ItemType Junction sets it on some hosts) then
+        # delete only the link (non-recursive) so we never follow the reparse point
+        # into the target. Mirrors module\Install-Module.ps1 (#391 review).
+        $existing = Get-Item -LiteralPath $Link -Force
+        if (($existing.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
+            $existing.Attributes = $existing.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+        }
+        [System.IO.Directory]::Delete($Link, $false)
         Write-Verbose "Removed junction $Link"
     }
 }
