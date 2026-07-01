@@ -1,7 +1,15 @@
 
 Write-Verbose 'Installing and configuring PowerShell...'
-$scoopBucketPsd1 = Join-Path $PSScriptRoot '..\..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
-if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
+#region MarkMichaelis.ScoopBucket bundle module import (scoop-portable; see README)
+$scoopBucketModule = 'MarkMichaelis.ScoopBucket'
+$scoopBucketPsd1 = Join-Path $PSScriptRoot "..\..\module\$scoopBucketModule\$scoopBucketModule.psd1"
+if (-not (Test-Path $scoopBucketPsd1)) {
+    $scoopBucketRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $PSScriptRoot '..\..\..' }
+    $scoopBucketFound = Get-ChildItem -Path (Join-Path $scoopBucketRoot "buckets\*\module\$scoopBucketModule\$scoopBucketModule.psd1") -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($scoopBucketFound) { $scoopBucketPsd1 = $scoopBucketFound.FullName }
+}
+if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module $scoopBucketModule -Force }
+#endregion MarkMichaelis.ScoopBucket bundle module import
 
 # Remove the Microsoft Store / MSIX build of PowerShell 7 so the first-party
 # MSI build (C:\Program Files\PowerShell\7) is the resolved `pwsh` and its
