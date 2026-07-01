@@ -58,7 +58,9 @@ class PackageResult {
     # Single human-readable cell merging the version transition and the
     # reason for the summary table's `Details` column (#283). Rules:
     #   Updated/Installed : 'Reinstalled', or 'from -> to', or '-> to' (fresh
-    #                       install), suffixed ' (WhatIf)' on a dry run.
+    #                       install), suffixed ' (WhatIf)' on a dry run. A fresh
+    #                       install with no known version and no other note
+    #                       renders 'new install' rather than a blank cell.
     #   AlreadyLatest     : '<version> (latest)'.
     #   NotInstalled      : 'not installed'.
     #   SelfManaged       : 'self-managed'.
@@ -82,7 +84,13 @@ class PackageResult {
                     if ($d) { return "$d (WhatIf)" }
                     return [string]$this.Reason
                 }
-                if (-not $d) { return [string]$this.Reason }
+                if (-not $d) {
+                    # A fresh install with no version transition and no other
+                    # note would otherwise leave the Details cell blank; label
+                    # it explicitly so a new install reads as such (#283).
+                    if ($this.Status -eq 'Installed' -and -not $this.Reason) { return 'new install' }
+                    return [string]$this.Reason
+                }
                 return $d
             }
             '^(AlreadyLatest|AlreadyInstalled)$' {
