@@ -44,3 +44,47 @@ Describe 'ClientBasePackages: Todoist desktop entry' -Tag 'Light','Bundle' {
         @($desktop.Companions) | Should -Contain 'Bitwarden CLI'
     }
 }
+
+Describe 'ClientBasePackages: Amazon Kindle Store migration (#394)' -Tag 'Light','Bundle' {
+
+    It 'declares Kindle as the Microsoft Store package' {
+        $kindle = @($script:pkgs | Where-Object Name -EQ 'Amazon Kindle')
+        $kindle.Count        | Should -Be 1
+        $kindle[0].Installer | Should -Be 'winget'
+        $kindle[0].Id        | Should -Be '9P8JQ0JJSTLL'
+        $kindle[0].Source    | Should -Be 'msstore'
+        $kindle[0].Bundle    | Should -Be 'ClientBasePackages'
+    }
+
+    It 'no longer declares the legacy Kindle for PC package (discontinued 2026-06-30)' {
+        # Amazon.Kindle still resolves in the winget default source and its
+        # installer URL is still live, so a regression here would install
+        # silently and pass CI while placing dead software on the machine.
+        @($script:pkgs | Where-Object Id -EQ 'Amazon.Kindle').Count | Should -Be 0
+    }
+
+    It 'records why the Kindle version cannot be pinned' {
+        $kindle = @($script:pkgs | Where-Object Name -EQ 'Amazon Kindle')[0]
+        $kindle.Notes | Should -Match 'Epubor'
+    }
+}
+
+Describe 'ClientBasePackages: Epubor manifest (#394)' -Tag 'Light','Bundle' {
+
+    BeforeAll {
+        $script:epuborPath = Join-Path $PSScriptRoot 'client\Epubor.json'
+        $script:epubor     = Get-Content -Raw -Path $script:epuborPath | ConvertFrom-Json
+    }
+
+    It 'declares a real upstream version rather than the 1.00.001 placeholder' {
+        $script:epubor.version | Should -Not -Be '1.00.001'
+        $script:epubor.version | Should -Match '^\d+\.\d+\.\d+\.\d+$'
+    }
+
+    It 'still downloads from the floating latest URL' {
+        # Epubor publishes versioned URLs only for select archived builds, so
+        # the floating URL stays the install source and `version` is a record
+        # of what latest was when the manifest was last refreshed.
+        @($script:epubor.url) | Should -Contain 'https://download.epubor.com/epubor_ultimate.exe'
+    }
+}

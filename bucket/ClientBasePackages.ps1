@@ -12,7 +12,7 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 # Refs:
 #   #5/#6/#7/#10/#12  scoop extras for apps with no machine-scope winget installer
 #   #8/#46            Pushbullet: no maintained installer; CISkip
-#   #9/#11            Snagit / Todoist via Microsoft Store (winget --source msstore)
+#   #9/#11/#394       Snagit / Todoist / Kindle via Microsoft Store (winget --source msstore)
 #   #13/#46           DbxCli delisted from choco; install via local bucket manifest
 #   #27               foxitreader choco package times out; use winget
 #   #73               bw / gcloud have no PSCompletions catalog entry — ship our own native completer
@@ -101,7 +101,6 @@ Register-ArgumentCompleter -Native -CommandName espeak-ng -ScriptBlock {
     [Package]@{ Name = 'Spotify';          Installer = 'scoop';  Id = 'extras/spotify' }
     [Package]@{ Name = 'Zoom';             Installer = 'scoop';  Id = 'extras/zoom' }
 
-    [Package]@{ Name = 'Amazon Kindle';    Installer = 'winget'; Id = 'Amazon.Kindle' }
     [Package]@{ Name = 'Bitwarden';        Installer = 'winget'; Id = 'Bitwarden.Bitwarden'
                 Companions = @('Bitwarden CLI') }
     [Package]@{
@@ -168,6 +167,8 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
     [Package]@{ Name = 'Signal';           Installer = 'winget'; Id = 'OpenWhisperSystems.Signal'
                 Notes = 'Upstream MSI occasionally crashes on the CI runner with ACCESS_VIOLATION (#22/#65/#66/#75); Install-WingetPackage retries up to 3x before reporting failure.' }
 
+    [Package]@{ Name = 'Amazon Kindle';    Installer = 'winget'; Id = '9P8JQ0JJSTLL'; Source = 'msstore'
+                Notes = 'Legacy Kindle for PC (Amazon.Kindle, winget default source) was discontinued 2026-06-30; the Store app is the only supported distribution (#394). Version is upstream-coupled to Epubor (bucket/client/Epubor.json) and cannot be pinned: msstore exposes a single "Unknown" version, winget pin does not stop Store auto-update, and Store update suppression is machine-wide only. Expect occasional DRM breakage until Epubor catches up to a new Kindle build.' }
     [Package]@{ Name = 'ChatGPT (Store)';  Installer = 'winget'; Id = '9NT1R1C2HH7J'; Source = 'msstore' }
     [Package]@{ Name = 'VPN Unlimited';    Installer = 'winget'; Id = '9NRQBLR605RG'; Source = 'msstore' }
     [Package]@{ Name = 'Grammarly';        Installer = 'winget'; Id = 'XPDDXX9QW8N9D7'; Source = 'msstore' }

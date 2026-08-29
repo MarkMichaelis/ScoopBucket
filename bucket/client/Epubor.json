@@ -1,6 +1,6 @@
 ﻿{
     "$schema": "https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json",
-    "version": "1.00.001",
+    "version": "3.0.16.692",
     "url": ["https://download.epubor.com/epubor_ultimate.exe"],
     "installer": {
         "args": "/S"
