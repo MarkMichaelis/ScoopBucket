@@ -6,7 +6,8 @@
 # completion through Register-PackageCompletion below.
 #
 # Strategy:
-#   - Sentinel-delimited block per CLI in $PROFILE.AllUsersAllHosts.
+#   - Sentinel-delimited block per CLI in $PROFILE.CurrentUserAllHosts
+#     (per-user, so every PowerShell install loads it -- see #397).
 #   - Native scriptblock is the only completion source. Issue #241
 #     removed the PSCompletions fallback once every bucket entry
 #     adopted a NativeCommandScript. If the native script produces
@@ -14,7 +15,7 @@
 #     resolves to Source='Skipped' with a Reason -- it is no longer
 #     routed through `psc add`/`psc list`.
 #   - Idempotent: existing blocks preserved unless -Force.
-#   - Requires elevation to write to AllUsersAllHosts; honours
+#   - No elevation required (per-user profile); honours
 #     SupportsShouldProcess.
 
 $script:CompletionSentinelVersion = 'v4'
@@ -37,16 +38,15 @@ function Get-PackageCompletionSidecarDirectory {
     .DESCRIPTION
         Resolution order:
           1. -OverrideDirectory wins (test hook).
-          2. When -ProfilePath is supplied AND differs from
-             $PROFILE.AllUsersAllHosts, use `<dir-of-ProfilePath>\completions`.
-             This keeps Pester sandboxes self-contained without an
-             additional explicit hook.
+          2. When -ProfilePath is supplied AND sits in a different directory
+             than the real $PROFILE.CurrentUserAllHosts, use
+             `<dir-of-ProfilePath>\completions`. This keeps Pester sandboxes
+             self-contained without an additional explicit hook.
           3. Otherwise return $script:CompletionSidecarDirDefault
              ($env:ProgramData\ScoopBucket\completions).
-        Creates the directory on demand. Elevation is enforced upstream by
-        Get-PackageCompletionProfilePath -- the prod sidecar lives in
-        ProgramData which already requires admin to write to, and test
-        overrides bypass elevation.
+        Creates the directory on demand. ProgramData needs admin to create,
+        so when that fails (unelevated run) fall back to a directory beside
+        the profile, which is always user-writable (#397).
     #>
     [OutputType([string])]
     [CmdletBinding()]
@@ -56,15 +56,26 @@ function Get-PackageCompletionSidecarDirectory {
     )
 
     $dir = $OverrideDirectory
+    $profileDir = if ($ProfilePath) { Split-Path -Parent $ProfilePath } else { $null }
     if (-not $dir) {
-        if ($ProfilePath -and $ProfilePath -ne $PROFILE.AllUsersAllHosts) {
-            $dir = Join-Path (Split-Path -Parent $ProfilePath) 'completions'
+        $defaultDir = if ($PROFILE.CurrentUserAllHosts) {
+            Split-Path -Parent $PROFILE.CurrentUserAllHosts
+        } else { $null }
+        if ($profileDir -and $defaultDir -and $profileDir -ne $defaultDir) {
+            $dir = Join-Path $profileDir 'completions'
         } else {
             $dir = $script:CompletionSidecarDirDefault
         }
     }
     if (-not (Test-Path $dir)) {
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        try {
+            New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop | Out-Null
+        } catch {
+            if (-not $profileDir) { throw }
+            # ProgramData needs admin; fall back beside the profile (#397).
+            $dir = Join-Path $profileDir 'completions'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
     }
     return $dir
 }
@@ -161,33 +172,64 @@ if (-not `$Global:__ScoopBucketCompletionBootstrap) {
 "@
 }
 
+function Resolve-CompletionProfileTarget {
+    <#
+    .SYNOPSIS
+        Resolve the profile file that completion blocks are written into.
+    .DESCRIPTION
+        Targets $PROFILE.CurrentUserAllHosts.
+
+        Deliberately NOT AllUsersAllHosts (#397). That path is
+        `$PSHOME\profile.ps1` -- scoped to a single PowerShell *installation*,
+        not to the machine. A box carrying both the Store/MSIX and the MSI
+        build of PowerShell 7 has two of them, so whichever install happens to
+        run the installer is the only host that ends up with completions; the
+        other launches with none. Worse, the Store build's copy lives under
+        %ProgramFiles%\WindowsApps, which Windows refuses to write even for
+        administrators -- so elevation cannot rescue that case, and an
+        AllUsers strategy can never serve a Store-installed PowerShell.
+
+        CurrentUserAllHosts (Documents\PowerShell\profile.ps1) is loaded by
+        every PowerShell 7 host for this user regardless of which install
+        launched it, requires no elevation, and is already where this module
+        writes its MCP PAT sentinel block.
+
+        Note when running elevated: this resolves against the *elevated*
+        account. UAC elevation of the same user keeps the same profile, but
+        "run as" a separate admin account would write to that account's
+        profile instead. The resolved path is surfaced on the result object
+        so a mismatch is visible.
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param()
+
+    $target = $PROFILE.CurrentUserAllHosts
+    if ([string]::IsNullOrWhiteSpace($target)) {
+        Write-Verbose 'Host has no CurrentUserAllHosts profile path; completion registration skipped.'
+        return $null
+    }
+    $dir = Split-Path -Parent $target
+    if (-not (Test-Path $dir)) {
+        try { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        catch { throw "Cannot create profile directory '$dir': $($_.Exception.Message)" }
+    }
+    try {
+        $fs = [System.IO.File]::Open($target, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::ReadWrite)
+        $fs.Dispose()
+    } catch {
+        throw "Completion profile '$target' is not writable: $($_.Exception.Message)."
+    }
+    return $target
+}
+
 function Get-PackageCompletionProfilePath {
     [OutputType([string])]
     [CmdletBinding()]
     param([string]$OverridePath)
 
     if ($OverridePath) { return $OverridePath }
-
-    $target = $PROFILE.AllUsersAllHosts
-    if ([string]::IsNullOrWhiteSpace($target)) {
-        Write-Verbose "Host has no AllUsersAllHosts profile path; completion registration skipped."
-        return $null
-    }
-    if (-not (Test-IsElevated)) {
-        throw "Completion registration requires an elevated PowerShell session (target: $target). Re-run from an Administrator prompt."
-    }
-    $dir = Split-Path -Parent $target
-    if (-not (Test-Path $dir)) {
-        try { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        catch { throw "Cannot create AllUsersAllHosts profile directory '$dir': $($_.Exception.Message)" }
-    }
-    try {
-        $fs = [System.IO.File]::Open($target, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::ReadWrite)
-        $fs.Dispose()
-    } catch {
-        throw "AllUsersAllHosts profile '$target' is not writable: $($_.Exception.Message). Re-run elevated."
-    }
-    return $target
+    return Resolve-CompletionProfileTarget
 }
 
 function Resolve-PackageCompletionSource {
@@ -347,7 +389,7 @@ function Remove-PackageCompletionBlock {
     if (-not $target) {
         return [pscustomobject]@{
             Cli = $Cli; Action = 'Skipped'; ProfilePath = $null
-            Reason = 'No AllUsersAllHosts profile path available on this host.'
+            Reason = 'No CurrentUserAllHosts profile path available on this host.'
         }
     }
     if (-not (Test-Path $target)) {
@@ -475,7 +517,7 @@ function Register-PackageCompletion {
     if (-not $target) {
         return [pscustomobject]@{
             Cli = $Cli; Source = 'Skipped'; Action = 'Skipped'; ProfilePath = $null
-            Reason = 'No AllUsersAllHosts profile path available on this host.'
+            Reason = 'No CurrentUserAllHosts profile path available on this host.'
         }
     }
 
@@ -591,7 +633,8 @@ function Test-PackageCompletionWorks {
     .PARAMETER Cli
         The CLI command name to probe.
     .PARAMETER ProfilePath
-        The profile to load before probing. Defaults to AllUsersAllHosts.
+        The profile to load before probing. Defaults to the same profile
+        registration writes to (CurrentUserAllHosts, #397).
     .OUTPUTS
         PSCustomObject with Cli, Verified (bool), MatchCount, FirstMatches.
     #>
@@ -602,7 +645,7 @@ function Test-PackageCompletionWorks {
         [string]$ProfilePath
     )
 
-    if (-not $ProfilePath) { $ProfilePath = $PROFILE.AllUsersAllHosts }
+    if (-not $ProfilePath) { $ProfilePath = $PROFILE.CurrentUserAllHosts }
     if (-not (Test-Path $ProfilePath)) {
         return [pscustomobject]@{
             Cli = $Cli; Verified = $false; MatchCount = 0; FirstMatches = @()

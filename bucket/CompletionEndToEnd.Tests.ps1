@@ -11,7 +11,7 @@
 .DESCRIPTION
     Heavy-tag suite. Assumes the CLI under test is already installed on
     PATH (i.e. validate-installs.yml has run Install-Package first) and
-    the AllUsersAllHosts profile contains the sentinel block written by
+    the CurrentUserAllHosts profile contains the sentinel block written by
     Register-PackageCompletion. Each row spawns `pwsh -NoProfile`, dot-
     sources the profile, then calls [CommandCompletion]::CompleteInput
     so PowerShell's real completion engine produces the candidate list.
@@ -38,15 +38,15 @@ BeforeAll {
         }
     )
 
-    $script:profilePath = $PROFILE.AllUsersAllHosts
+    $script:profilePath = $PROFILE.CurrentUserAllHosts
     $script:profileExists = $script:profilePath -and (Test-Path $script:profilePath)
 }
 
 Describe 'Completion end-to-end (real Tab, no mocks)' -Tag 'Heavy','Completion' {
 
-    It '<Package>/<Cli> sentinel block is present in AllUsersAllHosts profile' -ForEach $script:completionCases {
+    It '<Package>/<Cli> sentinel block is present in the completion profile' -ForEach $script:completionCases {
         if (-not $script:profileExists) {
-            Set-ItResult -Skipped -Because "AllUsersAllHosts profile missing at $script:profilePath; run Install-Package first."
+            Set-ItResult -Skipped -Because "Completion profile missing at $script:profilePath; run Install-Package first."
             return
         }
         $raw = Get-Content -Raw -Path $script:profilePath
@@ -55,7 +55,7 @@ Describe 'Completion end-to-end (real Tab, no mocks)' -Tag 'Heavy','Completion' 
 
     It '<Package>/<Cli> TabExpansion2 returns expected subcommands' -ForEach $script:completionCases {
         if (-not $script:profileExists) {
-            Set-ItResult -Skipped -Because "AllUsersAllHosts profile missing; nothing to load."
+            Set-ItResult -Skipped -Because "Completion profile missing; nothing to load."
             return
         }
         if (-not (Get-Command $Cli -ErrorAction SilentlyContinue)) {
