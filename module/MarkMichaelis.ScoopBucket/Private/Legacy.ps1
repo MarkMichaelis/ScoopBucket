@@ -596,32 +596,17 @@ function Install-BucketApp {
 $script:CompletionSentinelVersion = 'v1'
 
 function Get-CompletionProfilePath {
+    # Procedural registration path (Register-CliCompletion, e.g. gh/gk from
+    # GitConfigure.ps1). Shares one target resolver with the declarative path
+    # so both land in the same profile -- see Resolve-CompletionProfileTarget
+    # in Register-PackageCompletion.ps1 for why it is CurrentUserAllHosts
+    # rather than AllUsersAllHosts (#397).
     [OutputType([string])]
     [CmdletBinding()]
     param([string]$OverridePath)
 
     if ($OverridePath) { return $OverridePath }
-
-    $target = $PROFILE.AllUsersAllHosts
-    if ([string]::IsNullOrWhiteSpace($target)) {
-        Write-Information 'Host has no AllUsersAllHosts profile path; completion registration skipped.' -InformationAction Continue
-        return $null
-    }
-    if (-not (Test-IsElevated)) {
-        throw "Completion registration requires an elevated PowerShell session (target: $target). Re-run from an Administrator prompt."
-    }
-    $dir = Split-Path -Parent $target
-    if (-not (Test-Path $dir)) {
-        try { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        catch { throw "Cannot create AllUsersAllHosts profile directory '$dir': $($_.Exception.Message)" }
-    }
-    try {
-        $fs = [System.IO.File]::Open($target, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::ReadWrite)
-        $fs.Dispose()
-    } catch {
-        throw "AllUsersAllHosts profile '$target' is not writable: $($_.Exception.Message). Re-run elevated."
-    }
-    return $target
+    return Resolve-CompletionProfileTarget
 }
 
 function Resolve-CliCompletionSource {
@@ -812,7 +797,7 @@ function Register-CliCompletion {
     if (-not $target) {
         return [pscustomobject]@{
             Cli         = $Cli; Source = 'Skipped'; Action = 'Skipped'; ProfilePath = $null
-            Reason      = 'No AllUsersAllHosts profile path available on this host.'
+            Reason      = 'No CurrentUserAllHosts profile path available on this host.'
         }
     }
 

@@ -3,12 +3,12 @@ function Update-PackageCompletion {
     .SYNOPSIS
         Repair / refresh tab-completion sentinel blocks for every
         Package in the bucket whose CliCommand is on PATH but has no
-        block in $PROFILE.AllUsersAllHosts.
+        block in $PROFILE.CurrentUserAllHosts.
 
     .DESCRIPTION
         Solves the "I have the CLI installed but `<cli> <Tab>` only
         completes file names" recovery scenario: after restoring a dev
-        machine, the CLIs are back on PATH but $PROFILE.AllUsersAllHosts
+        machine, the CLIs are back on PATH but $PROFILE.CurrentUserAllHosts
         was not part of the backup, so no sentinel blocks exist. For
         native-completion CLIs (`gh`, `rg`, …) this used to require
         running the original Install-Package per bundle.
@@ -48,7 +48,7 @@ function Update-PackageCompletion {
 
     .PARAMETER ProfilePath
         Test hook: read/write this file instead of
-        $PROFILE.AllUsersAllHosts. Bypasses elevation check.
+        $PROFILE.CurrentUserAllHosts. Bypasses elevation check.
 
     .OUTPUTS
         PSCustomObject[] — one record per (Cli, Package) candidate,
@@ -87,12 +87,12 @@ function Update-PackageCompletion {
     $bundles = Get-BundlePackages @bundleArgs
 
     # Resolve the profile we will read for "block already exists?"
-    # checks. When -ProfilePath supplied use it as-is; otherwise pull
-    # the AllUsersAllHosts profile path WITHOUT the elevation check
-    # — we only need to READ it here. Register-PackageCompletion will
-    # do its own elevation check when it tries to WRITE.
+    # checks. When -ProfilePath supplied use it as-is; otherwise read
+    # the same per-user profile registration writes to (#397). Reading
+    # needs no probing — Register-PackageCompletion validates
+    # writability when it actually writes.
     $profileTarget = $ProfilePath
-    if (-not $profileTarget) { $profileTarget = $PROFILE.AllUsersAllHosts }
+    if (-not $profileTarget) { $profileTarget = $PROFILE.CurrentUserAllHosts }
     $existingContent = ''
     if ($profileTarget -and (Test-Path $profileTarget)) {
         $raw = Get-Content -Path $profileTarget -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
