@@ -331,6 +331,13 @@ Describe 'Invoke-PackageInstall pipeline' -Tag 'Light','Module' {
         Mock -ModuleName MarkMichaelis.ScoopBucket Install-WingetPackage {
             return @{ State = 'AlreadyInstalled'; Reason = $null }
         }
+        # Install now means install-or-upgrade (#401), so an AlreadyInstalled
+        # engine result is routed through the updater. Mock that as "nothing
+        # newer" to hold this test on its actual subject: ConfigScript runs
+        # even when no version moved.
+        Mock -ModuleName MarkMichaelis.ScoopBucket Update-WingetPackage {
+            return @{ State = 'AlreadyLatest'; Reason = $null }
+        }
         $script:configRan = $false
         $pkgs = [Package[]]@(
             [Package]@{ Name='A'; Installer='winget'; Id='Foo.A'

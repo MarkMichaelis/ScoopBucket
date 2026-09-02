@@ -175,12 +175,43 @@ function Resolve-RepoRelative {
     return $full.Substring($root.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar)
 }
 
+# Newest commit in which this manifest's version VALUE actually changed.
+#
+# Not `git log -L /"version"/,+1:<file>`: -L tracks a moving line RANGE, so any
+# edit that shifts lines around the version line gets attributed to that line
+# even when the version string itself is untouched. That produced a silent
+# false negative -- edit a manifest, skip the bump, and the check passed
+# because the "bump commit" and the "file changed" commit were the same sha.
+# Compare the parsed value against the parent instead; only a real value
+# change counts. See #401.
 function Get-LastVersionLineCommit {
     param([Parameter(Mandatory)][string]$ManifestRel)
     $relForGit = $ManifestRel -replace '\\','/'
-    $out = Invoke-Git -GitArgs @('log', '-L', "/`"version`"/,+1:$relForGit", '--pretty=format:%H', '-s', '-n', '1') -AllowFailure
-    $sha = ($out | Where-Object { $_ -match '^[0-9a-f]{7,40}$' } | Select-Object -First 1)
-    return $sha
+
+    # Invoke-Git can hand back all of git's stdout as ONE string rather than a
+    # line per object, so split before matching or every sha is filtered out
+    # and the walk below silently finds nothing.
+    $commits = @(Invoke-Git -GitArgs @('log', '--format=%H', '--', $relForGit) -AllowFailure |
+        ForEach-Object { [string]$_ -split '\s+' } |
+        Where-Object { $_ -match '^[0-9a-f]{7,40}$' })
+
+    foreach ($sha in $commits) {
+        $now = Get-ManifestVersionAt -Commit $sha    -RelForGit $relForGit
+        $was = Get-ManifestVersionAt -Commit "$sha^" -RelForGit $relForGit
+        # $was is $null when the manifest was ADDED in this commit -- that
+        # first appearance is itself the version's origin.
+        if ($now -ne $was) { return $sha }
+    }
+    return $null
+}
+
+# Parsed `version` value of a manifest at a given commit, or $null when the
+# path does not exist there (or the blob does not parse).
+function Get-ManifestVersionAt {
+    param([Parameter(Mandatory)][string]$Commit, [Parameter(Mandatory)][string]$RelForGit)
+    $blob = Invoke-Git -GitArgs @('show', "${Commit}:${RelForGit}") -AllowFailure
+    if ($LASTEXITCODE -ne 0 -or -not $blob) { return $null }
+    try { return ((($blob -join "`n") | ConvertFrom-Json).version) } catch { return $null }
 }
 
 function Get-LastTouchedCommit {
@@ -326,7 +357,13 @@ if (-not (Test-Path $BucketDir)) {
     throw "Bucket directory not found: $BucketDir"
 }
 
-$manifests = Get-ChildItem -Path $BucketDir -Filter '*.json' | ForEach-Object {
+# -Recurse: manifests live both at bucket/ root (the bundles) and in the
+# foldered subdirectories (bucket/ai, bucket/admin, bucket/client, bucket/os).
+# Without it the foldered set was never version-checked at all, so a change to
+# e.g. bucket/ai/ChatGPT.ps1 shipped with a stale manifest version -- and
+# `scoop update ChatGPT` returns early on an unchanged version, so the change
+# never reached an installed machine. See #401.
+$manifests = Get-ChildItem -Path $BucketDir -Filter '*.json' -Recurse | ForEach-Object {
     $j = $null
     try { $j = Get-Content -Raw -Path $_.FullName | ConvertFrom-Json } catch { return }
     if ($null -eq $j) { return }
