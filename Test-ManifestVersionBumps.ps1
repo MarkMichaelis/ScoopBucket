@@ -141,28 +141,45 @@ function Get-RelatedFiles {
     #
     # Tests are excluded: they don't ship in the install path, so a
     # test-only edit legitimately needs no bump. See #401.
-    foreach ($m in Get-ModuleRelatedFiles) {
-        if (-not $files.Contains($m)) { [void]$files.Add($m) }
-    }
-
+    #
+    # The module is NOT expanded file-by-file here. Its ~370 files are related
+    # to all 36 manifests identically, so per-file git queries would run the
+    # same lookups 36 times over -- minutes of wall clock in a pre-push hook.
+    # Get-ModuleChangeAggregate answers "did the shipped module change?" in two
+    # git calls for the whole run; Get-ManifestViolation applies it per
+    # manifest.
     return $files
 }
 
-# Repo-relative paths of every shipped module file, computed once. Excludes
-# *.Tests.ps1 (not part of what an install runs).
-$script:ModuleRelatedFilesCache = $null
-function Get-ModuleRelatedFiles {
-    if ($null -ne $script:ModuleRelatedFilesCache) { return $script:ModuleRelatedFilesCache }
+# "Did the shipped module change, and when?" -- computed once per run.
+#
+# Two git calls (status + log) with a pathspec that excludes tests, instead of
+# two per module file per manifest. Returns the newest commit touching the
+# module and whether it has uncommitted edits.
+$script:ModuleChangeCache = $null
+function Get-ModuleChangeAggregate {
+    if ($null -ne $script:ModuleChangeCache) { return $script:ModuleChangeCache }
 
-    $moduleRoot = Join-Path $RepoRoot 'module'
-    $result = New-Object System.Collections.Generic.List[string]
-    if (Test-Path -LiteralPath $moduleRoot) {
-        foreach ($f in Get-ChildItem -Path $moduleRoot -Recurse -File | Where-Object { $_.Name -notmatch '\.Tests\.ps1$' }) {
-            [void]$result.Add((Resolve-RepoRelative $f.FullName))
-        }
+    $pathspec = @('module/', ':(exclude)module/**/*.Tests.ps1')
+
+    $status = Invoke-Git -GitArgs (@('status', '--porcelain', '--') + $pathspec) -AllowFailure
+    $dirtyLine = $status |
+        ForEach-Object { [string]$_ -split "`n" } |
+        Where-Object { $_.Trim() } |
+        Select-Object -First 1
+
+    $log = Invoke-Git -GitArgs (@('log', '-1', '--format=%H', '--') + $pathspec) -AllowFailure
+    $sha = $log |
+        ForEach-Object { [string]$_ -split '\s+' } |
+        Where-Object { $_ -match '^[0-9a-f]{7,40}$' } |
+        Select-Object -First 1
+
+    $script:ModuleChangeCache = [pscustomobject]@{
+        IsDirty    = [bool]$dirtyLine
+        DirtyHint  = if ($dirtyLine) { ([string]$dirtyLine).Trim() } else { $null }
+        LastCommit = $sha
     }
-    $script:ModuleRelatedFilesCache = $result
-    return $result
+    return $script:ModuleChangeCache
 }
 
 function Resolve-RepoRelative {
@@ -216,9 +233,14 @@ function Get-ManifestVersionAt {
 
 function Get-LastTouchedCommit {
     param([Parameter(Mandatory)][string]$RelPath)
+    if ($script:LastTouchedCache.ContainsKey($RelPath)) { return $script:LastTouchedCache[$RelPath] }
+
     $relForGit = $RelPath -replace '\\','/'
     $out = Invoke-Git -GitArgs @('log', '-1', '--follow', '--format=%H', '--', $relForGit) -AllowFailure
-    $sha = ($out | Where-Object { $_ -match '^[0-9a-f]{7,40}$' } | Select-Object -First 1)
+    $sha = ($out | ForEach-Object { [string]$_ -split '\s+' } |
+        Where-Object { $_ -match '^[0-9a-f]{7,40}$' } | Select-Object -First 1)
+
+    $script:LastTouchedCache[$RelPath] = $sha
     return $sha
 }
 
@@ -230,11 +252,26 @@ function Test-IsAncestor {
     return ($LASTEXITCODE -eq 0)
 }
 
+# Per-path git lookups, memoized.
+#
+# Every bundle manifest shares the same ~370-file module tree as related
+# files, so without caching each of those files is re-queried once per
+# manifest -- tens of thousands of git invocations, minutes of wall clock,
+# and a pre-push hook that times out. The answers are identical across
+# manifests within a single run, so compute each path once. See #401.
+$script:DirtyCache       = @{}
+$script:LastTouchedCache = @{}
+
 function Test-IsWorkingTreeDirty {
     param([Parameter(Mandatory)][string]$RelPath)
+    if ($script:DirtyCache.ContainsKey($RelPath)) { return $script:DirtyCache[$RelPath] }
+
     $relForGit = $RelPath -replace '\\','/'
     $out = Invoke-Git -GitArgs @('status','--porcelain','--', $relForGit) -AllowFailure
-    return ($null -ne ($out | Where-Object { $_ -and ($_.ToString().Trim().Length -gt 0) }))
+    $result = ($null -ne ($out | Where-Object { $_ -and ($_.ToString().Trim().Length -gt 0) }))
+
+    $script:DirtyCache[$RelPath] = $result
+    return $result
 }
 
 function Test-IsManifestVersionLineDirty {
@@ -289,6 +326,23 @@ function Get-ManifestViolation {
             [void]$violatingFiles.Add($rel)
             [void]$reasons.Add("$rel last changed at $($fileCommit.Substring(0,7)) but $manifestRel `"version`" was last bumped at $($bumpCommit.Substring(0,7)) (older)")
         }
+    }
+
+    # The shared module, applied as one aggregate rather than ~370 related
+    # files (see Get-ModuleChangeAggregate). Every bundle .ps1 imports it, so a
+    # change to an engine changes what every bundle does at install time
+    # without touching anything in the manifest's own url array -- and since
+    # `scoop update` returns early on an unchanged version, a module fix with
+    # no bump never reaches an installed machine. See #401.
+    $moduleChange = Get-ModuleChangeAggregate
+    if ($moduleChange.IsDirty) {
+        [void]$violatingFiles.Add('module\')
+        [void]$reasons.Add("module has uncommitted changes ($($moduleChange.DirtyHint)) but $manifestRel `"version`" is unchanged in working tree")
+    } elseif ($moduleChange.LastCommit -and $bumpCommit -and
+              $moduleChange.LastCommit -ne $bumpCommit -and
+              -not (Test-IsAncestor -Maybe $moduleChange.LastCommit -Of $bumpCommit)) {
+        [void]$violatingFiles.Add('module\')
+        [void]$reasons.Add("module last changed at $($moduleChange.LastCommit.Substring(0,7)) but $manifestRel `"version`" was last bumped at $($bumpCommit.Substring(0,7)) (older)")
     }
 
     return [pscustomobject]@{
