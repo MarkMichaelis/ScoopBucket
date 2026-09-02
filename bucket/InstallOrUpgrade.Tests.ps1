@@ -235,7 +235,7 @@ Describe 'Manifest version bumps track the module tree' -Tag 'Light', 'Manifest'
             $RawUrlPrefix = 'https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/'
 
             $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:bumpScript, [ref]$null, [ref]$null)
-            $wanted = @('Get-RelatedFiles', 'Get-ModuleRelatedFiles', 'Resolve-RepoRelative')
+            $wanted = @('Get-RelatedFiles', 'Resolve-RepoRelative')
             foreach ($fn in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
                 if ($fn.Name -in $wanted) { . ([scriptblock]::Create($fn.Extent.Text)) }
             }
@@ -243,24 +243,45 @@ Describe 'Manifest version bumps track the module tree' -Tag 'Light', 'Manifest'
         }
     }
 
-    It 'treats module files as related files of a bundle manifest' {
-        # A module change alters what every bundle does at install time but
-        # touches no file in the manifest's own url array. Without this,
-        # engine fixes ship with no version bump, and `scoop update` -- which
-        # returns early on an unchanged version -- never delivers them.
+    It 'still tracks the manifest and its url payload' {
         $related = Get-RelatedFilesForTest -ManifestPath (Join-Path $script:repoRoot 'bucket\AIAgents.json')
-
-        # The manifest and its url payload are still tracked ...
         $related | Should -Contain 'bucket\AIAgents.json'
         $related | Should -Contain 'bucket\AIAgents.ps1'
-        # ... and now so is the shared engine code.
-        $related | Should -Contain 'module\MarkMichaelis.ScoopBucket\Public\Invoke-PackageInstall.ps1'
-        $related | Should -Contain 'module\MarkMichaelis.ScoopBucket\Private\Install-WingetPackage.ps1'
     }
 
-    It 'excludes module tests, which do not ship in the install path' {
+    It 'checks the module as one aggregate rather than expanding every file' {
+        # A module change alters what every bundle does at install time but
+        # touches no file in the manifest's own url array. Expanding the
+        # module's ~370 files per manifest would repeat identical git lookups
+        # 36 times over and time out the pre-push hook, so the module is
+        # queried once and applied to each manifest.
         $related = Get-RelatedFilesForTest -ManifestPath (Join-Path $script:repoRoot 'bucket\AIAgents.json')
-        ($related | Where-Object { $_ -match '\.Tests\.ps1$' }) | Should -BeNullOrEmpty
+        ($related | Where-Object { $_ -like 'module\*' }) | Should -BeNullOrEmpty
+
+        $text = Get-Content -Raw -LiteralPath $script:bumpScript
+        $text | Should -Match 'Get-ModuleChangeAggregate'
+        # The aggregate must reach the violation logic, not just exist.
+        $text | Should -Match '\$moduleChange = Get-ModuleChangeAggregate'
+    }
+
+    It 'excludes module tests from the aggregate, since they do not ship' {
+        $text = Get-Content -Raw -LiteralPath $script:bumpScript
+        $text | Should -Match ":\(exclude\)module/\*\*/\*\.Tests\.ps1"
+    }
+
+    It 'reports a module change as a violation for a bundle manifest' {
+        # End-to-end through the real script: touch a shipped module file and
+        # every bundle manifest must be flagged.
+        $probe = Join-Path $script:repoRoot 'module\MarkMichaelis.ScoopBucket\Private\Invoke-EngineUpdate.ps1'
+        $original = Get-Content -Raw -LiteralPath $probe
+        try {
+            Add-Content -LiteralPath $probe -Value "`n# version-bump probe"
+            $out = & pwsh -NoProfile -File $script:bumpScript 2>&1
+            $joined = ($out | ForEach-Object { [string]$_ }) -join "`n"
+            $joined | Should -Match 'module has uncommitted changes'
+        } finally {
+            Set-Content -LiteralPath $probe -Value $original -NoNewline
+        }
     }
 
     It 'enumerates foldered manifests, not just the top-level bundles' {
