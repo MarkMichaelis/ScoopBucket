@@ -85,7 +85,13 @@ function Invoke-PackageInstall {
         [string[]]$Name,
         [string[]]$Skip,
         [switch]$DryRun,
-        [switch]$SkipCompletion
+        [switch]$SkipCompletion,
+        # Restore the legacy "ensure present" semantics: an already-installed
+        # package is reported AlreadyInstalled and left at whatever version it
+        # is at, instead of being routed through the engine's upgrade path.
+        # Use for bootstrap and CI smoke runs that only care about presence and
+        # do not want to pay for a full upgrade sweep. See #401.
+        [switch]$NoUpgrade
     )
 
     # Bridge the `-DryRun` alias into the single preview mechanism: flipping
@@ -189,6 +195,40 @@ function Invoke-PackageInstall {
                     default       { throw "Invoke-PackageInstall: unknown Installer '$($pkg.Installer)' for '$($pkg.Name)'." }
                 }
             }
+
+            # Install-or-upgrade (#401): "install" means "ensure LATEST", not
+            # merely "ensure present". When the engine reports the package is
+            # already there, route it through the same upgrade path
+            # Update-Package would use. This is what makes scoop re-running a
+            # bundle's installer script actually move versions, since scoop
+            # itself only ever calls the installer.
+            #
+            # Held packages are the deliberate exception: their version is
+            # coupled to another product, so an unattended upgrade is the bug.
+            # Installer='custom' has no engine upgrade path and is left alone.
+            if ($result.State -eq 'AlreadyInstalled' -and
+                -not $NoUpgrade -and
+                -not $pkg.CustomInstallScript -and
+                $pkg.Installer -ne 'custom') {
+
+                if ($pkg.HoldUpgrade) {
+                    Write-UpdateStatus -Activity 'Install-Package' "  [held] $($pkg.Name) -- $($pkg.HoldUpgrade)"
+                    $result = @{ State = 'AlreadyInstalled'; Reason = "Upgrade held: $($pkg.HoldUpgrade)" }
+                } else {
+                    Write-UpdateStatus -Activity 'Install-Package' "  [upgrade] $($pkg.Name) already installed; checking for a newer version"
+                    $upgrade = Invoke-EngineUpdate -Package $pkg -WhatIf:$isWhatIf
+                    # AlreadyLatest is the common, uninteresting outcome and
+                    # keeps the install-shaped AlreadyInstalled status so the
+                    # summary reads the way callers expect. A real version move
+                    # (Updated) and a Failed upgrade both surface as themselves.
+                    if ($upgrade.State -eq 'AlreadyLatest') {
+                        $result = @{ State = 'AlreadyInstalled'; Reason = $upgrade.Reason }
+                    } else {
+                        $result = $upgrade
+                    }
+                }
+            }
+
             $state  = $result.State
             $reason = $result.Reason
         } catch {

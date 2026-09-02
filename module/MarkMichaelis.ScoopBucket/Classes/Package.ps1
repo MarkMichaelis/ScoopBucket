@@ -132,6 +132,22 @@ class Package {
     [ValidateSet('Auto', 'Reinstall', 'SelfManaged', 'NoAutoUpdateSupport')]
     [string]   $UpdateMode = 'Auto'
 
+    # Non-empty => this package must NEVER be upgraded automatically, and the
+    # value is the human-readable reason why. Unlike UpdateMode (which is
+    # custom-installer-only and describes HOW to update), HoldUpgrade applies
+    # to every installer and answers WHETHER to update at all.
+    #
+    # Honored in two places:
+    #   - Invoke-PackageInstall's install-or-upgrade path leaves an
+    #     already-installed held package alone (State='AlreadyInstalled').
+    #   - Invoke-PackageUpdate reports State='Held' and skips the engine.
+    #
+    # Use for packages whose version is coupled to a second product, where a
+    # newer build breaks the pair (e.g. Kindle <-> Epubor DRM support). A hold
+    # only stops THIS tool from upgrading; it cannot stop an external updater
+    # (Microsoft Store auto-update, a vendor's own updater) from doing so.
+    [string]   $HoldUpgrade = ''
+
     # Cross-field invariants the type system can't express. Returns the
     # first violation as a string, or $null when the declaration is valid.
     #

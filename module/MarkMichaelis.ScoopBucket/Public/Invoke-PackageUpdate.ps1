@@ -196,7 +196,12 @@ function Invoke-PackageUpdate {
         Write-UpdateStatus "Updating $($pkg.Name) ($($pkg.Installer))..." -PercentComplete $pct
 
         try {
-            if ($pkg.Installer -eq 'custom' -or $pkg.CustomInstallScript) {
+            if ($pkg.HoldUpgrade) {
+                # Version deliberately pinned to stay compatible with a coupled
+                # product (#401). Never drive the engine for these; the reason
+                # rides along so the summary explains itself.
+                $result = @{ State = 'Held'; Reason = $pkg.HoldUpgrade }
+            } elseif ($pkg.Installer -eq 'custom' -or $pkg.CustomInstallScript) {
                 # Custom installs have no generic engine upgrade path.
                 # UpdateMode declares how (or whether) to update them. Each
                 # arm produces a uniform $result; terminal no-op states
@@ -265,14 +270,7 @@ function Invoke-PackageUpdate {
                         $result = @{ State = 'Updated'; Reason = '(WhatIf, version unknown)' }
                     }
                 } else {
-                    $result = switch ($pkg.Installer) {
-                        'winget'      { Update-WingetPackage     -Package $pkg -WhatIf:$isWhatIf -TimeoutMinutes $PackageTimeoutMinutes }
-                        'scoop'       { Update-ScoopPackage      -Package $pkg -WhatIf:$isWhatIf }
-                        'choco'       { Update-ChocoPackage      -Package $pkg -WhatIf:$isWhatIf }
-                        'npmGlobal'   { Update-NpmGlobalPackage  -Package $pkg -WhatIf:$isWhatIf }
-                        'dotnetTool'  { Update-DotnetToolPackage -Package $pkg -WhatIf:$isWhatIf }
-                        default       { throw "Invoke-PackageUpdate: unknown Installer '$($pkg.Installer)' for '$($pkg.Name)'." }
-                    }
+                    $result = Invoke-EngineUpdate -Package $pkg -WhatIf:$isWhatIf -TimeoutMinutes $PackageTimeoutMinutes
                     # Annotate the version transition from the pre-update probe.
                     # On a real upgrade the index's Available column is the
                     # version we just moved TO; AlreadyLatest pins to == from.
@@ -302,12 +300,12 @@ function Invoke-PackageUpdate {
             continue
         }
 
-        # AlreadyLatest / SelfManaged / NoAutoUpdateSupport: the package IS
-        # installed but there was no version bump, so PATH refresh,
+        # AlreadyLatest / SelfManaged / NoAutoUpdateSupport / Held: the package
+        # IS installed but there was no version bump, so PATH refresh,
         # PostUpdateScript, and completion re-register are intentionally
         # skipped. ConfigScript STILL runs -- idempotent config is re-applied
         # on every update regardless of whether a new version was fetched.
-        if ($state -in @('AlreadyLatest', 'SelfManaged', 'NoAutoUpdateSupport')) {
+        if ($state -in @('AlreadyLatest', 'SelfManaged', 'NoAutoUpdateSupport', 'Held')) {
             if (-not (& $runConfigScript $pkg)) { continue }
             & $addState $pkg $state $reason $null $from $to
             continue

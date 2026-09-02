@@ -168,6 +168,7 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
                 Notes = 'Upstream MSI occasionally crashes on the CI runner with ACCESS_VIOLATION (#22/#65/#66/#75); Install-WingetPackage retries up to 3x before reporting failure.' }
 
     [Package]@{ Name = 'Amazon Kindle';    Installer = 'winget'; Id = '9P8JQ0JJSTLL'; Source = 'msstore'
+                HoldUpgrade = 'DRM-coupled to Epubor (bucket/client/Epubor.json): a newer Kindle build routinely breaks Epubor until it ships support. Confirm Epubor lists the target Kindle version as supported, then clear HoldUpgrade for that upgrade. Only stops THIS tool -- Store auto-update can still move it (#394).'
                 Notes = 'Legacy Kindle for PC (Amazon.Kindle, winget default source) was discontinued 2026-06-30; the Store app is the only supported distribution (#394). Version is upstream-coupled to Epubor (bucket/client/Epubor.json) and cannot be pinned: msstore exposes a single "Unknown" version, winget pin does not stop Store auto-update, and Store update suppression is machine-wide only. Expect occasional DRM breakage until Epubor catches up to a new Kindle build.' }
     [Package]@{ Name = 'ChatGPT (Store)';  Installer = 'winget'; Id = '9NT1R1C2HH7J'; Source = 'msstore' }
     [Package]@{ Name = 'VPN Unlimited';    Installer = 'winget'; Id = '9NRQBLR605RG'; Source = 'msstore' }

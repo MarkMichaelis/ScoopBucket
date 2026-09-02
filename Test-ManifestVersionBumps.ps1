@@ -126,7 +126,43 @@ function Get-RelatedFiles {
             }
         }
     }
+
+    # The shared module is an IMPLICIT dependency of every bundle manifest:
+    # each bundle .ps1 opens with the Import-Module preamble, so a change to
+    # an engine (Install-WingetPackage, Invoke-PackageInstall, ...) changes
+    # what every bundle does at install time -- without touching any file in
+    # the manifest's own `url` array.
+    #
+    # That matters for delivery, not just bookkeeping: `scoop update` returns
+    # early when the manifest version is unchanged (scoop-update.ps1), so a
+    # module fix that never bumps a manifest never reaches an installed
+    # machine. Treating the module tree as a related file is what turns
+    # "module behavior changed" into a version bump users actually receive.
+    #
+    # Tests are excluded: they don't ship in the install path, so a
+    # test-only edit legitimately needs no bump. See #401.
+    foreach ($m in Get-ModuleRelatedFiles) {
+        if (-not $files.Contains($m)) { [void]$files.Add($m) }
+    }
+
     return $files
+}
+
+# Repo-relative paths of every shipped module file, computed once. Excludes
+# *.Tests.ps1 (not part of what an install runs).
+$script:ModuleRelatedFilesCache = $null
+function Get-ModuleRelatedFiles {
+    if ($null -ne $script:ModuleRelatedFilesCache) { return $script:ModuleRelatedFilesCache }
+
+    $moduleRoot = Join-Path $RepoRoot 'module'
+    $result = New-Object System.Collections.Generic.List[string]
+    if (Test-Path -LiteralPath $moduleRoot) {
+        foreach ($f in Get-ChildItem -Path $moduleRoot -Recurse -File | Where-Object { $_.Name -notmatch '\.Tests\.ps1$' }) {
+            [void]$result.Add((Resolve-RepoRelative $f.FullName))
+        }
+    }
+    $script:ModuleRelatedFilesCache = $result
+    return $result
 }
 
 function Resolve-RepoRelative {
