@@ -85,19 +85,66 @@ function Write-PackageCompletionSidecar {
     .SYNOPSIS
         Atomically write the raw native completer payload for $Cli to
         `<Directory>\<Cli>.ps1` as UTF-8 (no BOM).
+    .DESCRIPTION
+        Falls back to -FallbackDirectory when the primary write fails, and
+        returns the path actually used so the caller embeds the right path
+        in the generated profile block.
+
+        The fallback exists because permission failures here are per-FILE,
+        not per-directory (#402). On a machine where completions were first
+        registered elevated, ProgramData looks like this:
+
+            ...\completions          BUILTIN\Users = Write
+            ...\completions\adb.ps1  BUILTIN\Users = ReadAndExecute
+                                     owner         = BUILTIN\Administrators
+
+        An unelevated user may create NEW sidecars there but cannot replace
+        existing ones, because Move-Item -Force needs delete rights on the
+        target. Probing the directory does not detect this: a probe creates
+        and deletes a file it owns, so it succeeds while the real overwrite
+        of an Administrators-owned file still fails. Hence the fallback must
+        live at the actual write.
+    .PARAMETER FallbackDirectory
+        Written to when the primary directory rejects the write. Omitted for
+        callers that have nowhere else to go, in which case the failure
+        propagates.
     #>
     [OutputType([string])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Cli,
         [Parameter(Mandatory)][AllowEmptyString()][string]$Payload,
-        [Parameter(Mandatory)][string]$Directory
+        [Parameter(Mandatory)][string]$Directory,
+        [string]$FallbackDirectory
     )
-    $target = Join-Path $Directory ($Cli + '.ps1')
-    $tmp = "$target.tmp"
-    [System.IO.File]::WriteAllText($tmp, $Payload, [System.Text.UTF8Encoding]::new($false))
-    Move-Item -Path $tmp -Destination $target -Force
-    return $target
+
+    $write = {
+        param($dir)
+        $target = Join-Path $dir ($Cli + '.ps1')
+        $tmp = "$target.tmp"
+        [System.IO.File]::WriteAllText($tmp, $Payload, [System.Text.UTF8Encoding]::new($false))
+        # -Force still needs delete rights on an existing target.
+        Move-Item -Path $tmp -Destination $target -Force -ErrorAction Stop
+        return $target
+    }
+
+    try {
+        return & $write $Directory
+    } catch {
+        if (-not $FallbackDirectory -or $FallbackDirectory -eq $Directory) { throw }
+
+        # Leave no half-written .tmp behind in the directory we are abandoning.
+        $orphan = Join-Path $Directory ($Cli + '.ps1.tmp')
+        if (Test-Path -LiteralPath $orphan) { Remove-Item -LiteralPath $orphan -Force -ErrorAction SilentlyContinue }
+
+        if (-not (Test-Path $FallbackDirectory)) {
+            New-Item -ItemType Directory -Path $FallbackDirectory -Force | Out-Null
+        }
+        # Warn rather than stay silent: a partially relocated sidecar set is
+        # something the user should be able to see.
+        Write-Warning "Could not write completion payload for '$Cli' to '$Directory' ($($_.Exception.Message)). Falling back to '$FallbackDirectory'. Re-run elevated to keep payloads in the shared location."
+        return & $write $FallbackDirectory
+    }
 }
 
 function Remove-PackageCompletionSidecar {
@@ -591,7 +638,11 @@ function Register-PackageCompletion {
     # whose first line IS `using namespace System.Management.Automation`.
     if ($resolved.Source -eq 'Native' -and $resolved.NativePayload) {
         $sidecarDir  = Get-PackageCompletionSidecarDirectory -ProfilePath $target -OverrideDirectory $SidecarDirectory
-        $sidecarPath = Write-PackageCompletionSidecar -Cli $Cli -Payload $resolved.NativePayload -Directory $sidecarDir
+        # Beside the profile is always writable by the user who owns it, so
+        # it is the safe landing spot when the shared ProgramData location
+        # rejects an overwrite (#402).
+        $sidecarFallback = Join-Path (Split-Path -Parent $target) 'completions'
+        $sidecarPath = Write-PackageCompletionSidecar -Cli $Cli -Payload $resolved.NativePayload -Directory $sidecarDir -FallbackDirectory $sidecarFallback
         # Single-quote the dot-source path and escape any embedded
         # apostrophes (PowerShell single-quote strings escape `'` as
         # `''`). Real-world install paths can contain apostrophes
