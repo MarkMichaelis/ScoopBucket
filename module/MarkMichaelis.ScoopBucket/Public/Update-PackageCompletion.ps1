@@ -252,6 +252,87 @@ function Update-PackageCompletion {
         }
     }
 
+    # Procedural CLIs (#397). gh, gk, pwsh, powershell and wsl are registered
+    # by a bare Register-CliCompletion call inside their install script rather
+    # than by a [Package], so the bundle walk above cannot see them. Re-running
+    # the owning script is not an option -- those scripts also install software
+    # -- so repair from the recipe carried in CompletionCoverage.psd1.
+    $catalogRoot = $BucketPath
+    if (-not $catalogRoot) {
+        $catalogRoot = Resolve-BucketPath -BucketPath $catalogRoot -CallerScriptRoot $PSScriptRoot
+    }
+    $proceduralDefs = if ($catalogRoot -and (Test-Path $catalogRoot)) {
+        @(Get-ProceduralCompletionDefinition -BucketPath $catalogRoot)
+    } else {
+        Write-Verbose 'Bucket directory not resolved; procedural completion repair skipped.'
+        @()
+    }
+    # A CLI claimed by a declarative [Package] is handled above and must not
+    # be touched again here: the procedural walk runs second, so it would
+    # overwrite the richer declarative registration (which can carry
+    # pre-captured native output) with the catalog's fallback recipe.
+    # Declarative wins.
+    $declarativeClis = [System.Collections.Generic.HashSet[string]]::new(
+        [string[]]@($results | ForEach-Object { $_.Cli }),
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($def in $proceduralDefs) {
+        if ($declarativeClis.Contains($def.Cli)) {
+            Write-Verbose "Procedural repair skipped for '$($def.Cli)': already handled by a declarative package."
+            continue
+        }
+        if (-not (Get-Command $def.Cli -ErrorAction SilentlyContinue)) {
+            # Only register what is actually installed.
+            $results.Add([pscustomobject]@{
+                Cli = $def.Cli; Package = $def.Script; Bundle = 'procedural'
+                Mode = 'native'; Action = 'Skipped'; Source = 'Skipped'
+                Reason = "CLI '$($def.Cli)' not on PATH."
+            })
+            continue
+        }
+
+        $blockPattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($def.Cli))`:BEGIN \w+"
+        if ([regex]::IsMatch($existingContent, $blockPattern) -and -not $Force) {
+            $results.Add([pscustomobject]@{
+                Cli = $def.Cli; Package = $def.Script; Bundle = 'procedural'
+                Mode = 'native'; Action = 'Preserved'; Source = 'Existing'
+                Reason = 'Sentinel block already in profile; pass -Force to refresh.'
+            })
+            continue
+        }
+
+        # Route through Register-PackageCompletion, NOT the legacy
+        # Register-CliCompletion the install scripts use. The legacy path
+        # writes an EAGER block that registers at profile load; the modern
+        # one emits the deferred PowerShell.OnIdle form (#220). Repairing
+        # via the legacy path would quietly give these five CLIs different
+        # startup behaviour from every other block in the same profile.
+        # No -Force: Register-PackageCompletion always overwrites, and the
+        # preserve-unless-Force decision was already made above.
+        $regArgs = @{
+            Cli           = $def.Cli
+            NativeCommand = $def.NativeCommand
+            Mode          = 'native'
+            Confirm       = $false
+        }
+        if ($ProfilePath) { $regArgs['ProfilePath'] = $ProfilePath }
+        try {
+            $r = Register-PackageCompletion @regArgs
+            $results.Add([pscustomobject]@{
+                Cli = $def.Cli; Package = $def.Script; Bundle = 'procedural'
+                Mode = 'native'
+                Action = $(if ($r.Source -eq 'Skipped') { 'Skipped' } else { 'Registered' })
+                Source = $r.Source
+                Reason = $r.Reason
+            })
+        } catch {
+            $results.Add([pscustomobject]@{
+                Cli = $def.Cli; Package = $def.Script; Bundle = 'procedural'
+                Mode = 'native'; Action = 'Skipped'; Source = 'Skipped'
+                Reason = "Register-PackageCompletion threw: $($_.Exception.Message)"
+            })
+        }
+    }
+
     $arr = $results.ToArray()
 
     # Tag every row with a type name so the format view can render a tidy,
