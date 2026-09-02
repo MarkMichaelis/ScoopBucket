@@ -4,7 +4,7 @@
   "description": "Setups my personal scoop bucket.",
   "url": "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/_placeholder",
   "notes": "Of course, this script is placed in the MarkMichaelis bucket so you it presents a chicken and egg problem.",
-  "version": "1.02.000",
+  "version": "1.03.000",
   "installer": {
     "script": [
       "scoop bucket add LocalRepo https://github.com/MarkMichaelis/ScoopBucket.git"

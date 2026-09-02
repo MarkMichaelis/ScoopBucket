@@ -262,4 +262,97 @@ Describe 'Manifest version bumps track the module tree' -Tag 'Light', 'Manifest'
         $related = Get-RelatedFilesForTest -ManifestPath (Join-Path $script:repoRoot 'bucket\AIAgents.json')
         ($related | Where-Object { $_ -match '\.Tests\.ps1$' }) | Should -BeNullOrEmpty
     }
+
+    It 'enumerates foldered manifests, not just the top-level bundles' {
+        # Without -Recurse the whole bucket/ai, bucket/admin, bucket/client and
+        # bucket/os tree went unchecked, so those manifests never bumped and
+        # `scoop update <app>` never re-ran their installer.
+        $text = Get-Content -Raw -LiteralPath (Join-Path $script:repoRoot 'Test-ManifestVersionBumps.ps1')
+        $text | Should -Match "Get-ChildItem -Path \`$BucketDir -Filter '\*\.json' -Recurse"
+    }
+}
+
+Describe 'Version-bump commit detection' -Tag 'Light', 'Manifest' {
+
+    BeforeAll {
+        # A throwaway repo is the only honest way to test git-history logic.
+        $script:tmpRepo = Join-Path ([System.IO.Path]::GetTempPath()) "vbump-$([guid]::NewGuid().ToString('n'))"
+        New-Item -ItemType Directory -Path $script:tmpRepo -Force | Out-Null
+
+        Push-Location $script:tmpRepo
+        try {
+            git init -q 2>&1 | Out-Null
+            git config user.email 'test@example.com'
+            git config user.name  'Test'
+
+            $manifest = Join-Path $script:tmpRepo 'app.json'
+
+            # c1: created at 1.00.000
+            '{ "version": "1.00.000", "installer": { "script": ["a"] } }' | Set-Content -LiteralPath $manifest -Encoding utf8
+            git add -A 2>&1 | Out-Null; git commit -q -m 'add' 2>&1 | Out-Null
+            $script:c1 = (git rev-parse HEAD).Trim()
+
+            # c2: a REAL version bump
+            '{ "version": "1.01.000", "installer": { "script": ["a"] } }' | Set-Content -LiteralPath $manifest -Encoding utf8
+            git add -A 2>&1 | Out-Null; git commit -q -m 'bump' 2>&1 | Out-Null
+            $script:c2 = (git rev-parse HEAD).Trim()
+
+            # c3: edits the manifest and SHIFTS the version line, but leaves the
+            # version value alone. This is the case `git log -L` mis-attributed.
+            @(
+                '{'
+                '  "description": "added a line above the version",'
+                '  "version": "1.01.000",'
+                '  "installer": { "script": ["a"] }'
+                '}'
+            ) -join "`n" | Set-Content -LiteralPath $manifest -Encoding utf8
+            git add -A 2>&1 | Out-Null; git commit -q -m 'edit without bump' 2>&1 | Out-Null
+            $script:c3 = (git rev-parse HEAD).Trim()
+        } finally {
+            Pop-Location
+        }
+
+        function script:Get-BumpCommitForTest {
+            param([string]$RepoDir, [string]$ManifestRel)
+
+            $RepoRoot = $RepoDir
+            $bumpScript = Join-Path $script:repoRoot 'Test-ManifestVersionBumps.ps1'
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($bumpScript, [ref]$null, [ref]$null)
+            $wanted = @('Invoke-Git', 'Get-LastVersionLineCommit', 'Get-ManifestVersionAt')
+            foreach ($fn in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
+                if ($fn.Name -in $wanted) { . ([scriptblock]::Create($fn.Extent.Text)) }
+            }
+            Get-LastVersionLineCommit -ManifestRel $ManifestRel
+        }
+    }
+
+    AfterAll {
+        if ($script:tmpRepo -and (Test-Path $script:tmpRepo)) {
+            Remove-Item -LiteralPath $script:tmpRepo -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'reports the commit where the version VALUE changed, not one that merely moved the line' {
+        # `git log -L /"version"/,+1:<file>` tracks a moving line RANGE, so c3
+        # (which shifted the version line without changing it) was reported as
+        # the bump commit -- and since c3 is also the commit that changed the
+        # file, the checker compared a sha against itself and passed. The bump
+        # commit here must still be c2.
+        $bump = Get-BumpCommitForTest -RepoDir $script:tmpRepo -ManifestRel 'app.json'
+        $bump | Should -Be $script:c2
+        $bump | Should -Not -Be $script:c3
+    }
+
+    It 'falls back to the commit that introduced the manifest when the version never changed' {
+        Push-Location $script:tmpRepo
+        try {
+            '{ "version": "2.00.000", "installer": { "script": ["b"] } }' | Set-Content -LiteralPath (Join-Path $script:tmpRepo 'fresh.json') -Encoding utf8
+            git add -A 2>&1 | Out-Null; git commit -q -m 'add fresh' 2>&1 | Out-Null
+            $added = (git rev-parse HEAD).Trim()
+        } finally {
+            Pop-Location
+        }
+
+        Get-BumpCommitForTest -RepoDir $script:tmpRepo -ManifestRel 'fresh.json' | Should -Be $added
+    }
 }
