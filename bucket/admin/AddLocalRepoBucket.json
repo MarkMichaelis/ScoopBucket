@@ -11,6 +11,9 @@
     ]
   },
   "uninstaller": {
-    "script": ["scoop bucket rm LocalRepo"]
+    "script": [
+      "if (((Get-PSCallStack).Command -contains 'update_app') -or (Get-Variable -Name old_version -ErrorAction SilentlyContinue)) { Write-Host 'scoop update in progress: skipping uninstaller (#401).'; return }",
+      "scoop bucket rm LocalRepo"
+    ]
   }
 }

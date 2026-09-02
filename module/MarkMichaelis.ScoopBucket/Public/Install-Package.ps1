@@ -41,6 +41,11 @@ function Install-Package {
     .PARAMETER SkipCompletion
         Don't attempt completion registration.
 
+    .PARAMETER NoUpgrade
+        Keep the legacy "ensure present" semantics: leave an already-installed
+        package at its current version instead of routing it through the
+        engine's upgrade path. Install otherwise means "ensure latest" (#401).
+
     .PARAMETER BucketPath
         Override the auto-detected bucket directory.
 
@@ -56,6 +61,7 @@ function Install-Package {
         [Parameter(Mandatory, Position = 0)][string[]]$Name,
         [switch]$DryRun,
         [switch]$SkipCompletion,
+        [switch]$NoUpgrade,
         # Show every package in the result table, including unchanged rows
         # (AlreadyInstalled / Skipped). By default only changed rows
         # (Installed / Failed) are shown and the rest are summarized in a
@@ -176,6 +182,7 @@ function Install-Package {
         $results.AddRange([object[]]@(
             Invoke-PackageInstall -Packages $pkgObjects -Bundle $entry.Bundle `
                 -Name @($entry.Names) -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
+                -NoUpgrade:$NoUpgrade `
                 -ErrorAction Continue -ErrorVariable +pkgErrors))
     }
 
@@ -186,6 +193,7 @@ function Install-Package {
         $results.AddRange([object[]]@(
             Invoke-PackageInstall -Packages $pkgObjects -Bundle $b.Bundle `
                 -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
+                -NoUpgrade:$NoUpgrade `
                 -ErrorAction Continue -ErrorVariable +pkgErrors))
     }
 

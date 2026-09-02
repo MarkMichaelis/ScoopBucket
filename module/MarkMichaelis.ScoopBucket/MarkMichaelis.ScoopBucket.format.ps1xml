@@ -103,6 +103,7 @@
                     AlreadyLatest       = '='
                     AlreadyInstalled    = '='
                     Skipped             = '~'
+                    Held                = '#'
                     Failed              = 'x'
                     NotInstalled        = 'o'
                     SelfManaged         = '@'
@@ -118,6 +119,7 @@
                       'AlreadyLatest'       { $style = $PSStyle.Foreground.BrightBlack }
                       'AlreadyInstalled'    { $style = $PSStyle.Foreground.BrightBlack }
                       'Skipped'             { $style = $PSStyle.Foreground.Yellow }
+                      'Held'                { $style = $PSStyle.Foreground.Cyan }
                       'Failed'              { $style = $PSStyle.Foreground.Red }
                       'NotInstalled'        { $style = $PSStyle.Foreground.Yellow }
                       'SelfManaged'         { $style = $PSStyle.Foreground.Cyan }
