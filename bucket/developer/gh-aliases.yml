@@ -1,0 +1,21 @@
+# Per-user `gh` CLI aliases, applied by GitConfigGitHubCli.ps1 via
+# `gh alias import --clobber`. Aliases live in %APPDATA%\GitHub CLI\config.yml,
+# which is per-user state -- nothing here is machine-scoped.
+#
+# Shell aliases (`!`-prefixed) are executed by gh through a POSIX `sh`. On
+# Windows gh locates Git for Windows' sh.exe itself, so `sh` does not need to
+# be on PATH; git does need to be installed, which GitConfigure.ps1 guarantees
+# by running before this configurator.
+#
+# Block scalars (`|-`) are used deliberately: the expansions are shell
+# one-liners dense with quotes and `$`, and a block scalar keeps them literal
+# with no escaping.
+
+# gh iv <issue-number> [-s|--summary] -- compact issue view.
+#   gh iv 390     -> "#390 <title>"
+#   gh iv 390 -s  -> title plus the first *prose* paragraph of the body,
+#                    skipping headings, blockquotes, tables, code fences and
+#                    HTML comments so the summary is never markdown scaffolding.
+# A leading '#' on the number is stripped, so `gh iv #390` works too.
+iv: |-
+  !s=0; n=""; for a in "$@"; do case "$a" in -s|--summary) s=1;; *) n=${a#\#};; esac; done; if [ -z "$n" ]; then echo "usage: gh iv <issue-number> [-s|--summary]" >&2; exit 2; fi; if [ "$s" = 1 ]; then gh issue view "$n" --json number,title,body --jq '("#" + (.number|tostring) + " " + .title), ([(.body // "") | split("\n\n")[] | select(length > 0) | select(startswith("#") or startswith(">") or startswith("|") or startswith("```") or startswith("<!--") | not)] | first // "(no body)")'; else gh issue view "$n" --json number,title --jq '"#" + (.number|tostring) + " " + .title'; fi
