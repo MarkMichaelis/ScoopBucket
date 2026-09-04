@@ -74,6 +74,14 @@ Function GitConfigure {
         Write-Warning "Skipping gh tab-completion registration: $($_.Exception.Message)"
     }
 
+    # gh per-user aliases (gh iv, ...). Dot-sourced HERE rather than at the top
+    # of this script alongside the other GitConfig* companions: those configure
+    # tools installed elsewhere, whereas this one needs `gh` on PATH, which only
+    # becomes true after the `winget install GitHub.cli` above. The script
+    # self-invokes Invoke-GitConfigGitHubCli and no-ops with a warning if gh is
+    # still missing.
+    . "$PSScriptRoot\GitConfigGitHubCli.ps1"
+
     # gk (GitKraken CLI) native tab completion. gk is cobra-based and emits a
     # real PowerShell completer via `gk completion powershell` (positional
     # shell arg -- note NOT the gh-style `-s powershell`). Co-located with the

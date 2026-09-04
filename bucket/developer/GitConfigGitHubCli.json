@@ -1,0 +1,11 @@
+{
+    "$schema": "https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json",
+    "version": "1.00.000",
+    "url": [
+        "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/developer/GitConfigGitHubCli.ps1",
+        "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/developer/gh-aliases.yml"
+    ],
+    "installer": {
+        "script": "& \"$dir\\GitConfigGitHubCli.ps1\""
+    }
+}
