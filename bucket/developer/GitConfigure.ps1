@@ -44,6 +44,22 @@ Function GitConfigure {
 
     git config --global color.ui 'auto'
     git config --global push.default 'simple'
+    # Normalize line endings on the way INTO the object database, and leave
+    # the working tree alone. `input` deliberately, not `true`: `true` also
+    # rewrites the working tree to CRLF, which breaks shell scripts under
+    # WSL, Docker and Linux CI.
+    #
+    # This overrides the system-level `false` that /NoAutoCrlf sets above.
+    # That parameter's "checkout as is" half is preserved -- `input` does
+    # nothing on checkout -- while "commit as is" becomes "commit as LF".
+    # Without it, whatever an editor happens to write is what gets committed:
+    # an audit found ~228 CRLF and ~52 mixed-ending files already in the
+    # local repository set.
+    #
+    # A per-machine safety net for repos with no .gitattributes. NOT the real
+    # fix -- .gitattributes lives in the repo, travels to every clone and CI
+    # runner, and takes precedence over this setting.
+    git config --global core.autocrlf input
     git config --global color.status.untracked "red normal bold"
     git config --global color.status.changed "red normal bold"
     git config --global color.status.add "green normal bold"

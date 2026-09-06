@@ -24,4 +24,10 @@ Describe "Install $name" -Tag 'Heavy', 'Install', 'Manual' {
     It 'sets push.default to simple' {
         git config --global push.default | Should -Be 'simple'
     }
+
+    It 'sets core.autocrlf to input so CRLF never enters the index' {
+        # `input`, not `true`: `true` would also rewrite the working tree to
+        # CRLF and break shell scripts under WSL, Docker and Linux CI.
+        git config --global core.autocrlf | Should -Be 'input'
+    }
 }
