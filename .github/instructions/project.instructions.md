@@ -86,7 +86,7 @@ directly:
 ```
 
 Most scripts self-invoke their primary function on the last line of the file, so
-dot-sourcing one runs it. The function name varies by family (see the checklist
+dot-sourcing one runs it. The function name varies by shape (see the checklist
 below) -- it is not uniformly `Invoke-<Name>`.
 
 ## Key Conventions
@@ -140,12 +140,12 @@ Any change to a `bucket/**/*.ps1` shipped by a manifest requires bumping the
 bundle manifests that ship it transitively. `Test-ManifestVersionBumps.ps1`
 enforces this and CI fails without it. Versions are `M.NN.000`.
 
-### New script checklist -- pick the right family first
+### New script checklist -- pick the right shape first
 
-There is no single template. Three shapes recur, and roughly half the scripts
-under `bucket/*/` are one-offs that match none of them cleanly. **Copy the
-nearest sibling in the category you are adding to** rather than applying a shape
-from elsewhere.
+There is no single template. Three shapes recur, and about a third of the
+scripts under `bucket/*/` (5 of 15) are one-offs that match none of them cleanly.
+**Copy the nearest sibling in the category you are adding to** rather than
+applying a shape from elsewhere.
 
 **Package-list shape** (`ChatGPT.ps1`, `Aspire.ps1`, the four top-level bundles):
 declares a `$Packages` array and ends by calling the shared engine,
@@ -164,11 +164,11 @@ its `Invoke-<Name>` function on the last line.
 no tool guard. Common for installers that drive a vendor bootstrapper or an
 uninstall sweep.
 
-A `Get-Command` guard is not a reliable family marker: five scripts use one, and
+A `Get-Command` guard is not a reliable shape marker: five scripts use one, and
 they span these shapes -- `Aspire.ps1` uses it mid-script to probe for `dotnet`
 rather than as an early-exit guard.
 
-Both families share:
+All three shapes share:
 
 - One `bucket/<category>/` directory holding `<Name>.ps1`, `<Name>.json`,
   `<Name>.Tests.ps1`, plus any data file the script reads.
