@@ -142,21 +142,31 @@ enforces this and CI fails without it. Versions are `M.NN.000`.
 
 ### New script checklist -- pick the right family first
 
-There are **two** live patterns. Copy the siblings in the category you are adding
-to; do not apply one family's shape to the other.
+There is no single template. Three shapes recur, and roughly half the scripts
+under `bucket/*/` are one-offs that match none of them cleanly. **Copy the
+nearest sibling in the category you are adding to** rather than applying a shape
+from elsewhere.
 
-**Installer family** (`ChatGPT.ps1`, `Aspire.ps1`, the four top-level bundles):
+**Package-list shape** (`ChatGPT.ps1`, `Aspire.ps1`, the four top-level bundles):
 declares a `$Packages` array and ends by calling the shared engine,
-`Invoke-PackageInstall -Packages $Packages -Bundle '<Name>'`. This is the usual
-shape for a script whose job is "install these packages". It needs no
-`Get-Command` guard -- the engine owns install sequencing and reporting.
+`Invoke-PackageInstall -Packages $Packages -Bundle '<Name>'`. The usual shape
+when the job is "install these packages" -- the engine owns install sequencing
+and reporting, so the script does not re-implement them.
 
-**Configurator family** (`GitConfigVSCode.ps1`, `GitConfigBeyondCompare.ps1`,
+**Configurator shape** (`GitConfigVSCode.ps1`, `GitConfigBeyondCompare.ps1`,
 `GitConfigVisualStudio.ps1`): configures an already-installed tool. Guards on
-`Get-Command <tool>` and warns-and-returns when the tool is absent, then
-self-invokes its `Invoke-<Name>` function on the last line. Only about a third of
-the scripts under `bucket/*/` carry a `Get-Command` guard, and it belongs to this
-family.
+`Get-Command <tool>`, warns and returns when the tool is absent, then self-invokes
+its `Invoke-<Name>` function on the last line.
+
+**Bespoke shape** (`ClaudeExcel.ps1`, `Gemini.ps1`, `Chocolatey.ps1`,
+`McAfeeUninstall.ps1`): a single purpose-built `Install-<Name>` /
+`Uninstall-<Name>` function, self-invoked on the last line. No `$Packages` array,
+no tool guard. Common for installers that drive a vendor bootstrapper or an
+uninstall sweep.
+
+A `Get-Command` guard is not a reliable family marker: five scripts use one, and
+they span these shapes -- `Aspire.ps1` uses it mid-script to probe for `dotnet`
+rather than as an early-exit guard.
 
 Both families share:
 
@@ -180,8 +190,10 @@ Both families share:
   parent's naming prefix (`GitConfigure` -> `GitConfig*`).
 - **Sidecar** -- a generated completion script written alongside a registered CLI
   completion.
-- **Light / Heavy / Install** -- Pester tags. `Light` is side-effect-free and runs
-  in CI; `Heavy` and `Install` mutate the machine and run only locally.
+- **Light / Heavy / Install** -- Pester tags. `Light` is side-effect-free and is
+  the PR gate. `Heavy` and `Install` mutate the machine; `Install` runs only
+  locally, and `Heavy` runs locally plus, for five named files, post-merge in
+  `validate-installs.yml` (see **Build, Test, Format** above).
 
 ## External Dependencies & Secrets
 
