@@ -137,3 +137,73 @@ Describe "Install $name" -Tag 'Heavy', 'Install' {
         finally { Pop-Location }
     }
 }
+
+Describe "Behaviour $sut (unit)" -Tag 'Light', 'Unit' {
+    BeforeAll {
+        $script:configurator = Join-Path $PSScriptRoot 'GitConfigGitHubCli.ps1'
+
+        # Dot-sourcing the configurator self-invokes Invoke-GitConfigGitHubCli
+        # (last line of the file), so merely loading the function under test
+        # would import the aliases for real. GH_CONFIG_DIR redirects gh's
+        # per-user config away from %APPDATA%\GitHub CLI\ for the whole block,
+        # so neither the load nor any assertion can touch the developer's real
+        # alias set.
+        $script:sandbox = Join-Path ([System.IO.Path]::GetTempPath()) "ghcfg-$([guid]::NewGuid())"
+        New-Item -ItemType Directory -Path $script:sandbox -Force | Out-Null
+        $script:priorConfigDir = $env:GH_CONFIG_DIR
+        $env:GH_CONFIG_DIR = $script:sandbox
+
+        . $script:configurator *>$null
+    }
+
+    AfterAll {
+        if ($null -eq $script:priorConfigDir) {
+            Remove-Item Env:\GH_CONFIG_DIR -ErrorAction Ignore
+        } else {
+            $env:GH_CONFIG_DIR = $script:priorConfigDir
+        }
+        Remove-Item -LiteralPath $script:sandbox -Recurse -Force -ErrorAction Ignore
+    }
+
+    It 'parses without syntax errors' {
+        $tokens = $null; $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile(
+            $script:configurator, [ref]$tokens, [ref]$errors) | Out-Null
+        $errors | Should -BeNullOrEmpty
+    }
+
+    It 'ships gh-aliases.yml alongside the configurator' {
+        # The manifest url list ships this file into the same app dir; the
+        # configurator resolves it via $PSScriptRoot and no-ops without it.
+        Test-Path (Join-Path $PSScriptRoot 'gh-aliases.yml') | Should -Be $true
+    }
+
+    It 'declares the iv alias as a shell alias' {
+        $yml = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'gh-aliases.yml') -Raw
+        $yml | Should -Match '(?m)^iv:'
+        # gh only runs an expansion through POSIX sh when it is '!'-prefixed;
+        # without the bang the whole one-liner would be treated as gh args.
+        $yml | Should -Match '(?m)^\s*!s=0;'
+    }
+
+    It 'warns and returns without throwing when gh is not installed' {
+        # Acceptance criterion from issue #406. Unreachable on a machine that
+        # has gh -- which is every machine the Heavy suite runs on -- so the
+        # absent-tool guard is only ever exercised here, under a mock.
+        Mock Get-Command -ParameterFilter { $Name -eq 'gh' } -MockWith { $null }
+
+        $captured = $null
+        { $script:captured = Invoke-GitConfigGitHubCli 3>&1 } | Should -Not -Throw
+        ($script:captured | Out-String) | Should -Match 'gh not found'
+    }
+
+    It 'warns and returns without throwing when gh-aliases.yml is missing' {
+        # The second guard: gh present but the data file absent, which is what
+        # a manifest that forgot the gh-aliases.yml url would produce.
+        Mock Resolve-GhAliasFile -MockWith { $null }
+
+        $captured = $null
+        { $script:captured = Invoke-GitConfigGitHubCli 3>&1 } | Should -Not -Throw
+        ($script:captured | Out-String) | Should -Match 'gh-aliases\.yml not found'
+    }
+}
