@@ -143,9 +143,11 @@ enforces this and CI fails without it. Versions are `M.NN.000`.
 ### New script checklist -- pick the right shape first
 
 There is no single template. Three shapes recur, and about a third of the
-scripts under `bucket/*/` (5 of 15) are one-offs that match none of them cleanly.
-**Copy the nearest sibling in the category you are adding to** rather than
-applying a shape from elsewhere.
+scripts under `bucket/*/` are one-offs matching none of them cleanly
+(`GitConfigure.ps1`, `Invoke-GitDiffCode.ps1`, `PowerShell.ps1`,
+`PowerToysSettingsBackup.ps1`, `SetPowerConfiguration.ps1`). **Copy the nearest
+sibling in the category you are adding to** rather than applying a shape from
+elsewhere.
 
 **Package-list shape** (`ChatGPT.ps1`, `Aspire.ps1`, the four top-level bundles):
 declares a `$Packages` array and ends by calling the shared engine,
@@ -185,7 +187,7 @@ All three shapes share:
   configurators (e.g. `DeveloperBasePackages`, `AIAgents`). Installed by users
   directly; the constituent configurators are also individually installable.
 - **Configurator** -- a single-purpose script that configures an already-installed
-  tool rather than installing it (e.g. `GitConfigVSCode`, `GitConfigGitHubCli`).
+  tool rather than installing it (e.g. `GitConfigVSCode`, `GitConfigVisualStudio`).
 - **Companion** -- a configurator dot-sourced by a parent script, following the
   parent's naming prefix (`GitConfigure` -> `GitConfig*`).
 - **Sidecar** -- a generated completion script written alongside a registered CLI
