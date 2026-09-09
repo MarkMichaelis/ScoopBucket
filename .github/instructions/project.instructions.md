@@ -66,9 +66,14 @@ There is no compile step. The test suite is the build.
 .\Test-ManifestVersionBumps.ps1
 ```
 
-**Gotcha:** CI runs only the `Light` tag. `Heavy` / `Install` tests -- which is
-where `Install-LocalManifest` coverage lives -- never run in CI, so run them
-locally before merging any change to a manifest or its installer script.
+**Gotcha:** the PR gate (`.github/workflows/test.yml`) runs `Light` only. `Heavy`
+tests do run in CI, but in `.github/workflows/validate-installs.yml`, which
+triggers on push to `main` and `workflow_dispatch` -- i.e. *after* merge, too
+late to gate a PR. That workflow also names five specific test files rather than
+running every `Heavy` test, so a new manifest's `Heavy` / `Install` tests -- where
+`Install-LocalManifest` coverage lives -- get no CI coverage at all until they
+are added to it. Run them locally before merging any change to a manifest or its
+installer script.
 
 ## Run / Debug
 
@@ -80,8 +85,9 @@ directly:
 & .\bucket\<category>\<Name>.ps1
 ```
 
-Scripts self-invoke their `Invoke-<Name>` function on the last line of the file,
-so dot-sourcing one runs it.
+Most scripts self-invoke their primary function on the last line of the file, so
+dot-sourcing one runs it. The function name varies by family (see the checklist
+below) -- it is not uniformly `Invoke-<Name>`.
 
 ## Key Conventions
 
@@ -134,16 +140,34 @@ Any change to a `bucket/**/*.ps1` shipped by a manifest requires bumping the
 bundle manifests that ship it transitively. `Test-ManifestVersionBumps.ps1`
 enforces this and CI fails without it. Versions are `M.NN.000`.
 
-### New configurator checklist
+### New script checklist -- pick the right family first
 
-A new configurator ships alongside its siblings in one `bucket/<category>/`
-directory: `<Name>.ps1`, `<Name>.json`, `<Name>.Tests.ps1`, plus any data file it
-reads. The `.ps1` opens with the verbatim bundle module-import header (copied
-from a sibling -- `BundleModuleImportDrift.Tests.ps1` counts the occurrences and
-must be updated), guards on `Get-Command <tool>` and warns-and-returns when the
-tool is absent, and self-invokes its `Invoke-<Name>` function on the last line.
-Every file it needs at runtime must appear in the manifest's `url` list, since
-Scoop downloads only the listed files into the app dir.
+There are **two** live patterns. Copy the siblings in the category you are adding
+to; do not apply one family's shape to the other.
+
+**Installer family** (`ChatGPT.ps1`, `Aspire.ps1`, the four top-level bundles):
+declares a `$Packages` array and ends by calling the shared engine,
+`Invoke-PackageInstall -Packages $Packages -Bundle '<Name>'`. This is the usual
+shape for a script whose job is "install these packages". It needs no
+`Get-Command` guard -- the engine owns install sequencing and reporting.
+
+**Configurator family** (`GitConfigVSCode.ps1`, `GitConfigBeyondCompare.ps1`,
+`GitConfigVisualStudio.ps1`): configures an already-installed tool. Guards on
+`Get-Command <tool>` and warns-and-returns when the tool is absent, then
+self-invokes its `Invoke-<Name>` function on the last line. Only about a third of
+the scripts under `bucket/*/` carry a `Get-Command` guard, and it belongs to this
+family.
+
+Both families share:
+
+- One `bucket/<category>/` directory holding `<Name>.ps1`, `<Name>.json`,
+  `<Name>.Tests.ps1`, plus any data file the script reads.
+- The verbatim bundle module-import header, copied from a sibling.
+  `BundleModuleImportDrift.Tests.ps1` asserts an exact hard-coded count of files
+  carrying it, so adding one means bumping that count deliberately.
+- Every file needed at runtime listed in the manifest's `url` array -- Scoop
+  downloads only the listed files into the app dir, so a data file omitted there
+  is missing at install time even though it sits next to the script in the repo.
 
 ## Domain Glossary
 
@@ -171,5 +195,6 @@ treated as user state the scripts provision but never overwrite wholesale.
 - Never edit upstream-managed files (`CLAUDE.md`, `.github/copilot-instructions.md`,
   `.github/agents/*`, `.github/skills/*`, and `.github/instructions/*` other than
   this file). Changes there belong in the IntelliSDLC.ai repo.
-- Do not assume CI green means the change is verified -- CI runs `Light` only.
+- Do not assume a green PR check means the change is verified -- the PR gate runs
+  `Light` only, and the `Heavy` workflow runs post-merge over five named files.
 - Do not use bare `git config`; always `git config --global`.

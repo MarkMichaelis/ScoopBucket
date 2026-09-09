@@ -29,11 +29,14 @@ code**, using the `Agent` tool with an explicit `model` override:
 This is the one case in this repo where spawning a subagent is expected rather
 than avoided.
 
-## Testing: CI green is not verification
+## Testing: a green PR check is not verification
 
-CI runs only the `Light` Pester tag. `Heavy` / `Install` tests — where
-`Install-LocalManifest` coverage lives — never run in CI. Run them locally before
-merging anything that touches a manifest or an installer script:
+The PR gate (`test.yml`) runs only the `Light` Pester tag. `Heavy` tests do run in
+CI — but in `validate-installs.yml`, which fires on push to `main`, i.e. *after*
+merge, and only over five named test files. So a new manifest's `Heavy` /
+`Install` tests, where `Install-LocalManifest` coverage lives, have no CI coverage
+at all. Run them locally before merging anything that touches a manifest or an
+installer script:
 
 ```powershell
 .\bucket\Invoke-Tests.ps1                      # Light -- pre-push gate
