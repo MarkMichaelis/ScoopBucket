@@ -305,6 +305,12 @@ Describe 'Claude tabs: Git Bash helper and tab-session hook' -Tag 'Light', 'Buck
         $record.PSObject.Properties.Name | Should -Not -Contain 'ended'
     }
 
+    It 'ignores session events from a subagent, which shares the tab''s claude process' {
+        Invoke-Hook '{"hook_event_name":"SessionStart","session_id":"sub","cwd":"C:/x","source":"startup","agent_id":"a1"}' 111
+
+        (Read-Record).sessionId | Should -Be 's2'
+    }
+
     It 'tells a restored Git Bash tab which session to resume' {
         $lines = @(node $script:helper restore $script:tokenDir)
 

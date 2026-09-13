@@ -44,8 +44,8 @@ _ct_update_tab() {
 }
 
 claude() {
-    # When run by Claude itself there is no tab to restore.
-    if [ -n "$CLAUDECODE" ]; then
+    # When run by Claude itself, or outside Windows Terminal, there is no tab to restore.
+    if [ -n "$CLAUDECODE" ] || [ -z "$WT_SESSION" ]; then
         command "$_ct_claude" "$@"
         return
     fi
