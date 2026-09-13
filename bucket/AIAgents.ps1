@@ -270,6 +270,14 @@ foreach (`$pair in @(
         Completion  = 'auto'
         Notes       = 'claude has no completion subcommand and no PSCompletions entry. Hand-curated top-level command list. Also the install home for Claude Design''s local-project workflow (/design, /design-sync); claude.ai/design is the web canvas and there is no separate ClaudeDesign package.'
         ExpectedCompletions = @{ claude = @('--help','--version','mcp') }
+        # #412: tab-session hook (resume in restored Windows Terminal tabs), Prompt
+        # Spotlight theme, and the "Outcomes, not code" output style.
+        # $PSScriptRoot is empty when Update-Package/Install-Package harvest this entry;
+        # the import's default then resolves the same file from the module's bucket.
+        ConfigScript        = {
+            if ($PSScriptRoot) { Import-ClaudeCodeSettings -ConfigPath (Join-Path $PSScriptRoot 'ai\MarkMichaelisClaudeCodeSettings.jsonc') }
+            else { Import-ClaudeCodeSettings }
+        }
         NativeCommandScript = {
             @"
 Register-ArgumentCompleter -Native -CommandName claude -ScriptBlock {

@@ -541,6 +541,24 @@ package owns, such as the AIAgents MCP-server wiring (`mcpServers` JSON /
 Codex TOML entries, the persisted GitHub PAT, the profile self-heal
 block) -- gets the same treatment via the `[Package].ConfigScript` hook.
 
+The **Windows Terminal** and **Claude Code CLI** entries use the same hook
+to apply the MarkMichaelis terminal setup (#412), merging into the existing
+settings files without duplicating entries:
+
+- `Import-WindowsTerminalSettings` -- reopen windows and tabs after a
+  reboot or crash, start at sign-in, the `Claude Tabs` theme (the selected
+  tab stands out), a Git Bash profile, and per-repository tab colors with
+  Claude session resume for PowerShell and Git Bash
+  (`bucket/os/MarkMichaelisWindowsTerminalSettings.jsonc` plus the
+  `MarkMichaelisClaudeTabs.*` shell integration).
+- `Import-ClaudeCodeSettings` -- the tab-session hook that keeps each tab's
+  Claude session record current, the `Prompt Spotlight` theme, and the
+  `Outcomes, not code` output style
+  (`bucket/ai/MarkMichaelisClaudeCodeSettings.jsonc`).
+
+Refresh either with `Update-Package 'Windows Terminal'` or
+`Update-Package 'Claude Code CLI'`.
+
 > **`posh` MCP server -- full, write-capable PowerShell.** The `posh`
 > server (PoshMcp) is wired with a generated config
 > (`~\.poshmcp\appsettings.full.json`) whose `PowerShellConfiguration`
