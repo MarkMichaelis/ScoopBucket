@@ -1,0 +1,13 @@
+{
+  // Applied by Import-ClaudeCodeSettings, the Claude Code CLI ConfigScript (#412).
+  // Re-applied on every install and update: keys under "settings" are set in
+  // ~/.claude/settings.json; every other key there is kept. The tab-session hook
+  // (SessionStart/SessionEnd) is added once, next to any existing hooks.
+  "settings": {
+    // Colored band behind your own prompts (MarkMichaelisClaudePromptSpotlightTheme.jsonc).
+    "theme": "custom:prompt-spotlight",
+    // Plain-language replies: You asked / Result / Assumptions / Needs you
+    // (MarkMichaelisClaudeOutcomesNotCode.md).
+    "outputStyle": "Outcomes, not code"
+  }
+}

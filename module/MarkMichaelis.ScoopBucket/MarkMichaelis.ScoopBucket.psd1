@@ -59,7 +59,9 @@
         'Invoke-CliCompletionsSweep',
         'Save-Artifact',
         'Export-PowerToysSettings',
-        'Import-PowerToysSettings'
+        'Import-PowerToysSettings',
+        'Import-WindowsTerminalSettings',
+        'Import-ClaudeCodeSettings'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()

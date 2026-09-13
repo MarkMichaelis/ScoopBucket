@@ -24,6 +24,14 @@ $Packages = [Package[]]@(
         Completion  = 'auto'
         Notes       = 'Phase 2: converted from pscompletions to a native in-tree completer (#232). wt has no upstream PowerShell completion command; documented CLI surface is small and stable (https://learn.microsoft.com/en-us/windows/terminal/command-line-arguments).'
         ExpectedCompletions = @{ wt = @('new-tab','split-pane','focus-tab','move-focus','swap-pane','--window','-w','--maximized','-M','--fullscreen','-F','--focus','-f') }
+        # #412: restore windows/tabs after a reboot, Claude Tabs theme, Git Bash profile,
+        # and per-repo tab colors + Claude session resume for PowerShell and Git Bash.
+        # $PSScriptRoot is empty when Update-Package/Install-Package harvest this entry;
+        # the import's default then resolves the same file from the module's bucket.
+        ConfigScript        = {
+            if ($PSScriptRoot) { Import-WindowsTerminalSettings -ConfigPath (Join-Path $PSScriptRoot 'os\MarkMichaelisWindowsTerminalSettings.jsonc') }
+            else { Import-WindowsTerminalSettings }
+        }
         NativeCommandScript = {
             @"
 Register-ArgumentCompleter -Native -CommandName wt -ScriptBlock {

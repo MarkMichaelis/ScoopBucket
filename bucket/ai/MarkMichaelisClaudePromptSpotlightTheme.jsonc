@@ -1,0 +1,11 @@
+{
+  "name": "Prompt Spotlight",
+  "base": "dark",
+  "overrides": {
+    "userMessageBackground": "#23406b",
+    "userMessageBackgroundHover": "#2f5590",
+    "briefLabelYou": "#7cc4ff",
+    "promptBorder": "#7cc4ff",
+    "promptBorderShimmer": "#b3dcff"
+  }
+}

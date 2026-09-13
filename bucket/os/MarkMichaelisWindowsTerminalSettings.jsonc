@@ -1,0 +1,37 @@
+{
+  // Applied by Import-WindowsTerminalSettings, the Windows Terminal ConfigScript (#412).
+  // Re-applied on every install and update: keys under "settings" and the themes
+  // below are set in Windows Terminal's settings.json; everything else there is kept.
+  "settings": {
+    // Reopen every window and tab (in its last folder) after a reboot, crash, or
+    // closing the last window. Terminal saves the layout every 5 minutes and at shutdown.
+    "firstWindowPreference": "persistedWindowLayout",
+    "startOnUserLogin": true,
+    "theme": "Claude Tabs"
+  },
+  "themes": [
+    {
+      // Black tab row so faded (unselected) repo-colored tabs recede; the selected tab
+      // shows its color at full strength, uncolored selected tabs use the accent color,
+      // and only the selected tab shows a close button.
+      "name": "Claude Tabs",
+      "window": { "applicationTheme": "dark" },
+      "tab": { "background": "accent", "unfocusedBackground": "#00000000", "showCloseButton": "activeOnly" },
+      "tabRow": { "background": "#000000FF", "unfocusedBackground": "#1C1C1CFF" }
+    }
+  ],
+  // Added only when Git for Windows is installed and no profile has this name;
+  // commandline and icon are filled in from the detected Git install.
+  "gitBashProfile": {
+    "guid": "{5e1c7a42-3f9b-4d6e-8a21-b7c04d9e3f15}",
+    "name": "Git Bash",
+    "startingDirectory": "%USERPROFILE%",
+    "hidden": false
+  },
+  // Seeded into ~/.claude/terminal-tabs/colors.json; local entries are never overwritten.
+  // Keys are lower-case repository roots (main worktree).
+  "tabColors": {
+    "c:\\git\\codiwomplersocialmedia": "#2E86DE",
+    "c:\\git\\scoop": "#E67E22"
+  }
+}
