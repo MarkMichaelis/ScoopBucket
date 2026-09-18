@@ -71,7 +71,13 @@ $Packages = [Package[]]@(
 
             $shimDir = Get-ScoopShimDirectory
             if (-not $shimDir) {
-                throw "No scoop 'shims' directory exists under any candidate root -- `$env:SCOOP='$env:SCOOP', `$env:SCOOP_GLOBAL='$env:SCOOP_GLOBAL', '$(Join-Path $env:USERPROFILE 'scoop')', '$(Join-Path $env:ProgramData 'scoop')'. Install scoop first (this bucket depends on it)."
+                # Guard the two Join-Path calls the way Get-ScoopShimDirectory
+                # guards them: Join-Path throws on a null Path, so building
+                # this diagnostic unguarded would replace it with a binding
+                # error when USERPROFILE/ProgramData are unset (SYSTEM).
+                $userScoop = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'scoop' } else { '<USERPROFILE unset>' }
+                $pdScoop   = if ($env:ProgramData) { Join-Path $env:ProgramData 'scoop' } else { '<ProgramData unset>' }
+                throw "No scoop 'shims' directory exists under any candidate root -- `$env:SCOOP='$env:SCOOP', `$env:SCOOP_GLOBAL='$env:SCOOP_GLOBAL', '$userScoop', '$pdScoop'. Install scoop first (this bucket depends on it)."
             }
 
             $map = @{
@@ -404,7 +410,10 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
             # the terminal returns immediately after launching the GUI.
             $shimDir = Get-ScoopShimDirectory
             if (-not $shimDir) {
-                throw "No scoop 'shims' directory exists under any candidate root -- `$env:SCOOP='$env:SCOOP', `$env:SCOOP_GLOBAL='$env:SCOOP_GLOBAL', '$(Join-Path $env:USERPROFILE 'scoop')', '$(Join-Path $env:ProgramData 'scoop')'. Install scoop first (this bucket depends on it)."
+                # Null-guarded for the same reason as the Office shim site above.
+                $userScoop = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'scoop' } else { '<USERPROFILE unset>' }
+                $pdScoop   = if ($env:ProgramData) { Join-Path $env:ProgramData 'scoop' } else { '<ProgramData unset>' }
+                throw "No scoop 'shims' directory exists under any candidate root -- `$env:SCOOP='$env:SCOOP', `$env:SCOOP_GLOBAL='$env:SCOOP_GLOBAL', '$userScoop', '$pdScoop'. Install scoop first (this bucket depends on it)."
             }
             $shimPath = Join-Path $shimDir 'onedrive.cmd'
             $content  = "@echo off`r`n" +
