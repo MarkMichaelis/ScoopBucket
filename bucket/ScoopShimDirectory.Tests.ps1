@@ -66,6 +66,14 @@ Describe 'Get-ScoopShimDirectory' -Tag 'Light', 'Module' {
     }
 
     AfterEach {
+        # Restore per-test, not just in AfterAll: these are process-wide, and
+        # leaving $env:USERPROFILE / $env:ProgramData pointed at a sandbox we
+        # are about to delete would poison any later test in this session.
+        # Matches the per-test save/restore in LazyScoopInit.Tests.ps1.
+        $env:SCOOP        = $script:savedScoop
+        $env:SCOOP_GLOBAL = $script:savedScoopGlobal
+        $env:USERPROFILE  = $script:savedUserProfile
+        $env:ProgramData  = $script:savedProgramData
         Remove-Item -LiteralPath $script:sandbox -Recurse -Force -ErrorAction SilentlyContinue
     }
 

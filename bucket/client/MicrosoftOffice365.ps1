@@ -71,7 +71,7 @@ $Packages = [Package[]]@(
 
             $shimDir = Get-ScoopShimDirectory
             if (-not $shimDir) {
-                throw "Scoop shim directory not found under `$env:SCOOP, `$env:SCOOP_GLOBAL, ~\scoop, or $env:ProgramData\scoop. Install scoop first (this bucket depends on it)."
+                throw "No scoop 'shims' directory exists under any candidate root -- `$env:SCOOP='$env:SCOOP', `$env:SCOOP_GLOBAL='$env:SCOOP_GLOBAL', '$(Join-Path $env:USERPROFILE 'scoop')', '$(Join-Path $env:ProgramData 'scoop')'. Install scoop first (this bucket depends on it)."
             }
 
             $map = @{
@@ -287,7 +287,7 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
         CliCommands = @('onedrive')
         Completion  = 'native'
         UpdateMode  = 'SelfManaged'  # OneDrive auto-updates its own client; the install script only seeds the machine-wide binary.
-        Notes       = 'Replaces the Windows-default per-user OneDrive with a machine-wide install via OneDriveSetup.exe /allusers /silent. /allusers requires admin; the per-user uninstall is best-effort. Shim at <scoop shims>\onedrive.cmd (resolved by Get-ScoopShimDirectory, so a global scoop install under $env:SCOOP works as well as the per-user ~\scoop default) resolves to C:\Program Files\Microsoft OneDrive\OneDrive.exe. Switches per support.microsoft.com OneDrive command-line reference (flat switches, no subcommands).'
+        Notes       = 'Replaces the Windows-default per-user OneDrive with a machine-wide install via OneDriveSetup.exe /allusers /silent. /allusers requires admin; the per-user uninstall is best-effort. Shim at <scoop shims>\onedrive.cmd (resolved by Get-ScoopShimDirectory, so a global scoop install under $env:SCOOP works as well as the per-user ~\scoop default) resolves to C:\Program Files\Microsoft OneDrive\OneDrive.exe. Switches per support.microsoft.com OneDrive command-line reference (flat switches, no subcommands). The install short-circuits when VerifyScript passes, which is a presence check (exe + shim + sentinel) rather than an integrity check; since UpdateMode is SelfManaged, nothing re-runs the install automatically. To force a reinstall after a corrupt or interrupted one, delete the onedrive.cmd shim or C:\Program Files\Microsoft OneDrive\OneDrive.exe and install again.'
         ExpectedCompletions = @{
             onedrive = @('/addaccount','/background','/reset','/resetauthstate','/shutdown','/signout','/configure_business:')
         }
@@ -301,9 +301,27 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
             # fwlink -- which serves an OLDER build than the self-updating
             # client already on disk and silently downgrades it. Delegating
             # to VerifyScript keeps the skip condition and the verification
-            # condition from drifting apart. Mirrors the same pattern in the
-            # 'Claude for Excel' entry above.
-            if ($pkg -and $pkg.VerifyScript -and (& $pkg.VerifyScript $pkg)) {
+            # condition from drifting apart. Same "detect, then early-return"
+            # shape as the 'Claude for Excel' entry above, though that one
+            # duplicates its detection inline rather than reusing VerifyScript.
+            #
+            # A throwing VerifyScript means "not verified", not "fail the
+            # package" -- matching how Test-PackageInstalled treats it
+            # (Invoke-PackageInstall.ps1). Without the catch, a throw here
+            # would surface as "Install threw:" and skip the install that
+            # would have repaired whatever made it throw.
+            #
+            # Note this is a presence check only (exe + shim + sentinel), so
+            # a corrupt or truncated OneDrive.exe still verifies and is never
+            # reinstalled -- and UpdateMode='SelfManaged' means the update
+            # path won't retry either. To force a reinstall, delete the shim
+            # or the exe (see Notes).
+            $alreadyInstalled = $false
+            if ($pkg -and $pkg.VerifyScript) {
+                try { $alreadyInstalled = [bool](& $pkg.VerifyScript $pkg) }
+                catch { Write-Verbose "  VerifyScript threw; treating OneDrive as not installed: $($_.Exception.Message)" }
+            }
+            if ($alreadyInstalled) {
                 Write-Host '  OneDrive is already installed machine-wide with its shim in place; skipping.'
                 return
             }
@@ -386,7 +404,7 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
             # the terminal returns immediately after launching the GUI.
             $shimDir = Get-ScoopShimDirectory
             if (-not $shimDir) {
-                throw "Scoop shim directory not found under `$env:SCOOP, `$env:SCOOP_GLOBAL, ~\scoop, or $env:ProgramData\scoop. Install scoop first (this bucket depends on it)."
+                throw "No scoop 'shims' directory exists under any candidate root -- `$env:SCOOP='$env:SCOOP', `$env:SCOOP_GLOBAL='$env:SCOOP_GLOBAL', '$(Join-Path $env:USERPROFILE 'scoop')', '$(Join-Path $env:ProgramData 'scoop')'. Install scoop first (this bucket depends on it)."
             }
             $shimPath = Join-Path $shimDir 'onedrive.cmd'
             $content  = "@echo off`r`n" +

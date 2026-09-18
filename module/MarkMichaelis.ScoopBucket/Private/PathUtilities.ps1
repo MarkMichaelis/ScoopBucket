@@ -159,6 +159,19 @@ function Get-ScoopShimDirectory {
         (shims dropped by other installers), and that directory is still
         the right place to write a shim.
 
+        Note the two helpers also differ in fallback ORDER: Resolve-ScoopRoot
+        tries ProgramData before USERPROFILE, this one the reverse (it follows
+        GitConfigBeyondCompare.ps1). They agree whenever $env:SCOOP is set --
+        which is how this repo's install.ps1 configures a machine -- and only
+        diverge when both env vars are unset AND both a per-user and a global
+        root exist. Preferring the per-user root there is deliberate: a shim
+        is a per-user convenience, and writing to ProgramData needs admin.
+
+        Does NOT check whether the resolved directory is on PATH; a shim
+        written somewhere off PATH will not resolve. Existence is used as a
+        proxy because scoop creates its own scoop.ps1/scoop.cmd shims during
+        bootstrap, so an active root always has the folder.
+
     .OUTPUTS
         The resolved shims directory path, or $null when no candidate root
         has one. Callers decide whether that is fatal.
