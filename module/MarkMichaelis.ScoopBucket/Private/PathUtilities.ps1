@@ -127,3 +127,57 @@ function Resolve-ScoopRoot {
     }
     return $null
 }
+
+function Get-ScoopShimDirectory {
+    <#
+    .SYNOPSIS
+        Resolve the scoop `shims` directory that packages should write
+        their .cmd shims into.
+
+    .DESCRIPTION
+        Scoop installs either per-user (~\scoop) or globally
+        (C:\ProgramData\scoop). This bucket's own install.ps1 sets SCOOP
+        to the ProgramData root at Machine scope, so the global layout is
+        the one the repo itself creates -- a package that assumes the
+        per-user default throws "Scoop shim directory ... not found" on
+        exactly the machine the repo provisioned.
+
+        Candidate roots are probed in order and the first whose `shims`
+        subdirectory EXISTS wins:
+
+          1. $env:SCOOP\shims
+          2. $env:SCOOP_GLOBAL\shims
+          3. $env:USERPROFILE\scoop\shims
+          4. $env:ProgramData\scoop\shims
+
+        Same order as bucket/developer/GitConfigBeyondCompare.ps1 uses to
+        find scoop-installed binaries.
+
+        Distinct from Resolve-ScoopRoot, which answers "is scoop itself
+        installed here" by probing apps\scoop\current. A machine can have
+        a populated shims directory on PATH without scoop's own app dir
+        (shims dropped by other installers), and that directory is still
+        the right place to write a shim.
+
+    .OUTPUTS
+        The resolved shims directory path, or $null when no candidate root
+        has one. Callers decide whether that is fatal.
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param()
+
+    $roots = @(
+        $env:SCOOP
+        $env:SCOOP_GLOBAL
+        $(if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'scoop' })
+        $(if ($env:ProgramData) { Join-Path $env:ProgramData 'scoop' })
+    )
+
+    foreach ($root in $roots) {
+        if (-not $root) { continue }
+        $shims = Join-Path $root 'shims'
+        if (Test-Path -LiteralPath $shims -PathType Container) { return $shims }
+    }
+    return $null
+}

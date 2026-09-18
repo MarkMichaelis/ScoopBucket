@@ -33,8 +33,11 @@ $Packages = [Package[]]@(
         # Issue #173. Office16 ships seven user-facing GUI apps under
         # C:\Program Files\Microsoft Office\root\Office16\ but that dir is
         # not on PATH, so `winword`/`excel`/`outlook` are unreachable from
-        # a terminal. We create thin .cmd shims in ~\scoop\shims (already
-        # on PATH via scoop) for the seven user-facing apps only --
+        # a terminal. We create thin .cmd shims in the active scoop shims
+        # directory (already on PATH via scoop; resolved by
+        # Get-ScoopShimDirectory, which honors a global install's
+        # $env:SCOOP rather than assuming the per-user ~\scoop default)
+        # for the seven user-facing apps only --
         # the other 39 EXEs under Office16 are internal helpers
         # (excelcnv, lync99, OcPubMgr, SDXHelperBgt, ...) that would just
         # pollute tab completion.
@@ -66,9 +69,9 @@ $Packages = [Package[]]@(
                 throw "Office16 install directory not found. Tried: $($candidates -join ', '). Ensure 'Microsoft 365 Apps for Enterprise' installed first."
             }
 
-            $shimDir = Join-Path $env:USERPROFILE 'scoop\shims'
-            if (-not (Test-Path -LiteralPath $shimDir)) {
-                throw "Scoop shim directory '$shimDir' not found. Install scoop first (this bucket depends on it)."
+            $shimDir = Get-ScoopShimDirectory
+            if (-not $shimDir) {
+                throw "Scoop shim directory not found under `$env:SCOOP, `$env:SCOOP_GLOBAL, ~\scoop, or $env:ProgramData\scoop. Install scoop first (this bucket depends on it)."
             }
 
             $map = @{
@@ -102,8 +105,8 @@ $Packages = [Package[]]@(
         }
         CustomUninstallScript = {
             param($pkg)
-            $shimDir = Join-Path $env:USERPROFILE 'scoop\shims'
-            if (-not (Test-Path -LiteralPath $shimDir)) { return }
+            $shimDir = Get-ScoopShimDirectory
+            if (-not $shimDir) { return }
             foreach ($shimName in @('winword','excel','outlook','powerpnt','onenote','msaccess','mspub')) {
                 $shimPath = Join-Path $shimDir "$shimName.cmd"
                 if (-not (Test-Path -LiteralPath $shimPath)) { continue }
@@ -116,8 +119,8 @@ $Packages = [Package[]]@(
             }
         }
         VerifyScript = {
-            $shimDir = Join-Path $env:USERPROFILE 'scoop\shims'
-            if (-not (Test-Path -LiteralPath $shimDir)) { return $false }
+            $shimDir = Get-ScoopShimDirectory
+            if (-not $shimDir) { return $false }
             foreach ($shimName in @('winword','excel','outlook','powerpnt','onenote','msaccess','mspub')) {
                 $shimPath = Join-Path $shimDir "$shimName.cmd"
                 if (-not (Test-Path -LiteralPath $shimPath)) {
@@ -284,7 +287,7 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
         CliCommands = @('onedrive')
         Completion  = 'native'
         UpdateMode  = 'SelfManaged'  # OneDrive auto-updates its own client; the install script only seeds the machine-wide binary.
-        Notes       = 'Replaces the Windows-default per-user OneDrive with a machine-wide install via OneDriveSetup.exe /allusers /silent. /allusers requires admin; the per-user uninstall is best-effort. Shim at ~\scoop\shims\onedrive.cmd resolves to C:\Program Files\Microsoft OneDrive\OneDrive.exe. Switches per support.microsoft.com OneDrive command-line reference (flat switches, no subcommands).'
+        Notes       = 'Replaces the Windows-default per-user OneDrive with a machine-wide install via OneDriveSetup.exe /allusers /silent. /allusers requires admin; the per-user uninstall is best-effort. Shim at <scoop shims>\onedrive.cmd (resolved by Get-ScoopShimDirectory, so a global scoop install under $env:SCOOP works as well as the per-user ~\scoop default) resolves to C:\Program Files\Microsoft OneDrive\OneDrive.exe. Switches per support.microsoft.com OneDrive command-line reference (flat switches, no subcommands).'
         ExpectedCompletions = @{
             onedrive = @('/addaccount','/background','/reset','/resetauthstate','/shutdown','/signout','/configure_business:')
         }
@@ -367,9 +370,9 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
             # Scoop shim so `onedrive` resolves on PATH. Uses the same
             # `@start "" "<exe>" %*` detach pattern as the Office shims so
             # the terminal returns immediately after launching the GUI.
-            $shimDir = Join-Path $env:USERPROFILE 'scoop\shims'
-            if (-not (Test-Path -LiteralPath $shimDir)) {
-                throw "Scoop shim directory '$shimDir' not found. Install scoop first (this bucket depends on it)."
+            $shimDir = Get-ScoopShimDirectory
+            if (-not $shimDir) {
+                throw "Scoop shim directory not found under `$env:SCOOP, `$env:SCOOP_GLOBAL, ~\scoop, or $env:ProgramData\scoop. Install scoop first (this bucket depends on it)."
             }
             $shimPath = Join-Path $shimDir 'onedrive.cmd'
             $content  = "@echo off`r`n" +
@@ -387,9 +390,9 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
             Get-Process OneDrive, 'OneDrive.Sync.Service' -ErrorAction SilentlyContinue |
                 ForEach-Object { try { Stop-Process -Id $_.Id -Force -ErrorAction Stop } catch {} }
 
-            $shimDir  = Join-Path $env:USERPROFILE 'scoop\shims'
-            $shimPath = Join-Path $shimDir 'onedrive.cmd'
-            if (Test-Path -LiteralPath $shimPath) {
+            $shimDir  = Get-ScoopShimDirectory
+            $shimPath = if ($shimDir) { Join-Path $shimDir 'onedrive.cmd' } else { $null }
+            if ($shimPath -and (Test-Path -LiteralPath $shimPath)) {
                 $raw = Get-Content -LiteralPath $shimPath -Raw -ErrorAction SilentlyContinue
                 if ($raw -and $raw -match 'ScoopBucket:OneDriveShim:') {
                     Remove-Item -LiteralPath $shimPath -Force
@@ -414,7 +417,9 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
         VerifyScript = {
             $machineExe = Join-Path $env:ProgramFiles 'Microsoft OneDrive\OneDrive.exe'
             if (-not (Test-Path -LiteralPath $machineExe)) { return $false }
-            $shimPath = Join-Path $env:USERPROFILE 'scoop\shims\onedrive.cmd'
+            $shimDir = Get-ScoopShimDirectory
+            if (-not $shimDir) { return $false }
+            $shimPath = Join-Path $shimDir 'onedrive.cmd'
             if (-not (Test-Path -LiteralPath $shimPath)) { return $false }
             $raw = Get-Content -LiteralPath $shimPath -Raw -ErrorAction SilentlyContinue
             if (-not $raw -or $raw -notmatch 'ScoopBucket:OneDriveShim:') { return $false }
