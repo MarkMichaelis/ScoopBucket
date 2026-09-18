@@ -294,6 +294,20 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
         CustomInstallScript = {
             param($pkg)
 
+            # Invoke-PackageInstall has no pre-install gate for
+            # Installer=custom: CustomInstallScript runs on every sweep and
+            # VerifyScript is only a post-install warning. Without this
+            # early-out each run re-downloads OneDriveSetup.exe from the
+            # fwlink -- which serves an OLDER build than the self-updating
+            # client already on disk and silently downgrades it. Delegating
+            # to VerifyScript keeps the skip condition and the verification
+            # condition from drifting apart. Mirrors the same pattern in the
+            # 'Claude for Excel' entry above.
+            if ($pkg -and $pkg.VerifyScript -and (& $pkg.VerifyScript $pkg)) {
+                Write-Host '  OneDrive is already installed machine-wide with its shim in place; skipping.'
+                return
+            }
+
             $machineExe = Join-Path $env:ProgramFiles 'Microsoft OneDrive\OneDrive.exe'
             $perUserExe = Join-Path $env:LOCALAPPDATA 'Microsoft\OneDrive\OneDriveSetup.exe'
             $sysWow64Exe = Join-Path $env:SystemRoot 'SysWOW64\OneDriveSetup.exe'

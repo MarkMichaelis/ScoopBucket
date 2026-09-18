@@ -149,6 +149,32 @@ Describe 'Shim-writing bundle scripts use the resolver' -Tag 'Light', 'Bundle' {
         $offenders | Should -BeNullOrEmpty -Because 'shim paths must come from Get-ScoopShimDirectory so global scoop installs work'
     }
 
+    It 'the OneDrive install short-circuits on VerifyScript before downloading the installer' {
+        # Invoke-PackageInstall has no pre-install gate for Installer=custom:
+        # CustomInstallScript runs on every sweep and VerifyScript is only a
+        # post-install warning. Without an early-out the package re-downloads
+        # OneDriveSetup.exe every run -- and the fwlink serves an older build
+        # than the self-updating client already on disk, silently downgrading
+        # it. The guard must come BEFORE the download, so assert the order.
+        # Get-BundlePackages round-trips through a child runspace as JSON, so
+        # scriptblock bodies do not survive it -- read the declaration source.
+        $raw   = Get-Content -LiteralPath $script:office365 -Raw
+        $start = $raw.IndexOf("Name        = 'Microsoft OneDrive (machine-wide)'")
+        $start | Should -BeGreaterThan -1 -Because 'the OneDrive package must still be declared'
+
+        $region = $raw.Substring($start)
+        $end    = $region.IndexOf('CustomUninstallScript')
+        $end | Should -BeGreaterThan -1
+        $region = $region.Substring(0, $end)
+
+        $guardAt    = $region.IndexOf('$pkg.VerifyScript')
+        $downloadAt = $region.IndexOf('Invoke-WebRequest')
+
+        $guardAt    | Should -BeGreaterThan -1 -Because 'the install must consult VerifyScript before doing any work'
+        $downloadAt | Should -BeGreaterThan -1
+        $guardAt    | Should -BeLessThan $downloadAt -Because 'an already-installed OneDrive must not be re-downloaded'
+    }
+
     It 'install, uninstall, and verify in MicrosoftOffice365.ps1 all call Get-ScoopShimDirectory' {
         $raw = Get-Content -LiteralPath $script:office365 -Raw
 
