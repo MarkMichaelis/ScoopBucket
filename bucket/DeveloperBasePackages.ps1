@@ -263,6 +263,31 @@ Register-ArgumentCompleter -Native -CommandName aspire -ScriptBlock {
 "@
         }
     }
+
+    [Package]@{
+        Name        = 'Playwright'
+        Installer   = 'scoop'
+        Id          = 'MarkMichaelis/Playwright'
+        CliCommands = @('playwright')
+        Completion  = 'auto'
+        Notes       = 'Bundle manifest invokes `npm install --global @playwright/test` and downloads the Chromium browser binaries. Requires Node.js/npm on PATH (the AIAgents bundle installs Node.js; on a developer-only machine install Node.js first). playwright has no completion subcommand and no PSCompletions entry; hand-curated command/flag list (mirrors the Playwright bundle).'
+        ExpectedCompletions = @{ playwright = @('test','install','codegen','show-report') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        'test','install','install-deps','uninstall','codegen','open','screenshot','pdf',
+        'show-report','merge-reports','clear-cache','run-server','--help','-h','--version','-V',
+        '--browser','--headed','--project','--reporter','--workers','--debug','--ui','--grep',
+        '--list','--repeat-each','--retries','--timeout','--update-snapshots','--trace','--config'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+    }
 )
 
 Invoke-PackageInstall -Packages $Packages -Bundle 'DeveloperBasePackages'

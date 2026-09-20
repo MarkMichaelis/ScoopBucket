@@ -486,10 +486,10 @@ GITHUB_PERSONAL_ACCESS_TOKEN = "leaked"
 
     Context 'Install-AIAgentsMcpConfiguration (orchestration)' {
         BeforeEach {
-            # Force npm/dotnet/gh/playwright "absent" so the real package
+            # Force npm/npx/dotnet/gh/playwright "absent" so the real package
             # installers never run; everything else is mocked at the helper
             # seam so we assert wiring behavior, not side effects.
-            Mock Get-Command -ParameterFilter { $Name -in @('npm','dotnet','gh','playwright') } { $null }
+            Mock Get-Command -ParameterFilter { $Name -in @('npm','npx','dotnet','gh','playwright') } { $null }
             Mock Get-NpmGlobalRoot { 'C:\fake\npm' }
             Mock Resolve-McpServerCommand { @{ Command = 'npx'; Arguments = @('-y', $PackageName) } }
             Mock Add-McpServerToJsonConfig { }

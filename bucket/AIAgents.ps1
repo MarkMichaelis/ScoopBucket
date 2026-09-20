@@ -90,6 +90,21 @@ Register-ArgumentCompleter -Native -CommandName npx -ScriptBlock {
         }
     }
 
+    # Playwright is a runtime prerequisite, not an agent: the `playwright` MCP
+    # server (@playwright/mcp, wired below) drives a real Chromium instance,
+    # and the npm package alone ships no browser binaries. The member manifest
+    # (bucket/developer/Playwright.ps1) owns the global npm install, the
+    # Chromium download, and the `playwright` completion registration --
+    # deliberately NOT re-declared here, so this bundle cannot race
+    # DeveloperBasePackages for the same CLI's profile block (#222).
+    [Package]@{
+        Name      = 'Playwright'
+        Installer = 'scoop'
+        Id        = 'MarkMichaelis/Playwright'
+        DependsOn = @('Node.js')
+        Notes     = 'Browser automation runtime for the playwright MCP server. Install-only entry: CliCommands/Completion are declared by the Playwright member manifest and by DeveloperBasePackages, so declaring them again here would make the completion registration order-dependent (#222).'
+    }
+
     # Agent apps.
     [Package]@{
         Name        = 'Claude Desktop'
@@ -376,7 +391,7 @@ Register-ArgumentCompleter -Native -CommandName copilot -ScriptBlock {
     [Package]@{
         Name      = 'MCP Server Configuration'
         Installer = 'custom'
-        DependsOn = @('Node.js')
+        DependsOn = @('Node.js','Playwright')
         Notes     = 'Idempotent MCP-server wiring for every MCP-capable agent. Re-applied on every install/update; refresh on demand with Update-Package "MCP Server Configuration".'
         # Engine no-op: the configuration IS the work, performed in ConfigScript.
         CustomInstallScript = { }

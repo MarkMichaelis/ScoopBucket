@@ -723,29 +723,14 @@ function Install-AIAgentsMcpConfiguration {
     [CmdletBinding()]
     param()
 
-    # Playwright separates its browser binaries from the npm package; install
-    # @playwright/test globally so the `playwright` shim lands on PATH, then
-    # install just chromium.
-    if (Get-Command npm -ErrorAction SilentlyContinue) {
-        if (-not (Get-Command playwright -ErrorAction SilentlyContinue)) {
-            $playwrightNpmArgs = Get-AIAgentsNpmInstallArgument -Package '@playwright/test'
-            & npm.cmd @playwrightNpmArgs
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "npm install --global @playwright/test exited with code $LASTEXITCODE; falling back to npx for browser install."
-            }
-        }
-        if (Get-Command playwright -ErrorAction SilentlyContinue) {
-            & playwright.cmd install chromium
-        }
-        else {
-            & npx.cmd -y '@playwright/test' install chromium
-        }
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "playwright install chromium exited with code $LASTEXITCODE; the Playwright MCP server may fail at runtime."
-        }
-    }
-    else {
-        Write-Warning 'npm not found after package pass; skipping Playwright browser install.'
+    # Playwright (the `playwright` CLI plus its Chromium binaries) is owned by
+    # the Playwright package, which this bundle declares as a DependsOn of
+    # 'MCP Server Configuration' -- so by the time this runs, the package pass
+    # has already installed it. Only warn here; re-installing it would
+    # duplicate the package's own idempotent install.
+    if (-not (Get-Command playwright -ErrorAction SilentlyContinue) -and
+        -not (Get-Command npx -ErrorAction SilentlyContinue)) {
+        Write-Warning 'Neither playwright nor npx is on PATH; the playwright MCP server will fail at runtime. Install the Playwright package (scoop install Playwright) and re-run Update-Package "MCP Server Configuration".'
     }
 
     # PoshMcp ships as a .NET global tool. Skip silently if dotnet isn't present.
