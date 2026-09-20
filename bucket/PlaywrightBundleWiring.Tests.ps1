@@ -16,10 +16,15 @@
       * AIAgents -- installs it because the `playwright` MCP server drives a
         real Chromium instance, and declares it as a DependsOn of
         'MCP Server Configuration' so the browser exists before the server is
-        wired up. This entry is deliberately install-only: re-declaring
-        CliCommands/Completion in a second bundle would make the profile-block
-        registration order-dependent (the rule established for node/npm/npx
-        in #222).
+        wired up.
+
+    All three declarations (both aggregators plus the member manifest) must
+    stay identical in CLI/completion terms. Update-Package and
+    Uninstall-Package resolve a -Name to the first bundle declaring it, so a
+    declaration that drops CliCommands would silently orphan the `playwright`
+    completer on uninstall and stop refreshing it on update. Identical blocks
+    also sidestep the #222 double-registration rule, which is about bundles
+    writing *competing* profile blocks for one CLI.
 
     Tagged 'Light' -- harvests declarative [Package] entries and reads the
     MCP helper as text; no install side effects.
@@ -78,15 +83,50 @@ Describe 'AIAgents: Playwright entry (issue #417)' -Tag 'Light','Bundle' {
         @($script:ai[0].DependsOn) | Should -Contain 'Node.js'
     }
 
-    It 'is install-only: no second completion registration for playwright (#222)' {
-        @($script:ai[0].CliCommands).Count | Should -Be 0
-        $script:ai[0].Completion | Should -Be 'none'
-        $script:ai[0].HasNativeCommandScript | Should -BeFalse
-    }
-
     It 'gates MCP server configuration on Playwright being installed' {
         $script:mcp.Count | Should -Be 1
         @($script:mcp[0].DependsOn) | Should -Contain 'Playwright'
+    }
+}
+
+Describe 'Every Playwright declaration registers the same completer (issue #417)' -Tag 'Light','Bundle','Completion' {
+
+    # Update-Package and Uninstall-Package resolve a -Name to the FIRST bundle
+    # that declares it, and AIAgents sorts ahead of DeveloperBasePackages. If
+    # the declarations drift -- one of them dropping CliCommands, or the flag
+    # lists diverging -- `Uninstall-Package Playwright` silently leaves an
+    # orphaned completer in the profile and `Update-Package Playwright` stops
+    # refreshing it, depending on which declaration happens to win. Identical
+    # declarations also make the #222 double-registration rule moot: blocks
+    # that are identical cannot compete.
+
+    BeforeAll {
+        $script:AllPlaywright = @($script:pkgs | Where-Object { $_.Name -eq 'Playwright' })
+    }
+
+    It 'declares Playwright in exactly three places (member manifest + both aggregators)' {
+        @($script:AllPlaywright | ForEach-Object { $_.Bundle } | Sort-Object) |
+            Should -Be @('AIAgents','DeveloperBasePackages','Playwright')
+    }
+
+    It 'declares playwright as a CLI everywhere, so uninstall always cleans up the completer' {
+        foreach ($p in $script:AllPlaywright) {
+            @($p.CliCommands) | Should -Be @('playwright') -Because "$($p.Bundle) must declare the CLI"
+            $p.Completion | Should -Be 'auto' -Because "$($p.Bundle) must register completion"
+        }
+    }
+
+    It 'renders an identical completer from every declaration' {
+        # Normalize line endings: the bundle files themselves differ (one is
+        # CRLF, the rest LF), which is invisible in the registered block.
+        $rendered = @($script:AllPlaywright | ForEach-Object { ($_.NativeCommandOutputs['playwright'] -replace "`r", '') })
+        @($rendered | Where-Object { $_ }).Count | Should -Be $script:AllPlaywright.Count
+        @($rendered | Select-Object -Unique).Count | Should -Be 1
+    }
+
+    It 'promises the same completions from every declaration' {
+        $sets = @($script:AllPlaywright | ForEach-Object { ($_.ExpectedCompletions['playwright'] | Sort-Object) -join ',' })
+        @($sets | Select-Object -Unique).Count | Should -Be 1
     }
 }
 

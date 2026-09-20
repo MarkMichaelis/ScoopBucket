@@ -92,17 +92,44 @@ Register-ArgumentCompleter -Native -CommandName npx -ScriptBlock {
 
     # Playwright is a runtime prerequisite, not an agent: the `playwright` MCP
     # server (@playwright/mcp, wired below) drives a real Chromium instance,
-    # and the npm package alone ships no browser binaries. The member manifest
-    # (bucket/developer/Playwright.ps1) owns the global npm install, the
-    # Chromium download, and the `playwright` completion registration --
-    # deliberately NOT re-declared here, so this bundle cannot race
-    # DeveloperBasePackages for the same CLI's profile block (#222).
+    # and the npm package alone ships no browser binaries.
+    #
+    # The CLI/completion block below is an IDENTICAL twin of the
+    # DeveloperBasePackages entry and of the Playwright member manifest, which
+    # is what keeps it safe under #222: that rule forbids two bundles writing
+    # *competing* profile blocks for the same CLI, and identical blocks cannot
+    # compete -- whichever registers last writes the same text (same shape as
+    # the 'GitHub Copilot CLI' duplicate already carried by both bundles).
+    # Declaring it here is not optional bookkeeping: Update-Package and
+    # Uninstall-Package resolve a -Name to the FIRST bundle declaring it, and
+    # AIAgents sorts ahead of DeveloperBasePackages. An install-only entry here
+    # would therefore make `Uninstall-Package Playwright` leave the completer
+    # orphaned in the profile, and `Update-Package Playwright` stop refreshing
+    # it. Keep all three declarations in sync.
     [Package]@{
-        Name      = 'Playwright'
-        Installer = 'scoop'
-        Id        = 'MarkMichaelis/Playwright'
-        DependsOn = @('Node.js')
-        Notes     = 'Browser automation runtime for the playwright MCP server. Install-only entry: CliCommands/Completion are declared by the Playwright member manifest and by DeveloperBasePackages, so declaring them again here would make the completion registration order-dependent (#222).'
+        Name        = 'Playwright'
+        Installer   = 'scoop'
+        Id          = 'MarkMichaelis/Playwright'
+        CliCommands = @('playwright')
+        DependsOn   = @('Node.js')
+        Completion  = 'auto'
+        Notes       = 'Browser automation runtime for the playwright MCP server; the member manifest performs the global npm install and the Chromium download. playwright has no completion subcommand and no PSCompletions entry; hand-curated command/flag list, kept identical to the DeveloperBasePackages entry and the Playwright member manifest so name-resolution order cannot change uninstall/update behavior.'
+        ExpectedCompletions = @{ playwright = @('test','install','codegen','show-report') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        'test','install','install-deps','uninstall','codegen','open','screenshot','pdf',
+        'show-report','merge-reports','clear-cache','run-server','--help','-h','--version','-V',
+        '--browser','--headed','--project','--reporter','--workers','--debug','--ui','--grep',
+        '--list','--repeat-each','--retries','--timeout','--update-snapshots','--trace','--config'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
     }
 
     # Agent apps.
