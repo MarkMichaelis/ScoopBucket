@@ -153,6 +153,39 @@ Register-ArgumentCompleter -Native -CommandName code -ScriptBlock {
 }
 "@
         }
+        # EDITOR is the fallback every CLI tool reaches for when it needs the
+        # user to edit a file: git with no core.editor, npm, gh, and most
+        # POSIX-minded tooling. `--wait` is mandatory -- plain `code` forks and
+        # returns immediately, so the caller reads back a file the user has not
+        # finished editing yet.
+        #
+        # Machine scope (not User) so scheduled tasks, services and every
+        # account on the box inherit it, matching this bundle's machine-wide
+        # posture. ConfigScript rather than PostInstallScript so it is
+        # re-applied on updates too, and self-heals a value someone clobbered.
+        #
+        # Declared IDENTICALLY in OSBasePackages and DeveloperBasePackages:
+        # Update-Package resolves a -Name to the FIRST bundle declaring it, so
+        # a ConfigScript on only one of the two would stop re-applying
+        # depending on which declaration won (the hazard fixed for Playwright
+        # in #417). Keep both copies in sync.
+        ConfigScript = {
+            $desired = 'code --wait'
+            $current = [Environment]::GetEnvironmentVariable('EDITOR', 'Machine')
+            if ($current -ne $desired) {
+                if (Test-IsElevated) {
+                    [Environment]::SetEnvironmentVariable('EDITOR', $desired, 'Machine')
+                    if ($current) { Write-Host "EDITOR (Machine): '$current' -> '$desired'." }
+                    else          { Write-Host "EDITOR (Machine) set to '$desired'." }
+                }
+                else {
+                    Write-Warning "Cannot set EDITOR to '$desired' machine-wide: this session is not elevated. Re-run Update-Package 'Visual Studio Code' from an admin shell."
+                }
+            }
+            # Mirror into the running session either way, so the first `git
+            # commit` after an install already opens VS Code without a new shell.
+            $env:EDITOR = $desired
+        }
     }
     [Package]@{
         Name        = 'GitHub Copilot CLI'
