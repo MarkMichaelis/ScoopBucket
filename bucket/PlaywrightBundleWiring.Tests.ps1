@@ -98,7 +98,9 @@ Describe 'Every Playwright declaration registers the same completer (issue #417)
     # orphaned completer in the profile and `Update-Package Playwright` stops
     # refreshing it, depending on which declaration happens to win. Identical
     # declarations also make the #222 double-registration rule moot: blocks
-    # that are identical cannot compete.
+    # with the same content cannot compete. "Same content" is the real
+    # invariant -- the declaring files follow different line-ending
+    # conventions, so the registered text differs only in CR bytes.
 
     BeforeAll {
         $script:AllPlaywright = @($script:pkgs | Where-Object { $_.Name -eq 'Playwright' })
