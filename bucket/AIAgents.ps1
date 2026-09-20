@@ -94,12 +94,12 @@ Register-ArgumentCompleter -Native -CommandName npx -ScriptBlock {
     # server (@playwright/mcp, wired below) drives a real Chromium instance,
     # and the npm package alone ships no browser binaries.
     #
-    # The CLI/completion block below is an IDENTICAL twin of the
-    # DeveloperBasePackages entry and of the Playwright member manifest, which
-    # is what keeps it safe under #222: that rule forbids two bundles writing
-    # *competing* profile blocks for the same CLI, and identical blocks cannot
-    # compete -- whichever registers last writes the same text (same shape as
-    # the 'GitHub Copilot CLI' duplicate already carried by both bundles).
+    # The CLI/completion block below is a twin of the DeveloperBasePackages
+    # entry and of the Playwright member manifest -- identical modulo each
+    # file's own line-ending convention -- which is what keeps it safe under
+    # #222: that rule forbids two bundles writing *competing* profile blocks
+    # for the same CLI, and blocks with the same content cannot compete
+    # (same shape as the 'GitHub Copilot CLI' duplicate both bundles carry).
     # Declaring it here is not optional bookkeeping: Update-Package and
     # Uninstall-Package resolve a -Name to the FIRST bundle declaring it, and
     # AIAgents sorts ahead of DeveloperBasePackages. An install-only entry here
