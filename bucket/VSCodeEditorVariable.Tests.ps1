@@ -94,10 +94,24 @@ Describe 'EDITOR hook degrades safely without elevation' -Tag 'Light','Bundle' {
         $env:EDITOR = $script:OriginalSessionEditor
     }
 
+    BeforeEach {
+        # Get-BundlePackageObjects evaluates the $Packages assignment inside
+        # the module, so the harvested ConfigScript resolves Test-IsElevated
+        # against MODULE session state -- an unqualified Mock here would not
+        # intercept it, and on an elevated host (every CI runner) the hook
+        # would take the real path and write a machine-scope variable.
+        Mock Test-IsElevated -ModuleName MarkMichaelis.ScoopBucket { $false }
+    }
+
     It 'warns instead of throwing, and leaves the machine value alone' {
         # Machine scope needs admin. A bundle run from a normal shell must
         # still complete -- a throw here would fail the whole package.
-        Mock Test-IsElevated { $false }
+        #
+        # Prove the mock is in effect BEFORE running anything that could
+        # write, so a mocking regression fails the test instead of mutating
+        # the host's environment.
+        (& (Get-Module MarkMichaelis.ScoopBucket) { Test-IsElevated }) |
+            Should -BeFalse -Because 'this test must never reach the elevated write path'
 
         $pkg = $script:Packages['OSBasePackages']
         { & $pkg.ConfigScript $pkg 3>&1 | Out-Null } | Should -Not -Throw
@@ -107,7 +121,8 @@ Describe 'EDITOR hook degrades safely without elevation' -Tag 'Light','Bundle' {
     }
 
     It 'still points the current session at VS Code' {
-        Mock Test-IsElevated { $false }
+        (& (Get-Module MarkMichaelis.ScoopBucket) { Test-IsElevated }) |
+            Should -BeFalse -Because 'this test must never reach the elevated write path'
 
         $env:EDITOR = 'notepad'
         $pkg = $script:Packages['OSBasePackages']
