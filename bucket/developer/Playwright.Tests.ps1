@@ -129,6 +129,7 @@ Describe 'Playwright migrates off the conflicting test runner (issue #423)' -Tag
         } (Join-Path $PSScriptRoot 'Playwright.ps1')
         $script:InstallBody = "$($harvested.CustomInstallScript)"
         $script:UpdateBody = "$($harvested.PostUpdateScript)"
+        $script:UninstallBody = "$($harvested.CustomUninstallScript)"
     }
 
     It 'carries the migration where the module can actually reach it' {
@@ -142,15 +143,26 @@ Describe 'Playwright migrates off the conflicting test runner (issue #423)' -Tag
         $script:Playwright[0].HasPostUpdateScript | Should -BeTrue `
             -Because 'a custom package gets no other update hook'
         foreach ($body in $script:InstallBody, $script:UpdateBody) {
-            $body | Should -Match "(?i)npm(\.cmd)?\s+uninstall\s+--global\s+'?@playwright/test'?" `
+            $body | Should -Match "(?i)\`$superseded\s*=\s*'@playwright/test'" `
+                -Because 'the superseded runner is named once, as history rather than configuration'
+            $body | Should -Match '(?i)npm(\.cmd)?\s+uninstall\s+--global\s+\$superseded' `
                 -Because 'the driver install fails with EEXIST while the runner owns the playwright shims'
         }
     }
 
+    It 'installs whatever Id declares, rather than a hardcoded twin' {
+        # Id would be decoration if the hooks hardcoded the package name, and
+        # the two could drift apart silently.
+        foreach ($body in $script:InstallBody, $script:UpdateBody) {
+            $body | Should -Match '(?i)npm(\.cmd)?\s+install\s+--global\s+\$Package\.Id'
+        }
+        $script:UninstallBody | Should -Match '(?i)npm(\.cmd)?\s+uninstall\s+--global\s+\$Package\.Id'
+    }
+
     It 'removes the runner before installing the driver, in both hooks' {
         foreach ($body in $script:InstallBody, $script:UpdateBody) {
-            $removeAt = $body.IndexOf('uninstall --global')
-            $addAt = $body.IndexOf('install --global playwright')
+            $removeAt = $body.IndexOf('uninstall --global $superseded')
+            $addAt = $body.IndexOf('install --global $Package.Id')
             $removeAt | Should -BeGreaterThan -1
             $addAt | Should -BeGreaterThan -1
             $removeAt | Should -BeLessThan $addAt `
@@ -162,7 +174,7 @@ Describe 'Playwright migrates off the conflicting test runner (issue #423)' -Tag
         foreach ($body in $script:InstallBody, $script:UpdateBody) {
             $body | Should -Match '(?i)npm(\.cmd)?\s+list\s+-g' `
                 -Because 'an unconditional uninstall would not be a no-op on a clean machine'
-            $body | Should -Match '@playwright/test@' `
+            $body | Should -Match '(?i)Escape\(\$superseded\)' `
                 -Because 'the guard must match the installed runner, not any mention of it'
         }
     }
@@ -183,12 +195,12 @@ Describe 'Playwright migrates off the conflicting test runner (issue #423)' -Tag
     }
 
     It 'short-circuits the install when the driver is already there' {
-        $script:InstallBody | Should -Match "(?m)\^\\S\+\\s\+playwright@" `
+        $script:InstallBody | Should -Match '(?i)already installed globally' `
             -Because 'the idempotency contract: a second install must change nothing'
     }
 
     It 'always reinstalls on update, because that is npm''s upgrade path' {
-        $script:UpdateBody | Should -Not -Match "(?m)\^\\S\+\\s\+playwright@" `
+        $script:UpdateBody | Should -Not -Match '(?i)already installed globally' `
             -Because 'short-circuiting on update would pin the driver at its installed version forever'
     }
 }

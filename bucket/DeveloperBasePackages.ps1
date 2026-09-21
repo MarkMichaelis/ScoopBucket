@@ -292,9 +292,9 @@ Register-ArgumentCompleter -Native -CommandName aspire -ScriptBlock {
 Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
     param(`$wordToComplete, `$commandAst, `$cursorPosition)
     @(
-        'open','codegen','install','install-deps','uninstall','cr','ff','wk',
-        'screenshot','pdf','show-trace','trace','cli','mcp','test','show-report',
-        'merge-reports','clear-cache','init-agents','init-skills','help',
+        'open','codegen','install','install-deps','uninstall','screenshot','pdf',
+        'show-trace','trace','cli','mcp','test','show-report','merge-reports',
+        'clear-cache','init-agents','init-skills','help',
         '--help','-h','--version','-V',
         '--browser','--headed','--project','--reporter','--workers','--debug','--ui','--grep',
         '--list','--repeat-each','--retries','--timeout','--update-snapshots','--trace','--config'
