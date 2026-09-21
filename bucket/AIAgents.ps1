@@ -121,7 +121,8 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
     param(`$wordToComplete, `$commandAst, `$cursorPosition)
     @(
         'test','install','install-deps','uninstall','codegen','open','screenshot','pdf',
-        'show-report','merge-reports','clear-cache','run-server','--help','-h','--version','-V',
+        'show-report','merge-reports','clear-cache','show-trace','trace','cr','ff','wk',
+        'init-agents','--help','-h','--version','-V',
         '--browser','--headed','--project','--reporter','--workers','--debug','--ui','--grep',
         '--list','--repeat-each','--retries','--timeout','--update-snapshots','--trace','--config'
     ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
