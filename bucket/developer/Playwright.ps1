@@ -86,9 +86,9 @@ $Packages = [Package[]]@(
 Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
     param(`$wordToComplete, `$commandAst, `$cursorPosition)
     @(
-        'open','codegen','install','install-deps','uninstall','cr','ff','wk',
-        'screenshot','pdf','show-trace','trace','cli','mcp','test','show-report',
-        'merge-reports','clear-cache','init-agents','init-skills','help',
+        'open','codegen','install','install-deps','uninstall','screenshot','pdf',
+        'show-trace','trace','cli','mcp','test','show-report','merge-reports',
+        'clear-cache','init-agents','init-skills','help',
         '--help','-h','--version','-V',
         '--browser','--headed','--project','--reporter','--workers','--debug','--ui','--grep',
         '--list','--repeat-each','--retries','--timeout','--update-snapshots','--trace','--config'
@@ -98,7 +98,13 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
 }
 "@
         }
+        # All three hooks are handed the [Package], so Id above stays the single
+        # source of truth for what gets installed rather than decoration beside
+        # a hardcoded string. Only the SUPERSEDED package name is a literal --
+        # it is history, not configuration, and will not track Id if Id changes.
         CustomInstallScript = {
+            param($Package)
+            $superseded = '@playwright/test'
             if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
                 throw 'npm is not on PATH. Install Node.js first.'
             }
@@ -106,46 +112,49 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
 
             # The conflicting global runner must go before npm will place the
             # driver's bin. Only the global copy; projects keep their own.
-            if ($globalList -match '(?m)^\S+\s+@playwright/test@') {
-                Write-Host 'Removing the global @playwright/test; it owns the `playwright` command the driver needs...'
-                & npm.cmd uninstall --global '@playwright/test' 2>&1 | ForEach-Object { Write-Host "  $_" }
+            if ($globalList -match "(?m)^\S+\s+$([regex]::Escape($superseded))@") {
+                Write-Host "Removing the global $superseded; it owns the ``$($Package.Id)`` command the driver needs..."
+                & npm.cmd uninstall --global $superseded 2>&1 | ForEach-Object { Write-Host "  $_" }
                 if ($LASTEXITCODE -ne 0) {
-                    throw "npm uninstall --global @playwright/test exited with $LASTEXITCODE; installing the driver would fail with EEXIST."
+                    throw "npm uninstall --global $superseded exited with $LASTEXITCODE; installing the driver would fail with EEXIST."
                 }
             }
 
-            if ($globalList -match '(?m)^\S+\s+playwright@') {
-                Write-Host '  playwright is already installed globally.'
+            if ($globalList -match "(?m)^\S+\s+$([regex]::Escape($Package.Id))@") {
+                Write-Host "  $($Package.Id) is already installed globally."
                 return
             }
-            Write-Host '  npm install --global playwright'
-            & npm.cmd install --global playwright
-            if ($LASTEXITCODE -ne 0) { throw "npm install --global playwright exited with $LASTEXITCODE." }
+            Write-Host "  npm install --global $($Package.Id)"
+            & npm.cmd install --global $Package.Id
+            if ($LASTEXITCODE -ne 0) { throw "npm install --global $($Package.Id) exited with $LASTEXITCODE." }
         }
         # The only update hook a custom package gets. Same migration, but it
         # always re-runs the install: for npm that IS the upgrade path.
         PostUpdateScript = {
+            param($Package)
+            $superseded = '@playwright/test'
             if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
                 throw 'npm is not on PATH. Install Node.js first.'
             }
             $globalList = & npm.cmd list -g --depth=0 2>$null | Out-String
-            if ($globalList -match '(?m)^\S+\s+@playwright/test@') {
-                Write-Host 'Removing the global @playwright/test; it owns the `playwright` command the driver needs...'
-                & npm.cmd uninstall --global '@playwright/test' 2>&1 | ForEach-Object { Write-Host "  $_" }
+            if ($globalList -match "(?m)^\S+\s+$([regex]::Escape($superseded))@") {
+                Write-Host "Removing the global $superseded; it owns the ``$($Package.Id)`` command the driver needs..."
+                & npm.cmd uninstall --global $superseded 2>&1 | ForEach-Object { Write-Host "  $_" }
                 if ($LASTEXITCODE -ne 0) {
-                    throw "npm uninstall --global @playwright/test exited with $LASTEXITCODE; installing the driver would fail with EEXIST."
+                    throw "npm uninstall --global $superseded exited with $LASTEXITCODE; installing the driver would fail with EEXIST."
                 }
             }
-            Write-Host '  npm install --global playwright'
-            & npm.cmd install --global playwright
-            if ($LASTEXITCODE -ne 0) { throw "npm install --global playwright exited with $LASTEXITCODE." }
+            Write-Host "  npm install --global $($Package.Id)"
+            & npm.cmd install --global $Package.Id
+            if ($LASTEXITCODE -ne 0) { throw "npm install --global $($Package.Id) exited with $LASTEXITCODE." }
         }
         CustomUninstallScript = {
+            param($Package)
             if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
                 throw 'npm is not on PATH.'
             }
-            & npm.cmd uninstall --global playwright
-            if ($LASTEXITCODE -ne 0) { throw "npm uninstall --global playwright exited with $LASTEXITCODE." }
+            & npm.cmd uninstall --global $Package.Id
+            if ($LASTEXITCODE -ne 0) { throw "npm uninstall --global $($Package.Id) exited with $LASTEXITCODE." }
         }
         ConfigScript = {
             # Drive the shim in npm's OWN global bin, not whatever `playwright`
