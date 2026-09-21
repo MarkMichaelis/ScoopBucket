@@ -134,8 +134,8 @@ Describe 'Every Playwright declaration registers the same completer (issue #417)
 
 Describe 'AIAgents MCP configuration no longer installs Playwright itself' -Tag 'Light','Bundle' {
 
-    It 'does not npm-install @playwright/test' {
-        $script:McpHelper | Should -Not -Match "(?i)Get-AIAgentsNpmInstallArgument\s+-Package\s+'@playwright/test'"
+    It 'does not npm-install Playwright itself' {
+        $script:McpHelper | Should -Not -Match "(?i)Get-AIAgentsNpmInstallArgument\s+-Package\s+'(playwright|@playwright/test)'"
     }
 
     It 'does not download browsers' {
