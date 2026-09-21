@@ -120,9 +120,10 @@ Register-ArgumentCompleter -Native -CommandName npx -ScriptBlock {
 Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
     param(`$wordToComplete, `$commandAst, `$cursorPosition)
     @(
-        'test','install','install-deps','uninstall','codegen','open','screenshot','pdf',
-        'show-report','merge-reports','clear-cache','show-trace','trace','cr','ff','wk',
-        'init-agents','--help','-h','--version','-V',
+        'open','codegen','install','install-deps','uninstall','cr','ff','wk',
+        'screenshot','pdf','show-trace','trace','cli','mcp','test','show-report',
+        'merge-reports','clear-cache','init-agents','init-skills','help',
+        '--help','-h','--version','-V',
         '--browser','--headed','--project','--reporter','--workers','--debug','--ui','--grep',
         '--list','--repeat-each','--retries','--timeout','--update-snapshots','--trace','--config'
     ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {

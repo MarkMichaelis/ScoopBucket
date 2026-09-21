@@ -15,8 +15,10 @@
 
     These tests lock in that contract:
       * the manifest runs the bundle script (not an inline installer line),
-      * the package uses the npmGlobal engine against `playwright` -- the
-        driver, never the `@playwright/test` runner (#423),
+      * the package installs `playwright` -- the driver, never the
+        `@playwright/test` runner (#423) -- and drives that install itself,
+        because the conflicting runner has to be removed first and the module
+        never runs top-level bundle code,
       * the Chromium download lives in ConfigScript -- re-applied on every
         install AND every update -- rather than install-only PostInstallScript,
       * only Chromium is downloaded (the full browser set costs several GB),
@@ -56,9 +58,12 @@ Describe 'Playwright package declaration' -Tag 'Light','Bundle','Completion' {
         $script:Playwright.Count | Should -Be 1
     }
 
-    It 'installs the browser driver globally via npm' {
-        $script:Playwright[0].Installer | Should -Be 'npmGlobal'
+    It 'drives its own global npm install of the browser driver' {
+        # Not the npmGlobal engine: the conflicting runner has to be removed
+        # BEFORE npm runs, and there is no pre-install hook (#423).
+        $script:Playwright[0].Installer | Should -Be 'custom'
         $script:Playwright[0].Id | Should -Be 'playwright'
+        $script:Playwright[0].HasCustomInstallScript | Should -BeTrue
     }
 
     It 'installs the driver, NOT the test runner (issue #423)' {
@@ -112,31 +117,79 @@ Describe 'Playwright package declaration' -Tag 'Light','Bundle','Completion' {
 Describe 'Playwright migrates off the conflicting test runner (issue #423)' -Tag 'Light','Bundle' {
 
     # Both packages publish a `playwright` bin, so npm refuses to install the
-    # driver while a global @playwright/test owns those shims (EEXIST), and the
-    # engine just reports a failed install. The migration has to happen before
-    # the engine runs, which is why it is top-level rather than a hook.
+    # driver while a global @playwright/test owns those shims (EEXIST). The
+    # removal must therefore precede the install.
 
-    It 'removes a conflicting global test runner' {
-        $script:CodeText | Should -Match "(?i)npm(\.cmd)?\s+uninstall\s+--global\s+'?@playwright/test'?" `
-            -Because 'the driver install fails with EEXIST while the runner owns the playwright shims'
+    BeforeAll {
+        # Get-Package returns a metadata projection (Has*Script booleans), so
+        # harvest the real [Package] to read the scriptblocks themselves.
+        $harvested = & (Get-Module MarkMichaelis.ScoopBucket) {
+            param($bundle)
+            Get-BundlePackageObjects -BundlePath $bundle | Where-Object Name -eq 'Playwright'
+        } (Join-Path $PSScriptRoot 'Playwright.ps1')
+        $script:InstallBody = "$($harvested.CustomInstallScript)"
+        $script:UpdateBody = "$($harvested.PostUpdateScript)"
     }
 
-    It 'only does so when the runner is actually installed' {
-        $script:CodeText | Should -Match '(?i)npm(\.cmd)?\s+list\s+-g' `
-            -Because 'an unconditional uninstall would not be a no-op on a clean machine'
+    It 'carries the migration where the module can actually reach it' {
+        # THE regression guard for this package. Get-BundlePackageObjects
+        # harvests only the $Packages assignment and never runs the rest of the
+        # file, so a migration written as top-level code is silently skipped by
+        # Install-Package / Update-Package -- this module's primary interface --
+        # and only a raw `scoop install` would ever run it. Living inside the
+        # harvested scriptblocks is what makes it reachable everywhere.
+        $script:Playwright[0].HasCustomInstallScript | Should -BeTrue
+        $script:Playwright[0].HasPostUpdateScript | Should -BeTrue `
+            -Because 'a custom package gets no other update hook'
+        foreach ($body in $script:InstallBody, $script:UpdateBody) {
+            $body | Should -Match "(?i)npm(\.cmd)?\s+uninstall\s+--global\s+'?@playwright/test'?" `
+                -Because 'the driver install fails with EEXIST while the runner owns the playwright shims'
+        }
     }
 
-    It 'migrates before the engine installs, not after' {
-        $uninstallAt = $script:CodeText.IndexOf('uninstall')
-        $installAt = $script:CodeText.IndexOf('Invoke-PackageInstall')
-        $uninstallAt | Should -BeGreaterThan -1
-        $installAt | Should -BeGreaterThan -1
-        $uninstallAt | Should -BeLessThan $installAt `
-            -Because 'migrating after the engine ran would leave the failed install unrepaired'
+    It 'removes the runner before installing the driver, in both hooks' {
+        foreach ($body in $script:InstallBody, $script:UpdateBody) {
+            $removeAt = $body.IndexOf('uninstall --global')
+            $addAt = $body.IndexOf('install --global playwright')
+            $removeAt | Should -BeGreaterThan -1
+            $addAt | Should -BeGreaterThan -1
+            $removeAt | Should -BeLessThan $addAt `
+                -Because 'installing first would just hit the EEXIST this exists to avoid'
+        }
     }
 
-    It 'warns rather than throwing when the uninstall fails' {
-        $script:CodeText | Should -Match '(?i)Write-Warning[^\r\n]*EEXIST'
+    It 'only removes it when it is actually installed' {
+        foreach ($body in $script:InstallBody, $script:UpdateBody) {
+            $body | Should -Match '(?i)npm(\.cmd)?\s+list\s+-g' `
+                -Because 'an unconditional uninstall would not be a no-op on a clean machine'
+            $body | Should -Match '@playwright/test@' `
+                -Because 'the guard must match the installed runner, not any mention of it'
+        }
+    }
+
+    It 'fails loudly when the removal fails, rather than walking into EEXIST' {
+        # A custom install that throws is marked Failed. Continuing would hit a
+        # guaranteed EEXIST and report the confusing file-exists error instead.
+        foreach ($body in $script:InstallBody, $script:UpdateBody) {
+            $body | Should -Match '(?i)throw[^\r\n]*EEXIST'
+        }
+    }
+
+    It 'only ever touches the global runner, never a project dependency' {
+        foreach ($body in $script:InstallBody, $script:UpdateBody) {
+            $body | Should -Not -Match '(?i)package\.json'
+            $body | Should -Not -Match "(?im)^\s*&\s*npm(\.cmd)?\s+uninstall\s+(?!--global)"
+        }
+    }
+
+    It 'short-circuits the install when the driver is already there' {
+        $script:InstallBody | Should -Match "(?m)\^\\S\+\\s\+playwright@" `
+            -Because 'the idempotency contract: a second install must change nothing'
+    }
+
+    It 'always reinstalls on update, because that is npm''s upgrade path' {
+        $script:UpdateBody | Should -Not -Match "(?m)\^\\S\+\\s\+playwright@" `
+            -Because 'short-circuiting on update would pin the driver at its installed version forever'
     }
 }
 
