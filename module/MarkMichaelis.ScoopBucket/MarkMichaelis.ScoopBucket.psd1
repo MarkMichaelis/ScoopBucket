@@ -61,7 +61,8 @@
         'Export-PowerToysSettings',
         'Import-PowerToysSettings',
         'Import-WindowsTerminalSettings',
-        'Import-ClaudeCodeSettings'
+        'Import-ClaudeCodeSettings',
+        'Set-DefaultEditorVariable'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
