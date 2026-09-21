@@ -33,11 +33,13 @@ function Set-DefaultEditorVariable {
         ELEVATION. Machine scope needs admin. An unelevated run warns instead of
         throwing, so the package is not marked Failed.
 
-        SESSION MIRROR. Whenever the variable is ours to set, $env:EDITOR is
-        also set for the running session -- including when the machine-scope
-        write was skipped for lack of elevation -- so the first `git commit`
-        after an install opens VS Code without needing a fresh shell. When
-        another editor owns the value, the session is left alone too.
+        SESSION MIRROR. $env:EDITOR is also set for the running session --
+        including when the machine-scope write was skipped for lack of
+        elevation -- so the first `git commit` after an install opens VS Code
+        without needing a fresh shell. The session value is judged by the same
+        ownership rule, on its own merits: a shell that exported `vim` for this
+        session chose that as deliberately as a machine-wide value, and is left
+        alone even when the machine-scope value was ours to set.
 
     .PARAMETER Command
         The editor command line to install. Defaults to 'code --wait'.
@@ -75,7 +77,7 @@ function Set-DefaultEditorVariable {
         [string]$Scope = 'Machine'
     )
 
-    $current = [Environment]::GetEnvironmentVariable('EDITOR', $Scope)
+    $current = Get-EditorVariable -Scope $Scope
 
     if ($current -and -not (Test-EditorVariableOwned -Value $current)) {
         Write-Host "EDITOR ($Scope) is '$current'; leaving it alone. Set it to '$Command' by hand to use VS Code."
@@ -101,8 +103,20 @@ function Set-DefaultEditorVariable {
         }
     }
 
-    if ($Scope -ne 'Process' -and $PSCmdlet.ShouldProcess('EDITOR (current session)', "Set to '$Command'")) {
-        $env:EDITOR = $Command
+    # Session mirror. Judged on its OWN value, not the target scope's: a shell
+    # that exported `vim` for this session made that choice as deliberately as a
+    # machine-wide one, so the same ownership rule applies. (In Process scope
+    # the write above already IS the session -- $env:EDITOR and the Process
+    # environment are one store -- so there is nothing further to mirror.)
+    if ($Scope -ne 'Process') {
+        $session = Get-EditorVariable -Scope Process
+        if ($session -and -not (Test-EditorVariableOwned -Value $session)) {
+            Write-Host "EDITOR is '$session' in this session; leaving this shell alone."
+        }
+        elseif ($session -ne $Command -and
+                $PSCmdlet.ShouldProcess('EDITOR (current session)', "Set to '$Command'")) {
+            $env:EDITOR = $Command
+        }
     }
 
     return [pscustomobject]@{

@@ -107,48 +107,90 @@ Describe 'Set-DefaultEditorVariable claims EDITOR only when it is free' -Tag 'Li
     }
 }
 
-Describe 'Set-DefaultEditorVariable at Machine scope without elevation' -Tag 'Light' {
+Describe 'Set-DefaultEditorVariable at Machine scope' -Tag 'Light' {
+
+    # The machine-scope value is read through Get-EditorVariable, so every
+    # branch here is driven by a mock rather than by whatever this particular
+    # host happens to have set. Nothing in this block can write a machine-scope
+    # value: Test-IsElevated is forced false throughout, and each test asserts
+    # the mock is live BEFORE anything that could write.
 
     BeforeAll {
         $script:MachineEditorBefore = [Environment]::GetEnvironmentVariable('EDITOR', 'Machine')
     }
 
     BeforeEach {
-        # Machine scope needs admin. Force the unelevated path so this test can
-        # never write a machine-scope value, on a developer box or an elevated
-        # CI runner alike.
         Mock Test-IsElevated -ModuleName MarkMichaelis.ScoopBucket { $false }
+        # Default read passes through to the real value; each test then adds a
+        # Machine-scope filter, which Pester prefers over this fallback. The
+        # session reads stay real so the mirror is exercised for real.
+        Mock Get-EditorVariable -ModuleName MarkMichaelis.ScoopBucket {
+            [Environment]::GetEnvironmentVariable('EDITOR', $Scope)
+        }
         $env:EDITOR = $null
     }
 
-    AfterEach { $env:EDITOR = $null }
+    AfterEach {
+        $env:EDITOR = $null
+        [Environment]::GetEnvironmentVariable('EDITOR', 'Machine') |
+            Should -Be $script:MachineEditorBefore -Because 'no test here may touch the host machine value'
+    }
 
     It 'warns instead of throwing, so the package is not marked Failed' {
-        # Prove the mock is in effect BEFORE anything that could write, so a
-        # mocking regression fails the test instead of mutating the host.
         (& (Get-Module MarkMichaelis.ScoopBucket) { Test-IsElevated }) |
             Should -BeFalse -Because 'this test must never reach the elevated write path'
+        Mock Get-EditorVariable -ModuleName MarkMichaelis.ScoopBucket -ParameterFilter { $Scope -eq 'Machine' } { $null }
 
         { Set-DefaultEditorVariable 3>$null 6>$null | Out-Null } | Should -Not -Throw
 
-        [Environment]::GetEnvironmentVariable('EDITOR', 'Machine') |
-            Should -Be $script:MachineEditorBefore -Because 'an unelevated run must not attempt the write'
+        (Set-DefaultEditorVariable 3>$null 6>$null).Action |
+            Should -Be 'Skipped' -Because 'the machine write needs elevation'
     }
 
-    It 'still points the current session at VS Code' -Skip:(
-        [bool][Environment]::GetEnvironmentVariable('EDITOR', 'Machine')
-    ) {
-        # Skipped on a host that already has a machine-scope EDITOR: the
-        # session mirror is decided by the MACHINE value, so only a host
-        # without one exercises the "ours to set" path deterministically.
+    It 'still points the current session at VS Code when the machine value is ours to set' {
         (& (Get-Module MarkMichaelis.ScoopBucket) { Test-IsElevated }) |
             Should -BeFalse -Because 'this test must never reach the elevated write path'
+        Mock Get-EditorVariable -ModuleName MarkMichaelis.ScoopBucket -ParameterFilter { $Scope -eq 'Machine' } { $null }
 
-        $env:EDITOR = 'notepad'
-        $result = Set-DefaultEditorVariable 3>$null 6>$null
+        Set-DefaultEditorVariable 3>$null 6>$null | Out-Null
 
-        $result.Action | Should -Be 'Skipped' -Because 'the machine write needs elevation'
         $env:EDITOR | Should -Be 'code --wait' `
             -Because 'the first git commit after an install should not need a fresh shell'
+    }
+
+    It 'keeps a machine-wide editor that belongs to someone else, even unelevated' {
+        (& (Get-Module MarkMichaelis.ScoopBucket) { Test-IsElevated }) |
+            Should -BeFalse -Because 'this test must never reach the elevated write path'
+        Mock Get-EditorVariable -ModuleName MarkMichaelis.ScoopBucket -ParameterFilter { $Scope -eq 'Machine' } { 'vim' }
+
+        $result = Set-DefaultEditorVariable 3>$null 6>$null
+
+        $result.Action | Should -Be 'Kept'
+        $result.Previous | Should -Be 'vim'
+        $env:EDITOR | Should -BeNullOrEmpty -Because 'a kept value must not be mirrored into the session either'
+    }
+
+    It 'leaves a session-local override alone even when the machine value is free' {
+        # Exporting EDITOR in one shell is as deliberate a choice as a
+        # machine-wide one, so the mirror applies the same ownership rule.
+        (& (Get-Module MarkMichaelis.ScoopBucket) { Test-IsElevated }) |
+            Should -BeFalse -Because 'this test must never reach the elevated write path'
+        Mock Get-EditorVariable -ModuleName MarkMichaelis.ScoopBucket -ParameterFilter { $Scope -eq 'Machine' } { $null }
+        $env:EDITOR = 'vim'
+
+        Set-DefaultEditorVariable 3>$null 6>$null | Out-Null
+
+        $env:EDITOR | Should -Be 'vim'
+    }
+
+    It 'writes nothing under -WhatIf' {
+        (& (Get-Module MarkMichaelis.ScoopBucket) { Test-IsElevated }) |
+            Should -BeFalse -Because 'this test must never reach the elevated write path'
+        Mock Get-EditorVariable -ModuleName MarkMichaelis.ScoopBucket -ParameterFilter { $Scope -eq 'Machine' } { $null }
+
+        $result = Set-DefaultEditorVariable -WhatIf 3>$null 6>$null
+
+        $result.Action | Should -Be 'Skipped'
+        $env:EDITOR | Should -BeNullOrEmpty
     }
 }
