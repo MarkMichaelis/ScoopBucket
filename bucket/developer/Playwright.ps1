@@ -16,8 +16,9 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 #   2. Browser binaries  -- downloaded out-of-band by `playwright install`
 #                           into a per-user cache (%USERPROFILE%\AppData\
 #                           Local\ms-playwright), NEVER by npm itself.
-# The npmGlobal engine handles (1); (2) lives in ConfigScript rather than
-# PostInstallScript so the browser download is re-checked on every update
+# The package's own install scriptblock handles (1) -- see the migration note
+# below for why not the npmGlobal engine. (2) lives in ConfigScript rather
+# than PostInstallScript so the browser download is re-checked on every update
 # too -- a newer driver pins newer browser builds, and an npm-only upgrade
 # would otherwise leave the CLI pointing at a browser revision that is not
 # on disk. `playwright install chromium` is a no-op once the matching
@@ -42,36 +43,39 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 # and the full three-browser set costs several GB. Run
 # `playwright install firefox webkit` by hand for cross-browser runs.
 
-# Migration off the wrong package (#423). Both packages publish a `playwright`
-# bin, so npm refuses to install the driver while the runner owns those shims:
+# MIGRATION OFF THE WRONG PACKAGE, and why it is not the npmGlobal engine.
+#
+# Both packages publish a `playwright` bin, so npm refuses to install the
+# driver while a global runner owns those shims:
 #     npm error EEXIST: file already exists
 #     npm error File exists: ...\npm\playwright.ps1
-# Nothing downstream recovers from that -- the engine just reports a failed
-# install -- so the conflicting global runner is removed first. This is the
-# bucket cleaning up after itself: #417 is what installed it globally. A
-# project's own `@playwright/test`, in its package.json where it belongs, is
-# untouched; only the global copy goes.
+# Nothing downstream recovers -- the engine reports a failed install -- so the
+# conflicting global runner has to go FIRST. The bucket is cleaning up after
+# itself here: #417 is what installed it globally. Only the GLOBAL copy goes;
+# a project's own dependency, in its package.json where it belongs, is never
+# touched.
 #
-# Top-level rather than a hook because it has to run BEFORE the engine install,
-# and there is no pre-install hook. `scoop install` / `scoop update` both run
-# this whole script, so the migration is covered either way. It is a no-op once
-# the runner is gone, which keeps the script twice-runnable.
-$npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
-if ($npmCommand) {
-    $globalList = & npm.cmd list -g --depth=0 2>$null | Out-String
-    if ($globalList -match '(?m)^\S+\s+@playwright/test@') {
-        Write-Host 'Removing the global @playwright/test; it owns the `playwright` command the driver needs...'
-        & npm.cmd uninstall --global '@playwright/test' 2>&1 | ForEach-Object { Write-Host "  $_" }
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "npm uninstall --global @playwright/test exited with $LASTEXITCODE; the driver install below will fail with EEXIST until it is removed by hand."
-        }
-    }
-}
+# There is no pre-install hook, and top-level code in a bundle script is NOT a
+# substitute: Get-BundlePackageObjects deliberately harvests only the
+# `$Packages` assignment via the AST and never runs the rest of the file, so
+# anything top-level is silently skipped by Install-Package / Update-Package --
+# this module's primary interface. (That is the same gap ConfigScript exists to
+# close; see README.) Only `scoop install` would have run it.
+#
+# So the package drives its own install: Installer='custom' with the migration
+# and the npm install together in one scriptblock, which every path executes.
+# PostUpdateScript is the matching update hook -- for a custom package it is
+# the ONLY one, and without it Update-Package reports NoAutoUpdateSupport.
+# CustomUninstallScript keeps removal symmetric.
+#
+# The two scriptblocks differ on purpose: install short-circuits when the
+# driver is already there (that is the idempotency contract), while update
+# always re-runs `npm install --global`, which IS npm's upgrade path.
 
 $Packages = [Package[]]@(
     [Package]@{
         Name        = 'Playwright'
-        Installer   = 'npmGlobal'
+        Installer   = 'custom'
         Id          = 'playwright'
         CliCommands = @('playwright')
         Completion  = 'auto'
@@ -82,9 +86,10 @@ $Packages = [Package[]]@(
 Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
     param(`$wordToComplete, `$commandAst, `$cursorPosition)
     @(
-        'test','install','install-deps','uninstall','codegen','open','screenshot','pdf',
-        'show-report','merge-reports','clear-cache','show-trace','trace','cr','ff','wk',
-        'init-agents','--help','-h','--version','-V',
+        'open','codegen','install','install-deps','uninstall','cr','ff','wk',
+        'screenshot','pdf','show-trace','trace','cli','mcp','test','show-report',
+        'merge-reports','clear-cache','init-agents','init-skills','help',
+        '--help','-h','--version','-V',
         '--browser','--headed','--project','--reporter','--workers','--debug','--ui','--grep',
         '--list','--repeat-each','--retries','--timeout','--update-snapshots','--trace','--config'
     ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
@@ -93,24 +98,80 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
 }
 "@
         }
-        ConfigScript = {
-            $playwrightCmd = Get-Command playwright -ErrorAction SilentlyContinue
-            if (-not $playwrightCmd) {
-                # npm's global shim directory may not be on the PATH of the
-                # session that just installed it. Fall back to npx, which
-                # resolves the globally installed package itself.
-                if (Get-Command npx -ErrorAction SilentlyContinue) {
-                    Write-Host 'Downloading the Chromium browser for Playwright (via npx)...'
-                    & npx.cmd -y 'playwright' install chromium
-                }
-                else {
-                    Write-Warning 'Neither playwright nor npx is on PATH; skipping the Chromium browser download. Run `playwright install chromium` once Node.js is available.'
-                    return
+        CustomInstallScript = {
+            if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+                throw 'npm is not on PATH. Install Node.js first.'
+            }
+            $globalList = & npm.cmd list -g --depth=0 2>$null | Out-String
+
+            # The conflicting global runner must go before npm will place the
+            # driver's bin. Only the global copy; projects keep their own.
+            if ($globalList -match '(?m)^\S+\s+@playwright/test@') {
+                Write-Host 'Removing the global @playwright/test; it owns the `playwright` command the driver needs...'
+                & npm.cmd uninstall --global '@playwright/test' 2>&1 | ForEach-Object { Write-Host "  $_" }
+                if ($LASTEXITCODE -ne 0) {
+                    throw "npm uninstall --global @playwright/test exited with $LASTEXITCODE; installing the driver would fail with EEXIST."
                 }
             }
-            else {
+
+            if ($globalList -match '(?m)^\S+\s+playwright@') {
+                Write-Host '  playwright is already installed globally.'
+                return
+            }
+            Write-Host '  npm install --global playwright'
+            & npm.cmd install --global playwright
+            if ($LASTEXITCODE -ne 0) { throw "npm install --global playwright exited with $LASTEXITCODE." }
+        }
+        # The only update hook a custom package gets. Same migration, but it
+        # always re-runs the install: for npm that IS the upgrade path.
+        PostUpdateScript = {
+            if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+                throw 'npm is not on PATH. Install Node.js first.'
+            }
+            $globalList = & npm.cmd list -g --depth=0 2>$null | Out-String
+            if ($globalList -match '(?m)^\S+\s+@playwright/test@') {
+                Write-Host 'Removing the global @playwright/test; it owns the `playwright` command the driver needs...'
+                & npm.cmd uninstall --global '@playwright/test' 2>&1 | ForEach-Object { Write-Host "  $_" }
+                if ($LASTEXITCODE -ne 0) {
+                    throw "npm uninstall --global @playwright/test exited with $LASTEXITCODE; installing the driver would fail with EEXIST."
+                }
+            }
+            Write-Host '  npm install --global playwright'
+            & npm.cmd install --global playwright
+            if ($LASTEXITCODE -ne 0) { throw "npm install --global playwright exited with $LASTEXITCODE." }
+        }
+        CustomUninstallScript = {
+            if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+                throw 'npm is not on PATH.'
+            }
+            & npm.cmd uninstall --global playwright
+            if ($LASTEXITCODE -ne 0) { throw "npm uninstall --global playwright exited with $LASTEXITCODE." }
+        }
+        ConfigScript = {
+            # Drive the shim in npm's OWN global bin, not whatever `playwright`
+            # resolves to on PATH. On a machine with a second Node install,
+            # `Get-Command playwright` can point at a different tree entirely --
+            # so the browser download would be requested from a binary this
+            # package never installed, for a browser revision it never pins.
+            $shim = $null
+            if (Get-Command npm.cmd -ErrorAction SilentlyContinue) {
+                $prefix = (& npm.cmd prefix -g 2>$null | Select-Object -First 1)
+                if ($prefix) {
+                    $candidate = Join-Path $prefix 'playwright.cmd'
+                    if (Test-Path $candidate) { $shim = $candidate }
+                }
+            }
+            if ($shim) {
                 Write-Host 'Downloading the Chromium browser for Playwright...'
-                & playwright.cmd install chromium
+                & $shim install chromium
+            }
+            elseif (Get-Command npx -ErrorAction SilentlyContinue) {
+                Write-Host 'Downloading the Chromium browser for Playwright (via npx)...'
+                & npx.cmd -y 'playwright' install chromium
+            }
+            else {
+                Write-Warning 'Neither the global playwright shim nor npx was found; skipping the Chromium browser download. Run `playwright install chromium` once Node.js is available.'
+                return
             }
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "playwright install chromium exited with code $LASTEXITCODE; browser-driving tools (including the Playwright MCP server) may fail at runtime."
