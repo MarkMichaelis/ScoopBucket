@@ -121,11 +121,21 @@ Describe 'Set-DefaultEditorVariable at Machine scope' -Tag 'Light' {
 
     BeforeEach {
         Mock Test-IsElevated -ModuleName MarkMichaelis.ScoopBucket { $false }
-        # Default read passes through to the real value; each test then adds a
-        # Machine-scope filter, which Pester prefers over this fallback. The
-        # session reads stay real so the mirror is exercised for real.
+        # Session reads stay real, so the mirror is exercised for real. Each
+        # test then adds its own Machine-scope stub, which Pester prefers over
+        # these.
+        Mock Get-EditorVariable -ModuleName MarkMichaelis.ScoopBucket `
+            -ParameterFilter { $Scope -eq 'Process' } {
+            [Environment]::GetEnvironmentVariable('EDITOR', 'Process')
+        }
+        # Anything that matches NEITHER filter throws rather than falling
+        # through to a real read. Most of these tests stub the machine value as
+        # $null, which is also what a real read returns on nearly every host --
+        # so a silently-unmatched filter (a renamed or dropped -Scope parameter
+        # would do it) would leave them passing for the wrong reason, quietly
+        # back to testing against host state. This is what fails instead.
         Mock Get-EditorVariable -ModuleName MarkMichaelis.ScoopBucket {
-            [Environment]::GetEnvironmentVariable('EDITOR', $Scope)
+            throw "Get-EditorVariable was called in a way no stub matched (Scope='$Scope'). The machine-scope read must never reach the host from these tests."
         }
         $env:EDITOR = $null
     }
