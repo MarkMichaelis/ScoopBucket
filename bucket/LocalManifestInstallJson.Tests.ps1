@@ -15,7 +15,7 @@
 
       * install.json.bucket is set to MarkMichaelis in BOTH dirs.
       * manifest.json.url[] is rewritten back to canonical
-        raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master URLs.
+        raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main URLs.
       * Missing files / malformed JSON / read-only files do NOT throw
         (install.json is internal Scoop API; helper must be best-effort).
       * Calling the helper twice is idempotent.

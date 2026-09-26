@@ -14,7 +14,7 @@ configurations.
 ## Bootstrap
 
 ```powershell
-iex (irm https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/install.ps1)
+iex (irm https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/install.ps1)
 ```
 
 `install.ps1` installs Chocolatey, installs Scoop, registers this bucket
@@ -697,7 +697,7 @@ if it had come from the registered `MarkMichaelis` bucket:
   to `MarkMichaelis` (Scoop leaves it empty for file-path installs).
 - `~/scoop/apps/<App>/current/manifest.json` — `url[]` entries are
   restored to canonical
-  `https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/bucket/<leaf>`
+  `https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/<leaf>`
   so future re-installs/updates fetch from the bucket, not your local
   working copy.
 
