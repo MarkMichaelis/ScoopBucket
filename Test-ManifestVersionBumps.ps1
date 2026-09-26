@@ -87,7 +87,7 @@ if ($Push)  { $Amend = $true }
 if ($Amend) { $Fix   = $true }
 
 $BucketDir = Join-Path $RepoRoot 'bucket'
-$RawUrlPrefix = 'https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/master/'
+$RawUrlPrefix = 'https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/'
 
 function Invoke-Git {
     param([Parameter(Mandatory)][string[]]$GitArgs, [switch]$AllowFailure)
