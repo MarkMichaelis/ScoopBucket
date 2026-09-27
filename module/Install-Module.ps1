@@ -32,9 +32,6 @@ param(
     Registers this repo's module/ directory on PSModulePath via the
     $PROFILE.CurrentUserAllHosts sentinel block (no junction, no reparse
     point under the user's -- often OneDrive-synced -- module path, #375).
-    Earlier versions junctioned the module under the user module path,
-    which broke OneDrive folder backup; this installer removes any such
-    legacy self-pointing junction it finds (transitional, see #376).
 
     Unless -SkipProfile is passed, writes (or migrates) an idempotent,
     sentinel-bracketed lazy-import stub (v3) into
@@ -69,8 +66,8 @@ if (-not (Test-Path -LiteralPath $source -PathType Container)) {
 # Resolve a user-scope module path. $env:PSModulePath splits on ';' on
 # Windows; we want one under the user profile (writable without admin).
 # Internal/test seam: $env:SCOOPBUCKET_USER_MODULE_PATH overrides the
-# resolved path so the legacy-junction cleanup can be exercised against a
-# sandbox without touching the host.
+# resolved path so the tests can exercise the install and uninstall paths
+# against a sandbox without touching the host.
 if ($env:SCOOPBUCKET_USER_MODULE_PATH) {
     $userModulePath = $env:SCOOPBUCKET_USER_MODULE_PATH
 } else {
@@ -145,35 +142,6 @@ if ($Uninstall) {
 
     Write-Host "Uninstall complete. To use the module from this repo: cd here and run 'Import-Module .\module\MarkMichaelis.ScoopBucket'."
     return
-}
-
-# Transitional legacy cleanup (#375 -> follow-up #376): earlier versions of
-# this installer junctioned the module into $userModulePath. On a OneDrive
-# Known-Folder-Move machine that path is synced and folder backup chokes on
-# the reparse point. Remove any such self-pointing junction so the machine is
-# unblocked; discovery now flows through the PSModulePath entry the profile
-# block adds (below). Once GLOBETROTTERX1 and DAKAR are migrated this block
-# can be deleted (#376).
-if (Test-Path -LiteralPath $target) {
-    $existing = Get-Item -LiteralPath $target -Force
-    $isJunction = ($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
-    $pointsHere = $false
-    if ($isJunction -and $existing.Target) {
-        try {
-            $pointsHere = (Resolve-Path -LiteralPath $existing.Target).Path -eq (Resolve-Path -LiteralPath $source).Path
-        } catch { $pointsHere = $false }
-    }
-    if ($pointsHere) {
-        if ($PSCmdlet.ShouldProcess($target, 'Remove legacy MarkMichaelis.ScoopBucket junction')) {
-            # Strip ReadOnly then delete only the link (non-recursive) so we
-            # never follow the reparse point into the repo source (#253).
-            if (($existing.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
-                $existing.Attributes = $existing.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
-            }
-            [System.IO.Directory]::Delete($target, $false)
-            Write-Host "Removed legacy MarkMichaelis.ScoopBucket junction at $target (now registered via PSModulePath)."
-        }
-    }
 }
 
 # Register the repo's module dir on PSModulePath for the CURRENT session so
