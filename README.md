@@ -194,8 +194,8 @@ module path) and registers an argument completer; the module itself
 loads on the first Tab (or on the first cmdlet call, via PSModulePath
 auto-load), adding <10 ms to profile load and saving ~1 s of cold pwsh
 startup. Re-running `Install-Module.ps1` migrates the legacy v1/v2
-block in-place. It also removes any legacy `MarkMichaelis.ScoopBucket`
-junction a previous installer left under your user module path.
+block in-place. To remove a legacy `MarkMichaelis.ScoopBucket` junction an
+older installer left under your user module path, run it with `-Uninstall`.
 
 Note: PSModulePath auto-load via the profile block does not apply to
 `-NoProfile` sessions; there, run
