@@ -336,43 +336,27 @@ if (Get-Module -ListAvailable -Name MarkMichaelis.ScoopBucket) { 'PRESENT' } els
     }
 }
 
-Describe 'Install-Module.ps1 install path removes a legacy junction and creates none (#375)' -Tag 'Light','Module' {
-    It 'removes a pre-existing self-pointing junction at the user module path and leaves no reparse point' {
-        # The pre-#375 installer junctioned the module into the user module
-        # path; on OneDrive Known-Folder-Move machines that path is synced and
-        # backup chokes on the reparse point. Running the installer must now
-        # clean up that legacy junction and must NOT recreate one. The test
-        # redirects the user module path via the internal
-        # $env:SCOOPBUCKET_USER_MODULE_PATH seam so it never touches the host.
+Describe 'Install-Module.ps1 install path creates no junction (#375)' -Tag 'Light','Module' {
+    It 'leaves nothing at the user module path -- discovery is by PSModulePath, not a reparse point' {
+        # A junction under the user module path breaks OneDrive Known-Folder-Move
+        # backup (#375). The installer registers the module through PSModulePath
+        # instead, so it must never create an entry there. The internal
+        # $env:SCOOPBUCKET_USER_MODULE_PATH seam keeps the test off the host.
         $installScript = Join-Path (Split-Path -Parent $PSScriptRoot) 'module\Install-Module.ps1'
         $source        = Join-Path (Split-Path -Parent $PSScriptRoot) 'module\MarkMichaelis.ScoopBucket'
-        $sandbox       = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-legacy-$([guid]::NewGuid().ToString('N'))"
-        $linkPath      = Join-Path $sandbox 'MarkMichaelis.ScoopBucket'
+        $sandbox       = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-nojunction-$([guid]::NewGuid().ToString('N'))"
         $savedEnv      = $env:SCOOPBUCKET_USER_MODULE_PATH
         try {
             New-Item -ItemType Directory -Path $sandbox | Out-Null
-            New-Item -ItemType Junction -Path $linkPath -Target $source | Out-Null
-            (Get-Item -LiteralPath $linkPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint | Should -Not -Be 0
-
             $env:SCOOPBUCKET_USER_MODULE_PATH = $sandbox
+
             & $installScript -SkipProfile -WarningAction SilentlyContinue | Out-Null
 
-            # The legacy junction must be gone, and no new reparse point may
-            # exist at that path.
-            if (Test-Path -LiteralPath $linkPath) {
-                (Get-Item -LiteralPath $linkPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint |
-                    Should -Be 0 -Because 'the installer must not recreate a junction under the user module path'
-            }
-            # The real source module must be untouched.
+            Test-Path -LiteralPath (Join-Path $sandbox 'MarkMichaelis.ScoopBucket') |
+                Should -BeFalse -Because 'the installer must not create a junction under the user module path'
             Test-Path -LiteralPath $source -PathType Container | Should -BeTrue
         } finally {
             $env:SCOOPBUCKET_USER_MODULE_PATH = $savedEnv
-            if (Test-Path -LiteralPath $linkPath) {
-                $i = Get-Item -LiteralPath $linkPath -Force
-                if (($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                    [IO.Directory]::Delete($linkPath, $false)
-                }
-            }
             Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction Ignore
         }
     }

@@ -122,8 +122,7 @@ The root cause -- the installer creating a junction under the OneDrive module
 path -- was fixed in
 [MarkMichaelis/ScoopBucket#375](https://github.com/MarkMichaelis/ScoopBucket/issues/375).
 `module/Install-Module.ps1` now registers the module via `PSModulePath` (no
-junction) and removes any legacy self-pointing junction on (re)install, so this
-script is a one-time remediation for machines that were linked by an older
-installer. For the scoop module specifically you can also just run
-`module\Install-Module.ps1` (or `-Uninstall`) -- it performs the same safe
+junction), so this script is a one-time remediation for machines that were
+linked by an older installer. For the scoop module specifically you can also
+run `module\Install-Module.ps1 -Uninstall` -- it performs the same safe
 junction cleanup.
