@@ -7,9 +7,10 @@
     a committed .jsonc snapshot (#431).
 
 .DESCRIPTION
-    OSBasePackages (Windows Terminal) and ClientBasePackages (PowerToys) both
-    reapply a committed configuration snapshot from their ConfigScript. Each
-    bundle manifest lists ONLY its .ps1 in `url[]`, so under `scoop install` the
+    OSBasePackages (Windows Terminal), ClientBasePackages (PowerToys) and
+    AIAgents (Claude Code CLI) all reapply a committed configuration snapshot
+    from their ConfigScript. Each bundle manifest lists ONLY its .ps1 in
+    `url[]`, so under `scoop install` the
     app directory (`<scoopRoot>\apps\<bundle>\<version>\`) contains the bundle
     script and nothing else -- no `os\` sibling. $PSScriptRoot IS set there (to
     the app dir), so a hook that branches on $PSScriptRoot alone hands the
@@ -47,9 +48,10 @@ Describe 'Bundle ConfigScript snapshot hooks under the scoop app-dir layout' -Ta
 
         # Stage a fake scoop app dir containing only the bundle's declarative
         # $Packages assignment, lifted verbatim from the shipped bundle. With
-        # -WithSnapshot the `os\<name>` sibling is created too (the bucket
-        # checkout layout); without it, the app-dir layout scoop actually
-        # produces. Returns the staged .ps1 path for the caller to dot-source.
+        # -WithSnapshot (a bundle-relative path such as 'os\Foo.jsonc') that
+        # sibling is created too, reproducing the bucket checkout layout;
+        # without it, the app-dir layout scoop actually produces. Returns the
+        # staged .ps1 path for the caller to dot-source.
         function New-StagedBundleScript {
             param(
                 [Parameter(Mandatory)][string]$BundleName,
@@ -69,7 +71,7 @@ Describe 'Bundle ConfigScript snapshot hooks under the scoop app-dir layout' -Ta
             $appDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Force -Path $appDir | Out-Null
             if ($WithSnapshot) {
-                $snapshot = Join-Path $appDir "os\$WithSnapshot"
+                $snapshot = Join-Path $appDir $WithSnapshot
                 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $snapshot) | Out-Null
                 Set-Content -LiteralPath $snapshot -Value '{}' -Encoding utf8
             }
@@ -103,7 +105,7 @@ Describe 'Bundle ConfigScript snapshot hooks under the scoop app-dir layout' -Ta
         }
 
         It 'passes the local snapshot when it does sit beside the bundle (bucket checkout)' {
-            $staged = New-StagedBundleScript -BundleName 'OSBasePackages' -WithSnapshot 'MarkMichaelisWindowsTerminalSettings.jsonc'
+            $staged = New-StagedBundleScript -BundleName 'OSBasePackages' -WithSnapshot 'os\MarkMichaelisWindowsTerminalSettings.jsonc'
             . $staged
             $package = $Packages | Where-Object Name -eq 'Windows Terminal'
 
@@ -140,7 +142,7 @@ Describe 'Bundle ConfigScript snapshot hooks under the scoop app-dir layout' -Ta
         }
 
         It 'passes the local snapshot when it does sit beside the bundle (bucket checkout)' {
-            $staged = New-StagedBundleScript -BundleName 'ClientBasePackages' -WithSnapshot 'MarkMichaelisPowerToysSettings.jsonc'
+            $staged = New-StagedBundleScript -BundleName 'ClientBasePackages' -WithSnapshot 'os\MarkMichaelisPowerToysSettings.jsonc'
             . $staged
             $package = $Packages | Where-Object Name -eq 'PowerToys'
 
@@ -154,6 +156,42 @@ Describe 'Bundle ConfigScript snapshot hooks under the scoop app-dir layout' -Ta
             $script:call.Bound | Should -BeTrue
             $script:call.NoRestart | Should -BeTrue
             $script:call.SnapshotPath | Should -Be (Join-Path (Split-Path -Parent $staged) 'os\MarkMichaelisPowerToysSettings.jsonc')
+        }
+    }
+
+    Context 'AIAgents: Claude Code CLI' {
+
+        It 'falls back to the module default when the app dir has no sibling ai\*.jsonc' {
+            $staged = New-StagedBundleScript -BundleName 'AIAgents'
+            . $staged
+            $package = $Packages | Where-Object Name -eq 'Claude Code CLI'
+
+            $script:call = $null
+            function Import-ClaudeCodeSettings {
+                [CmdletBinding()] param([string]$ConfigPath)
+                $script:call = @{ ConfigPath = $ConfigPath; Bound = $PSBoundParameters.ContainsKey('ConfigPath') }
+            }
+
+            { & $package.ConfigScript $package } | Should -Not -Throw
+            $script:call | Should -Not -BeNullOrEmpty -Because 'the configuration must still be applied'
+            $script:call.Bound | Should -BeFalse `
+                -Because 'with no snapshot beside the bundle the hook must let Import-ClaudeCodeSettings resolve its module-relative default (the bucket checkout)'
+        }
+
+        It 'passes the local snapshot when it does sit beside the bundle (bucket checkout)' {
+            $staged = New-StagedBundleScript -BundleName 'AIAgents' -WithSnapshot 'ai\MarkMichaelisClaudeCodeSettings.jsonc'
+            . $staged
+            $package = $Packages | Where-Object Name -eq 'Claude Code CLI'
+
+            $script:call = $null
+            function Import-ClaudeCodeSettings {
+                [CmdletBinding()] param([string]$ConfigPath)
+                $script:call = @{ ConfigPath = $ConfigPath; Bound = $PSBoundParameters.ContainsKey('ConfigPath') }
+            }
+
+            { & $package.ConfigScript $package } | Should -Not -Throw
+            $script:call.Bound | Should -BeTrue
+            $script:call.ConfigPath | Should -Be (Join-Path (Split-Path -Parent $staged) 'ai\MarkMichaelisClaudeCodeSettings.jsonc')
         }
     }
 }

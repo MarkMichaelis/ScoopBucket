@@ -316,11 +316,18 @@ foreach (`$pair in @(
         ExpectedCompletions = @{ claude = @('--help','--version','mcp') }
         # #412: tab-session hook (resume in restored Windows Terminal tabs), Prompt
         # Spotlight theme, and the "Outcomes, not code" output style.
-        # $PSScriptRoot is empty when Update-Package/Install-Package harvest this entry;
-        # the import's default then resolves the same file from the module's bucket.
+        # #431: test for the FILE, not for $PSScriptRoot. $PSScriptRoot is empty when
+        # Update-Package/Install-Package harvest this entry, and under `scoop install`
+        # it is the app dir -- which holds only this .ps1 (the manifest's sole url),
+        # never the ai\ sibling. Either way the import's module-relative default
+        # resolves the same file from scoop's bucket checkout.
         ConfigScript        = {
-            if ($PSScriptRoot) { Import-ClaudeCodeSettings -ConfigPath (Join-Path $PSScriptRoot 'ai\MarkMichaelisClaudeCodeSettings.jsonc') }
-            else { Import-ClaudeCodeSettings }
+            $localConfig = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'ai\MarkMichaelisClaudeCodeSettings.jsonc' }
+            if ($localConfig -and (Test-Path -LiteralPath $localConfig -PathType Leaf)) {
+                Import-ClaudeCodeSettings -ConfigPath $localConfig
+            } else {
+                Import-ClaudeCodeSettings
+            }
         }
         NativeCommandScript = {
             @"
