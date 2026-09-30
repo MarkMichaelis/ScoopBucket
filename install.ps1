@@ -104,6 +104,11 @@ function Resolve-ScoopRoot {
   <#
   .SYNOPSIS
       Compute the scoop root from the SCOOP value and ProgramData path.
+  .DESCRIPTION
+      Intentionally NOT the module's same-named Resolve-ScoopRoot: this one
+      is pure (both inputs are passed in) and does no discovery, because
+      the bootstrap runs before the module exists. Do not dot-source both
+      into one session.
   #>
   [OutputType([string])]
   [CmdletBinding()]
@@ -118,14 +123,24 @@ function Resolve-ScoopRoot {
 function Get-ScoopInstallState {
   <#
   .SYNOPSIS
-      Classify scoop's state as Installed, Orphaned, or Missing.
+      Classify scoop as Installed, Unlinked, Orphaned, or Missing.
   .DESCRIPTION
       Pure: all filesystem/command facts are passed in.
 
       Orphaned is the state seen in the wild -- a populated root (leftover
-      apps\ and shims\) with no apps\scoop. The upstream installer hard-
+      apps\ and shims\) with NO apps\scoop. The upstream installer hard-
       fails there with Deny-Install "'<dir>' exists and is not empty", so
       the root must be moved aside before installing.
+
+      Unlinked keeps that destructive path away from a working install:
+      apps\scoop is present but the command does not resolve (a shell whose
+      $env:Path predates the install, a damaged shim). Moving that root
+      aside would relocate every global app, persist\ and bucket, so the
+      only safe response is to refresh PATH and report.
+
+      The app-dir probe is deliberately apps\scoop rather than the module's
+      apps\scoop\current: a false negative here costs a moved root, so the
+      broader check is the conservative one.
   #>
   [OutputType([string])]
   [CmdletBinding()]
@@ -135,7 +150,9 @@ function Get-ScoopInstallState {
     [Parameter(Mandatory)][bool]$RootExists,
     [Parameter(Mandatory)][bool]$RootIsEmpty
   )
-  if ($CommandFound -and $AppDirExists) { return 'Installed' }
+  if ($AppDirExists) {
+    return $(if ($CommandFound) { 'Installed' } else { 'Unlinked' })
+  }
   if ($RootExists -and -not $RootIsEmpty) { return 'Orphaned' }
   'Missing'
 }
@@ -185,9 +202,12 @@ function Update-PathFromRegistry {
   [CmdletBinding()]
   param()
   try {
-    $env:Path = Merge-PathValue `
+    $merged = Merge-PathValue `
       -MachinePath ([Environment]::GetEnvironmentVariable('Path', 'Machine')) `
       -UserPath ([Environment]::GetEnvironmentVariable('Path', 'User'))
+    # Never blank PATH: the Machine/User hives are Windows-only, and an
+    # empty merge would leave the rest of the run with nothing to resolve.
+    if ($merged) { $env:Path = $merged }
   } catch {
     Write-Warning "Could not refresh PATH from the registry: $($_.Exception.Message)"
   }
@@ -197,6 +217,11 @@ function Test-DirectoryEmpty {
   <#
   .SYNOPSIS
       Is the path missing or an empty directory?
+  .DESCRIPTION
+      Fails closed: a directory that cannot be enumerated (access denied)
+      is reported as NOT empty. Reading the empty result of a failed
+      enumeration as "empty" would walk a populated, locked-down scoop root
+      straight past the orphan handling.
   #>
   [OutputType([bool])]
   [CmdletBinding()]
@@ -204,7 +229,39 @@ function Test-DirectoryEmpty {
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Path
   )
   if (-not (Test-Path -LiteralPath $Path)) { return $true }
-  -not @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Ignore).Count
+  $enumerationError = $null
+  $entries = @(Get-ChildItem -LiteralPath $Path -Force `
+      -ErrorAction SilentlyContinue -ErrorVariable enumerationError)
+  if ($enumerationError) {
+    Write-Warning "Could not enumerate '$Path' ($($enumerationError[0].Exception.Message)); treating it as non-empty."
+    return $false
+  }
+  -not $entries.Count
+}
+
+function Move-OrphanedScoopRoot {
+  <#
+  .SYNOPSIS
+      Move an orphaned scoop root to a timestamped sibling path.
+  .DESCRIPTION
+      Returns $true only when the root is actually out of the way, so the
+      caller can skip the install rather than run the upstream installer
+      against a still-populated root (Deny-Install).
+  #>
+  [OutputType([bool])]
+  [CmdletBinding(SupportsShouldProcess)]
+  param(
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Root
+  )
+  $backup = Get-ScoopRootBackupPath -Root $Root -Timestamp (Get-Date -Format 'yyyyMMdd-HHmmss')
+  Write-Warning "'$Root' exists but has no apps\scoop; moving it to '$backup' so the installer can proceed."
+  if (-not $PSCmdlet.ShouldProcess($Root, "Move orphaned scoop root to '$backup'")) { return $false }
+  try {
+    Move-Item -LiteralPath $Root -Destination $backup -Force -ErrorAction Stop
+  } catch {
+    throw "Could not move '$Root' aside to '$backup': $($_.Exception.Message). Close anything running out of that directory, re-run elevated, and try again."
+  }
+  $true
 }
 
 function Install-ScoopEngine {
@@ -215,16 +272,19 @@ function Install-ScoopEngine {
   [CmdletBinding(SupportsShouldProcess)]
   param(
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Root,
-    [Parameter(Mandatory)][ValidateSet('Installed', 'Orphaned', 'Missing')][string]$State
+    [Parameter(Mandatory)][ValidateSet('Installed', 'Unlinked', 'Orphaned', 'Missing')][string]$State
   )
   if ($State -eq 'Installed') { return }
-  if ($State -eq 'Orphaned') {
-    $backup = Get-ScoopRootBackupPath -Root $Root -Timestamp (Get-Date -Format 'yyyyMMdd-HHmmss')
-    Write-Warning "'$Root' exists but has no apps\scoop; moving it to '$backup' so the installer can proceed."
-    if ($PSCmdlet.ShouldProcess($Root, "Move orphaned scoop root to '$backup'")) {
-      Move-Item -LiteralPath $Root -Destination $backup -Force -ErrorAction Stop
-    }
+  if ($State -eq 'Unlinked') {
+    # apps\scoop is present: scoop IS installed, only unreachable from this
+    # process. Never move or reinstall -- that would relocate a working
+    # install, global apps and persist\ included.
+    Write-Warning "scoop is installed at '$Root' but does not resolve on PATH; refreshing PATH instead of reinstalling."
+    Update-PathFromRegistry
+    return
   }
+  # A root that was not moved aside must not be handed to the installer.
+  if ($State -eq 'Orphaned' -and -not (Move-OrphanedScoopRoot -Root $Root)) { return }
   if (-not $PSCmdlet.ShouldProcess($Root, 'Install scoop')) { return }
   $env:SCOOP = $Root
   [Environment]::SetEnvironmentVariable('SCOOP', $env:SCOOP, 'Machine')
@@ -275,6 +335,10 @@ if (-not (Test-EngineInstalled 'choco')) {
 }
 
 #Install Scoop
+# Re-read PATH before probing: a shell opened before scoop landed on Machine
+# PATH carries a stale $env:Path, and a false "scoop is missing" here is what
+# would misclassify a working install.
+Update-PathFromRegistry
 $scoopRoot = Resolve-ScoopRoot -ScoopEnvValue $env:SCOOP -ProgramDataPath $env:ProgramData
 $scoopState = Get-ScoopInstallState `
   -CommandFound (Test-EngineInstalled 'scoop') `

@@ -44,6 +44,10 @@ BeforeAll {
         'Get-ScoopInstallState'
         'Get-ScoopRootBackupPath'
         'Merge-PathValue'
+        'Test-DirectoryEmpty'
+        'Update-PathFromRegistry'
+        'Move-OrphanedScoopRoot'
+        'Install-ScoopEngine'
     )
     foreach ($fn in $script:installFunctions) {
         if ($fn.Name -in $wanted) { . ([scriptblock]::Create($fn.Extent.Text)) }
@@ -166,6 +170,16 @@ Describe 'install.ps1 -- Get-ScoopInstallState' -Tag 'Light', 'Meta' {
             Should -Be 'Orphaned'
     }
 
+    It 'reports Unlinked -- never Orphaned -- when apps\scoop exists but PATH does not resolve scoop' {
+        # A shell opened before scoop landed on Machine PATH has a stale
+        # $env:Path, so the command probe says "missing" for a perfectly good
+        # install. Classifying that as Orphaned would move a working scoop
+        # root -- global apps, persist\, buckets and all -- aside and
+        # reinstall from scratch. Never do that.
+        Get-ScoopInstallState -CommandFound $false -AppDirExists $true -RootExists $true -RootIsEmpty $false |
+            Should -Be 'Unlinked'
+    }
+
     It 'reports Missing when the root is absent or empty' {
         Get-ScoopInstallState -CommandFound $false -AppDirExists $false -RootExists $false -RootIsEmpty $true |
             Should -Be 'Missing'
@@ -200,6 +214,101 @@ Describe 'install.ps1 -- Merge-PathValue' -Tag 'Light', 'Meta' {
     It 'tolerates empty hives and empty segments' {
         Merge-PathValue -MachinePath $null -UserPath 'C:\c' | Should -Be 'C:\c'
         Merge-PathValue -MachinePath 'C:\a;;C:\b' -UserPath '' | Should -Be 'C:\a;C:\b'
+    }
+}
+
+Describe 'install.ps1 -- Test-DirectoryEmpty' -Tag 'Light', 'Meta' {
+
+    BeforeEach {
+        $script:probeDir = Join-Path ([System.IO.Path]::GetTempPath()) ("empty432_" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:probeDir -Force | Out-Null
+    }
+
+    AfterEach {
+        icacls $script:probeDir /reset /t /q 2>&1 | Out-Null
+        Remove-Item -LiteralPath $script:probeDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'reports a missing path as empty' {
+        Test-DirectoryEmpty -Path (Join-Path $script:probeDir 'nope') | Should -BeTrue
+    }
+
+    It 'reports an empty directory as empty' {
+        Test-DirectoryEmpty -Path $script:probeDir | Should -BeTrue
+    }
+
+    It 'reports a populated directory as not empty, hidden entries included' {
+        $file = Join-Path $script:probeDir '.hidden'
+        Set-Content -LiteralPath $file -Value 'x' -Encoding ascii
+        (Get-Item -LiteralPath $file -Force).Attributes = 'Hidden'
+        Test-DirectoryEmpty -Path $script:probeDir | Should -BeFalse
+    }
+
+    It 'fails closed: an unreadable directory is not reported as empty' {
+        # Swallowing the access-denied error and reading the resulting empty
+        # collection as "empty" would route a populated-but-locked-down scoop
+        # root straight past the orphan handling.
+        Set-Content -LiteralPath (Join-Path $script:probeDir 'payload.txt') -Value 'x' -Encoding ascii
+        icacls $script:probeDir /deny "$([Environment]::UserName):(OI)(CI)(RX)" 2>&1 | Out-Null
+        $probe = @(Get-ChildItem -LiteralPath $script:probeDir -Force -ErrorAction SilentlyContinue)
+        if ($probe.Count -gt 0) {
+            Set-ItResult -Skipped -Because 'this process can still enumerate the directory despite the deny ACE'
+            return
+        }
+        Test-DirectoryEmpty -Path $script:probeDir -WarningAction SilentlyContinue | Should -BeFalse
+    }
+}
+
+Describe 'install.ps1 -- Install-ScoopEngine' -Tag 'Light', 'Meta' {
+
+    BeforeEach {
+        $script:fakeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("scooproot432_" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:fakeRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt') -Value 'x' -Encoding ascii
+        $script:savedPath = $env:Path
+        $script:savedScoop = $env:SCOOP
+    }
+
+    AfterEach {
+        $env:Path = $script:savedPath
+        $env:SCOOP = $script:savedScoop
+        Remove-Item -LiteralPath $script:fakeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'scooproot432_*' -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'leaves an Installed root completely alone' {
+        Install-ScoopEngine -Root $script:fakeRoot -State 'Installed'
+        Test-Path -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt') | Should -BeTrue
+        $env:SCOOP | Should -Be $script:savedScoop
+    }
+
+    It 'never moves or reinstalls an Unlinked root' {
+        # No -WhatIf here on purpose: the real code path must be
+        # non-destructive, not merely previewable.
+        Install-ScoopEngine -Root $script:fakeRoot -State 'Unlinked' -WarningAction SilentlyContinue
+        Test-Path -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt') | Should -BeTrue
+        @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter "$(Split-Path $script:fakeRoot -Leaf).orphaned-*" -ErrorAction SilentlyContinue).Count |
+            Should -Be 0
+    }
+
+    It 'moves nothing for an Orphaned root under -WhatIf' {
+        Install-ScoopEngine -Root $script:fakeRoot -State 'Orphaned' -WhatIf -WarningAction SilentlyContinue
+        Test-Path -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt') | Should -BeTrue
+    }
+
+    It 'skips the install when the orphaned root was not moved aside' {
+        # Declining (or -WhatIf-ing) the move must not fall through into the
+        # installer, which would hit Deny-Install on the populated root.
+        Move-OrphanedScoopRoot -Root $script:fakeRoot -WhatIf | Should -BeFalse
+        Test-Path -LiteralPath $script:fakeRoot | Should -BeTrue
+    }
+
+    It 'moves an orphaned root to the timestamped sibling path' {
+        Move-OrphanedScoopRoot -Root $script:fakeRoot -WarningAction SilentlyContinue | Should -BeTrue
+        Test-Path -LiteralPath $script:fakeRoot | Should -BeFalse
+        @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter "$(Split-Path $script:fakeRoot -Leaf).orphaned-*" -ErrorAction SilentlyContinue).Count |
+            Should -Be 1
     }
 }
 
@@ -240,6 +349,40 @@ Describe 'install.ps1 -- engine guards' -Tag 'Light', 'Meta' {
             }, $true) | ForEach-Object { $_.Extent.Text }
 
         $bareEngineCalls | Should -BeNullOrEmpty -Because 'Add-ScoopBucket must not depend on the module wrapper'
+    }
+
+    It 'refreshes PATH before probing whether scoop is installed' {
+        # A stale $env:Path makes the command probe say "missing" for a good
+        # install, which used to classify the root as orphaned.
+        function Get-ScriptBodyCalls {
+            param([string]$Name, [type[]]$Forbidden)
+            $script:installAst.FindAll({
+                    param($n)
+                    $n -is [System.Management.Automation.Language.CommandAst] -and
+                    $n.GetCommandName() -eq $Name
+                }, $true) | Where-Object {
+                $nested = $false
+                $p = $_.Parent
+                while ($p) {
+                    if ($Forbidden | Where-Object { $p -is $_ }) { $nested = $true; break }
+                    $p = $p.Parent
+                }
+                -not $nested
+            }
+        }
+
+        $inFunction = [System.Management.Automation.Language.FunctionDefinitionAst]
+        $conditional = [System.Management.Automation.Language.IfStatementAst]
+
+        # The refresh must be unconditional: the one inside the choco `if`
+        # only runs when choco was missing.
+        $refresh = @(Get-ScriptBodyCalls -Name 'Update-PathFromRegistry' -Forbidden $inFunction, $conditional)
+        $probe = @(Get-ScriptBodyCalls -Name 'Test-EngineInstalled' -Forbidden @($inFunction) |
+                Where-Object { $_.Extent.Text -match "'scoop'" })
+        $probe.Count | Should -Be 1
+        $refresh.Count | Should -BeGreaterThan 0
+        ($refresh | ForEach-Object { $_.Extent.StartOffset } | Measure-Object -Minimum).Minimum |
+            Should -BeLessThan $probe[0].Extent.StartOffset
     }
 
     It 'refreshes PATH after installing an engine' {
