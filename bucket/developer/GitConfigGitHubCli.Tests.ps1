@@ -123,6 +123,39 @@ Describe "Install $name" -Tag 'Heavy', 'Install' {
         finally { Pop-Location }
     }
 
+    It 'writes a gh-backed credential.helper into an isolated global git config' {
+        # Issue #434 end to end against the real gh. GIT_CONFIG_GLOBAL (git
+        # 2.32+) repoints `git config --global` -- which is what gh auth setup-git
+        # shells out to -- at a throwaway file, so this never rewrites the
+        # developer's real ~/.gitconfig. Also pins the caveat: the helper value
+        # is an absolute path to the gh binary, not a bare `gh`.
+        if (-not $script:ghAuthed) {
+            Set-ItResult -Skipped -Because 'gh not installed or not authenticated'
+            return
+        }
+        $sandboxConfig = Join-Path ([System.IO.Path]::GetTempPath()) "setupgit-$([guid]::NewGuid()).gitconfig"
+        $prior = $env:GIT_CONFIG_GLOBAL
+        try {
+            $env:GIT_CONFIG_GLOBAL = $sandboxConfig
+            gh auth setup-git *>$null
+            $LASTEXITCODE | Should -Be 0
+            $helper = git config --global --get-all 'credential.https://github.com.helper'
+            ($helper -join "`n") | Should -Match 'gh(\.exe)?'
+            # Re-running must not append a second copy of the same entry.
+            gh auth setup-git *>$null
+            $after = @(git config --global --get-all 'credential.https://github.com.helper')
+            $after.Count | Should -Be @($helper).Count
+        }
+        finally {
+            if ($null -eq $prior) {
+                Remove-Item Env:\GIT_CONFIG_GLOBAL -ErrorAction Ignore
+            } else {
+                $env:GIT_CONFIG_GLOBAL = $prior
+            }
+            Remove-Item -LiteralPath $sandboxConfig -Force -ErrorAction Ignore
+        }
+    }
+
     It 'exits 2 with a usage message when no issue number is given' {
         if (-not $script:ghAvailable) {
             Set-ItResult -Skipped -Because 'gh not installed'
@@ -153,6 +186,15 @@ Describe "Behaviour $sut (unit)" -Tag 'Light', 'Unit' {
         $script:priorConfigDir = $env:GH_CONFIG_DIR
         $env:GH_CONFIG_DIR = $script:sandbox
 
+        # Same containment for the *git* side: the credential-helper step shells
+        # out to `gh auth setup-git`, which writes `git config --global`.
+        # GIT_CONFIG_GLOBAL (git 2.32+) repoints --global at a throwaway file, so
+        # the load-time self-invocation can never rewrite the developer's real
+        # ~/.gitconfig even on a machine whose gh is authenticated.
+        $script:gitConfigSandbox = Join-Path $script:sandbox 'sandbox.gitconfig'
+        $script:priorGitConfigGlobal = $env:GIT_CONFIG_GLOBAL
+        $env:GIT_CONFIG_GLOBAL = $script:gitConfigSandbox
+
         . $script:configurator *>$null
     }
 
@@ -161,6 +203,11 @@ Describe "Behaviour $sut (unit)" -Tag 'Light', 'Unit' {
             Remove-Item Env:\GH_CONFIG_DIR -ErrorAction Ignore
         } else {
             $env:GH_CONFIG_DIR = $script:priorConfigDir
+        }
+        if ($null -eq $script:priorGitConfigGlobal) {
+            Remove-Item Env:\GIT_CONFIG_GLOBAL -ErrorAction Ignore
+        } else {
+            $env:GIT_CONFIG_GLOBAL = $script:priorGitConfigGlobal
         }
         Remove-Item -LiteralPath $script:sandbox -Recurse -Force -ErrorAction Ignore
     }
@@ -199,11 +246,124 @@ Describe "Behaviour $sut (unit)" -Tag 'Light', 'Unit' {
 
     It 'warns and returns without throwing when gh-aliases.yml is missing' {
         # The second guard: gh present but the data file absent, which is what
-        # a manifest that forgot the gh-aliases.yml url would produce.
+        # a manifest that forgot the gh-aliases.yml url would produce. Exercised
+        # against the alias step alone rather than the orchestrator, so the
+        # credential step is not driven for real just to assert this warning.
         Mock Resolve-GhAliasFile -MockWith { $null }
 
         $captured = $null
-        { $script:captured = Invoke-GitConfigGitHubCli 3>&1 } | Should -Not -Throw
+        { $script:captured = Set-GitHubCliAlias 3>&1 } | Should -Not -Throw
         ($script:captured | Out-String) | Should -Match 'gh-aliases\.yml not found'
+    }
+
+    Context 'git credential helper (issue #434)' {
+        # `gh auth setup-git` is the whole point of the step, and it mutates
+        # global git config, so every test here mocks Invoke-GhAuthSetupGit --
+        # the seam that wraps the native call -- and asserts on whether the
+        # guards let it through. Nothing below can reach git or the network.
+
+        BeforeAll {
+            # Stand-in for a gh on PATH, so the "gh is present" tests assert the
+            # same on a machine that has gh and one that does not.
+            $script:fakeGh = [pscustomobject]@{ Source = 'C:\fake\gh.exe' }
+        }
+
+        It 'maps the gh auth status exit code to a boolean' {
+            # The exit code is the only authentication signal gh gives us, and
+            # it is injected rather than probed so this stays a pure unit test.
+            Test-GhAuthenticated -StatusProbe { 0 } | Should -BeTrue
+            Test-GhAuthenticated -StatusProbe { 1 } | Should -BeFalse
+            Test-GhAuthenticated -StatusProbe { 4 } | Should -BeFalse
+        }
+
+        It 'warns and skips the credential helper when gh is not installed' {
+            Mock Get-Command -ParameterFilter { $Name -eq 'gh' } -MockWith { $null }
+            Mock Invoke-GhAuthSetupGit -MockWith { [pscustomobject]@{ ExitCode = 0; Output = '' } }
+
+            $captured = $null
+            { $script:captured = Set-GitCredentialHelperFromGitHubCli 3>&1 } | Should -Not -Throw
+            ($script:captured | Out-String) | Should -Match 'gh not found'
+            Should -Invoke Invoke-GhAuthSetupGit -Times 0 -Exactly
+        }
+
+        It 'warns telling the user to run gh auth login when gh is unauthenticated' {
+            # The unattended case: a never-logged-in machine must warn and skip
+            # rather than hang on the OAuth device flow or fail the bundle.
+            Mock Get-Command -ParameterFilter { $Name -eq 'gh' } -MockWith { $script:fakeGh }
+            Mock Test-GhAuthenticated -MockWith { $false }
+            Mock Invoke-GhAuthSetupGit -MockWith { [pscustomobject]@{ ExitCode = 0; Output = '' } }
+
+            $captured = $null
+            { $script:captured = Set-GitCredentialHelperFromGitHubCli 3>&1 } | Should -Not -Throw
+            ($script:captured | Out-String) | Should -Match 'gh auth login'
+            Should -Invoke Invoke-GhAuthSetupGit -Times 0 -Exactly
+        }
+
+        It 'runs gh auth setup-git when gh is present and authenticated' {
+            Mock Get-Command -ParameterFilter { $Name -eq 'gh' } -MockWith { $script:fakeGh }
+            Mock Test-GhAuthenticated -MockWith { $true }
+            Mock Invoke-GhAuthSetupGit -MockWith { [pscustomobject]@{ ExitCode = 0; Output = '' } }
+
+            $captured = $null
+            { $script:captured = Set-GitCredentialHelperFromGitHubCli 3>&1 } | Should -Not -Throw
+            ($script:captured | Out-String) | Should -Not -Match 'WARNING|Skipping'
+            Should -Invoke Invoke-GhAuthSetupGit -Times 1 -Exactly
+        }
+
+        It 'is idempotent -- a second run re-applies the helper without throwing' {
+            # Idempotency contract: setup-git rewrites the same credential.helper
+            # entries with --replace-all, so re-running is a no-op in effect and
+            # must never throw or double up.
+            Mock Get-Command -ParameterFilter { $Name -eq 'gh' } -MockWith { $script:fakeGh }
+            Mock Test-GhAuthenticated -MockWith { $true }
+            Mock Invoke-GhAuthSetupGit -MockWith { [pscustomobject]@{ ExitCode = 0; Output = '' } }
+
+            { Set-GitCredentialHelperFromGitHubCli *>$null } | Should -Not -Throw
+            { Set-GitCredentialHelperFromGitHubCli *>$null } | Should -Not -Throw
+            Should -Invoke Invoke-GhAuthSetupGit -Times 2 -Exactly
+        }
+
+        It 'warns without throwing when gh auth setup-git fails' {
+            Mock Get-Command -ParameterFilter { $Name -eq 'gh' } -MockWith { $script:fakeGh }
+            Mock Test-GhAuthenticated -MockWith { $true }
+            Mock Invoke-GhAuthSetupGit -MockWith {
+                [pscustomobject]@{ ExitCode = 1; Output = 'boom' }
+            }
+
+            $captured = $null
+            { $script:captured = Set-GitCredentialHelperFromGitHubCli 3>&1 } | Should -Not -Throw
+            ($script:captured | Out-String) | Should -Match 'gh auth setup-git failed'
+        }
+
+        It 'records the scoop-uninstall caveat next to the setup-git call' {
+            # `gh auth setup-git` bakes an ABSOLUTE path to the gh binary into
+            # credential.helper, so a scoop-installed gh leaves git auth broken
+            # once gh is uninstalled. The caveat must travel with the code.
+            $source = Get-Content -LiteralPath $script:configurator -Raw
+            $source | Should -Match 'absolute path'
+            $source | Should -Match 'scoop'
+        }
+
+        It 'surfaces the caveat to the installing user through manifest notes' {
+            # scoop prints `notes` after an install, which is the only place a
+            # user who never reads the script will see the uninstall hazard.
+            $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'GitConfigGitHubCli.json') -Raw |
+                ConvertFrom-Json
+            $manifest.notes | Should -Not -BeNullOrEmpty
+            ($manifest.notes -join ' ') | Should -Match 'gh auth setup-git'
+            ($manifest.notes -join ' ') | Should -Match 'gh auth login'
+        }
+
+        It 'configures aliases and credentials as independent steps' {
+            # A missing gh-aliases.yml must not suppress credential setup (and
+            # vice versa): the orchestrator runs both, each with its own guards.
+            Mock Set-GitHubCliAlias -MockWith { }
+            Mock Set-GitCredentialHelperFromGitHubCli -MockWith { }
+
+            Invoke-GitConfigGitHubCli *>$null
+
+            Should -Invoke Set-GitHubCliAlias -Times 1 -Exactly
+            Should -Invoke Set-GitCredentialHelperFromGitHubCli -Times 1 -Exactly
+        }
     }
 }

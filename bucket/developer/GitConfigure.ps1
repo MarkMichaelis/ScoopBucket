@@ -74,12 +74,17 @@ Function GitConfigure {
         Write-Warning "Skipping gh tab-completion registration: $($_.Exception.Message)"
     }
 
-    # gh per-user aliases (gh iv, ...). Dot-sourced HERE rather than at the top
-    # of this script alongside the other GitConfig* companions: those configure
-    # tools installed elsewhere, whereas this one needs `gh` on PATH, which only
-    # becomes true after the `winget install GitHub.cli` above. The script
-    # self-invokes Invoke-GitConfigGitHubCli and no-ops with a warning if gh is
-    # still missing.
+    # gh per-user config: aliases (gh iv, ...) plus git's credential helper via
+    # `gh auth setup-git`, which is what keeps a fresh machine's first HTTPS
+    # `git pull` from popping the Git Credential Manager helper-selector dialog
+    # (issue #434). Dot-sourced HERE rather than at the top of this script
+    # alongside the other GitConfig* companions: those configure tools installed
+    # elsewhere, whereas this one needs `gh` on PATH, which only becomes true
+    # after the `winget install GitHub.cli` above -- and the credential step
+    # additionally needs an authenticated gh, so it must run after the choco
+    # git-credential-manager install too. The script self-invokes
+    # Invoke-GitConfigGitHubCli and each step warns and skips (never throws) when
+    # gh is missing or not yet authenticated.
     . "$PSScriptRoot\GitConfigGitHubCli.ps1"
 
     # gk (GitKraken CLI) native tab completion. gk is cobra-based and emits a
