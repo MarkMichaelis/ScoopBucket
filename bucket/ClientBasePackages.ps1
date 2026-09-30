@@ -155,7 +155,19 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
     [Package]@{ Name = 'Dropbox';          Installer = 'winget'; Id = 'Dropbox.Dropbox' }
     [Package]@{ Name = 'PowerToys';        Installer = 'winget'; Id = 'Microsoft.PowerToys'
                 Notes = 'Microsoft PowerToys suite; installed for the maintained Mouse Without Borders module (mouse/keyboard/clipboard sharing across machines), which replaces the unmaintained standalone Microsoft.MouseWithoutBorders 2.2.1 build.'
-                ConfigScript = { Import-PowerToysSettings -NoRestart -SnapshotPath (Join-Path $PSScriptRoot 'os\MarkMichaelisPowerToysSettings.jsonc') } }
+                # #431: test for the FILE, not for $PSScriptRoot. $PSScriptRoot is empty when
+                # Update-Package/Install-Package harvest this entry, and under `scoop install`
+                # it is the app dir -- which holds only this .ps1 (the manifest's sole url),
+                # never the os\ sibling. Either way the import's module-relative default
+                # resolves the same snapshot from scoop's bucket checkout.
+                ConfigScript = {
+                    $localSnapshot = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'os\MarkMichaelisPowerToysSettings.jsonc' }
+                    if ($localSnapshot -and (Test-Path -LiteralPath $localSnapshot -PathType Leaf)) {
+                        Import-PowerToysSettings -NoRestart -SnapshotPath $localSnapshot
+                    } else {
+                        Import-PowerToysSettings -NoRestart
+                    }
+                } }
     [Package]@{ Name = 'Foxit PDF Reader'; Installer = 'winget'; Id = 'Foxit.FoxitReader'
                 Notes = 'choco foxitreader times out downloading upstream installer (#27). winget is preferred per README.' }
     [Package]@{

@@ -26,11 +26,18 @@ $Packages = [Package[]]@(
         ExpectedCompletions = @{ wt = @('new-tab','split-pane','focus-tab','move-focus','swap-pane','--window','-w','--maximized','-M','--fullscreen','-F','--focus','-f') }
         # #412: restore windows/tabs after a reboot, Claude Tabs theme, Git Bash profile,
         # and per-repo tab colors + Claude session resume for PowerShell and Git Bash.
-        # $PSScriptRoot is empty when Update-Package/Install-Package harvest this entry;
-        # the import's default then resolves the same file from the module's bucket.
+        # #431: test for the FILE, not for $PSScriptRoot. $PSScriptRoot is empty when
+        # Update-Package/Install-Package harvest this entry, and under `scoop install`
+        # it is the app dir -- which holds only this .ps1 (the manifest's sole url),
+        # never the os\ sibling. Either way the import's module-relative default
+        # resolves the same file from scoop's bucket checkout.
         ConfigScript        = {
-            if ($PSScriptRoot) { Import-WindowsTerminalSettings -ConfigPath (Join-Path $PSScriptRoot 'os\MarkMichaelisWindowsTerminalSettings.jsonc') }
-            else { Import-WindowsTerminalSettings }
+            $localConfig = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'os\MarkMichaelisWindowsTerminalSettings.jsonc' }
+            if ($localConfig -and (Test-Path -LiteralPath $localConfig -PathType Leaf)) {
+                Import-WindowsTerminalSettings -ConfigPath $localConfig
+            } else {
+                Import-WindowsTerminalSettings
+            }
         }
         NativeCommandScript = {
             @"
