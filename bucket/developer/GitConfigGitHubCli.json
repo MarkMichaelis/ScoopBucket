@@ -1,9 +1,14 @@
 {
     "$schema": "https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json",
-    "version": "1.04.000",
+    "version": "1.05.000",
     "url": [
         "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/developer/GitConfigGitHubCli.ps1",
         "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/developer/gh-aliases.yml"
+    ],
+    "notes": [
+        "Configures per-user 'gh' state: this bucket's gh aliases, plus git's credential helper via 'gh auth setup-git' so HTTPS remotes stop popping the Git Credential Manager helper-selector dialog.",
+        "The credential step is skipped with a warning when gh is missing or not authenticated -- run 'gh auth login' once (it is interactive by nature), then re-run this package.",
+        "CAVEAT: 'gh auth setup-git' writes an ABSOLUTE path to the gh binary into credential.helper. A scoop-installed gh yields C:\\ProgramData\\scoop\\apps\\gh\\current\\bin\\gh.exe, so uninstalling or moving gh breaks git authentication until you re-run 'gh auth setup-git'."
     ],
     "installer": {
         "script": "& \"$dir\\GitConfigGitHubCli.ps1\""
