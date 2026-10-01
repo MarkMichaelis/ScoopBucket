@@ -19,7 +19,10 @@
 #   gh iv 390 -R owner/repo      -> the same, for another repository; also
 #                                   --repo owner/repo and --repo=owner/repo.
 #                                   -R with no repository exits 2.
+# Without -R, gh's saved default for the clone wins (`gh repo set-default`);
+# when there is none -- a clone with several remotes on a fresh machine --
+# origin's GitHub repository is used instead of failing (#443).
 # A leading '#' on the number is stripped, so `gh iv #390` works too. -s and
 # --summary are still accepted, and do nothing, so older habits keep working.
 iv: |-
-  !n=""; r=""; while [ $# -gt 0 ]; do case "$1" in -s|--summary) shift;; -R|--repo) if [ $# -lt 2 ]; then echo "gh iv: $1 needs <owner/repo>" >&2; exit 2; fi; r="$2"; shift 2;; --repo=*) r="${1#--repo=}"; if [ -z "$r" ]; then echo "gh iv: --repo= needs <owner/repo>" >&2; exit 2; fi; shift;; *) n=${1#\#}; shift;; esac; done; if [ -z "$n" ]; then echo "usage: gh iv <issue-number> [-R <owner/repo>]" >&2; exit 2; fi; gh issue view "$n" ${r:+-R "$r"} --json number,title,body --jq '("#" + (.number|tostring) + " " + .title), ([(.body // "") | split("\n\n")[] | select(length > 0) | select(startswith("#") or startswith(">") or startswith("|") or startswith("```") or startswith("<!--") | not)] | first // "(no body)")'
+  !n=""; r=""; while [ $# -gt 0 ]; do case "$1" in -s|--summary) shift;; -R|--repo) if [ $# -lt 2 ]; then echo "gh iv: $1 needs <owner/repo>" >&2; exit 2; fi; r="$2"; shift 2;; --repo=*) r="${1#--repo=}"; if [ -z "$r" ]; then echo "gh iv: --repo= needs <owner/repo>" >&2; exit 2; fi; shift;; *) n=${1#\#}; shift;; esac; done; if [ -z "$n" ]; then echo "usage: gh iv <issue-number> [-R <owner/repo>]" >&2; exit 2; fi; if [ -z "$r" ] && [ -z "$(git config --get-regexp '^remote\..*\.gh-resolved$' 2>/dev/null)" ]; then u=$(git remote get-url origin 2>/dev/null); case "$u" in *github.com[:/]*) r=${u#*github.com[:/]}; r=${r%.git};; esac; fi; gh issue view "$n" ${r:+-R "$r"} --json number,title,body --jq '("#" + (.number|tostring) + " " + .title), ([(.body // "") | split("\n\n")[] | select(length > 0) | select(startswith("#") or startswith(">") or startswith("|") or startswith("```") or startswith("<!--") | not)] | first // "(no body)")'

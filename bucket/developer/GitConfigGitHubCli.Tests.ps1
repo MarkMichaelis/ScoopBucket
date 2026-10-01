@@ -173,6 +173,35 @@ Describe "Install $name" -Tag 'Heavy', 'Install' {
         }
     }
 
+    It 'uses origin when a multi-remote clone has no saved gh default (#443)' {
+        # A clone with origin + another remote and no `gh repo set-default`:
+        # plain `gh issue view` refuses to guess, so gh iv must fall back to
+        # origin's repository. Built from scratch so the developer's clones and
+        # gh defaults are never touched.
+        if (-not $script:ghAuthed -or -not $script:probeIssue) {
+            Set-ItResult -Skipped -Because 'gh not authenticated or no issues to probe'
+            return
+        }
+        $clone = Join-Path ([System.IO.Path]::GetTempPath()) ("gh-iv-origin-" + [guid]::NewGuid().ToString('N'))
+        git init -q $clone
+        try {
+            git -C $clone remote add origin 'https://github.com/MarkMichaelis/ScoopBucket.git'
+            git -C $clone remote add upstream 'https://github.com/IntelliTect-Samples/IntelliSDLC.ai.git'
+            Push-Location $clone
+            try {
+                # Without a default, gh either refuses (interactive) or silently
+                # prefers the remote named 'upstream' (non-interactive) -- so
+                # assert WHICH repository answered, not just that one did.
+                $expected = gh issue view $script:probeIssue -R MarkMichaelis/ScoopBucket --json number,title --jq '"#" + (.number|tostring) + " " + .title'
+                $out = @(gh iv $script:probeIssue)
+                $LASTEXITCODE | Should -Be 0 -Because 'gh iv must resolve origin rather than demand a default'
+                $out[0] | Should -BeExactly $expected -Because "origin is MarkMichaelis/ScoopBucket, not the 'upstream' remote"
+            }
+            finally { Pop-Location }
+        }
+        finally { Remove-Item -LiteralPath $clone -Recurse -Force -ErrorAction Ignore }
+    }
+
     It 'exits 2, rather than looping forever, when -R or --repo= has no repository (#440)' {
         # Before the guard, a trailing -R made `shift 2` fail without shifting
         # and the argument loop never ended. Each call is bounded by a job
