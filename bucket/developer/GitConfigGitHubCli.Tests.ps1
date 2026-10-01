@@ -285,7 +285,7 @@ Describe "Behaviour $sut (unit)" -Tag 'Light', 'Unit' {
         $yml | Should -Match '(?m)^iv:'
         # gh only runs an expansion through POSIX sh when it is '!'-prefixed;
         # without the bang the whole one-liner would be treated as gh args.
-        $yml | Should -Match '(?m)^\s*!s=0;'
+        $yml | Should -Match '(?m)^iv: \|-\r?\n\s+!'
     }
 
     It 'warns and returns without throwing when gh is not installed' {
