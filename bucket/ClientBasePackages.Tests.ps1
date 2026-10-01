@@ -88,3 +88,34 @@ Describe 'ClientBasePackages: Epubor manifest (#394)' -Tag 'Light','Bundle' {
         @($script:epubor.url) | Should -Contain 'https://download.epubor.com/epubor_ultimate.exe'
     }
 }
+
+Describe 'ClientBasePackages: Signal user-scope declaration (#433)' -Tag 'Light','Bundle' {
+
+    # Signal's current releases ship a per-user NSIS installer with no
+    # machine-applicable variant. With no Scope declared, the schema default
+    # 'global' makes Install-WingetPackage pass `--scope machine`, and winget
+    # then walks backwards through manifest versions hunting for one that is
+    # machine-applicable. It silently lands on 6.1.0 -- released 2022-12-15 --
+    # and runs it with /S /ALLUSERS, so `Install-Package -Name Signal` puts a
+    # years-stale build of a security-focused messenger on the machine while
+    # 8.28.0 is current. Verified against live winget: `winget show --id
+    # OpenWhisperSystems.Signal --version 8.28.0 --scope machine` reports
+    # "No applicable installer found", while 6.1.0 resolves fine.
+    #
+    # Scope='user' is the fix, and these guards keep it from silently
+    # regressing -- dropping the property restores the default 'global' and
+    # the stale-version walk comes back with no other visible symptom.
+
+    It 'declares Scope=user so winget cannot walk back to a stale machine-scope build' {
+        $signal = @($script:pkgs | Where-Object Name -EQ 'Signal')
+        $signal.Count     | Should -Be 1
+        $signal[0].Id     | Should -Be 'OpenWhisperSystems.Signal'
+        $signal[0].Scope  | Should -Be 'user'
+    }
+
+    It 'records why Signal is pinned to user scope' {
+        $signal = @($script:pkgs | Where-Object Name -EQ 'Signal')[0]
+        $signal.Notes | Should -Match 'user'
+        $signal.Notes | Should -Match '#433'
+    }
+}
