@@ -209,7 +209,10 @@ Describe "Behaviour $sut (unit)" -Tag 'Light', 'Unit' {
             Remove-Item "Env:\$tokenVar" -ErrorAction Ignore
         }
 
-        . $script:configurator *>$null
+        # Captured rather than discarded so the test below can assert on which
+        # branch the self-invocation actually took, instead of only on what it
+        # failed to write.
+        $script:loadOutput = . $script:configurator *>&1
     }
 
     AfterAll {
@@ -236,6 +239,12 @@ Describe "Behaviour $sut (unit)" -Tag 'Light', 'Unit' {
         # the configurator self-invokes it, so this asserts that the load above
         # could not have run `gh auth setup-git` -- on a developer box and equally on
         # a CI runner whose GITHUB_TOKEN would otherwise authenticate gh.
+        #
+        # Two signals, because either alone is weak: the warning proves the
+        # credential step reached a skip branch (the file check alone would pass
+        # vacuously if the step never ran at all), and the config check proves
+        # nothing was written even if some future branch stops warning.
+        ($script:loadOutput | Out-String) | Should -Match 'gh not found|not authenticated'
         if (Test-Path -LiteralPath $script:gitConfigSandbox) {
             (Get-Content -LiteralPath $script:gitConfigSandbox -Raw) | Should -Not -Match 'credential'
         }
