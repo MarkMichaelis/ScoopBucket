@@ -175,6 +175,9 @@ sudo scoop install MarkMichaelis/UpdateBucketOnWindowsUpdate
 Get-Content "$env:LOCALAPPDATA\MarkMichaelis.ScoopBucket\UpdateBucketOnWindowsUpdate\UpdateBucketOnWindowsUpdate.log" -Tail 50
 ```
 
+A failed run exits 1 and is not retried until the next qualifying Windows
+update; retry it immediately by running the staged
+`%ProgramData%\MarkMichaelis.ScoopBucket\UpdateBucketOnWindowsUpdate\Invoke-BucketUpdateAfterWindowsUpdate.ps1 -Force`.
 Like `RegisterBucketModule`, no bundle depends on it. Reverse it with
 `sudo scoop uninstall UpdateBucketOnWindowsUpdate`.
 

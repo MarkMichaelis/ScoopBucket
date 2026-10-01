@@ -11,7 +11,10 @@
        Successful" events (System log, provider
        Microsoft-Windows-WindowsUpdateClient, ID 19) since then.
     3. Records the new marker BEFORE updating, so a burst of events that
-       triggers the task again later sees nothing new and skips.
+       triggers the task again later sees nothing new and skips. The flip
+       side: a failed update is not retried automatically; the next
+       qualifying Windows update (or a manual -Force run) retries it. If the
+       event check itself fails, the marker is left alone and the run exits 1.
     4. Skips (exit 0) when every event's update title matches
        -ExcludeTitlePattern -- by default Defender definition updates and
        Microsoft Store app updates, which install several times a day.
@@ -95,7 +98,7 @@ function Get-WindowsUpdateInstalledEvent {
     Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue | ForEach-Object {
         [pscustomobject]@{
             TimeCreated = $_.TimeCreated
-            Title       = [string]$_.Properties[0].Value
+            Title       = if ($_.Properties.Count -gt 0) { [string]$_.Properties[0].Value } else { '' }
         }
     }
 }
@@ -229,8 +232,14 @@ function Invoke-BucketUpdateAfterWindowsUpdate {
     Limit-BucketUpdateLog -Path $log -MaxBytes $MaxLogBytes
 
     $now = Get-Date
-    $since = Get-BucketUpdateLastRun -Path $marker -Now $now
-    $qualifying = @(Select-QualifyingWindowsUpdateEvent -UpdateEvent @(Get-WindowsUpdateInstalledEvent -Since $since) -Since $since -ExcludeTitlePattern $ExcludeTitlePattern)
+    try {
+        $since = Get-BucketUpdateLastRun -Path $marker -Now $now
+        $qualifying = @(Select-QualifyingWindowsUpdateEvent -UpdateEvent @(Get-WindowsUpdateInstalledEvent -Since $since) -Since $since -ExcludeTitlePattern $ExcludeTitlePattern)
+    } catch {
+        # Leave the marker alone so the next trigger re-examines these events.
+        Write-BucketUpdateLog -Path $log -Message "ERROR: checking for installed Windows updates failed: $($_.Exception.Message)"
+        return 1
+    }
     # Record the check before updating: later triggers from the same burst
     # (or events that arrived during the trigger delay) then see nothing new.
     Set-BucketUpdateLastRun -Path $marker -At $now

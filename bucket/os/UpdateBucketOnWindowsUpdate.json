@@ -7,10 +7,11 @@
     "Task: \\MarkMichaelis.ScoopBucket\\UpdateBucketOnWindowsUpdate. Inspect with 'Get-ScheduledTask -TaskPath \\MarkMichaelis.ScoopBucket\\' or Task Scheduler.",
     "Log: %LOCALAPPDATA%\\MarkMichaelis.ScoopBucket\\UpdateBucketOnWindowsUpdate\\UpdateBucketOnWindowsUpdate.log (rotated at 1 MB; one .1 generation kept).",
     "Defender definition updates and Microsoft Store app updates also raise Event ID 19 several times a day; the runner skips the bucket update when those are the only updates installed since its last check.",
+    "A failed bucket update is not retried automatically: the run exits 1 (see Last Run Result and the log), and the next qualifying Windows update retries it. To retry now: & \"$env:ProgramData\\MarkMichaelis.ScoopBucket\\UpdateBucketOnWindowsUpdate\\Invoke-BucketUpdateAfterWindowsUpdate.ps1\" -Force",
     "The task runs only while you are logged on (no stored password); an update installed while logged off is picked up by the next Windows Update event after logon.",
     "The runner is copied to %ProgramData%\\MarkMichaelis.ScoopBucket\\UpdateBucketOnWindowsUpdate so an unelevated process cannot rewrite what runs elevated. It still imports MarkMichaelis.ScoopBucket from the scoop bucket clone, which is as writable as your scoop install."
   ],
-  "version": "1.00.000",
+  "version": "1.01.000",
   "url": [
     "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/os/UpdateBucketOnWindowsUpdate.ps1",
     "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/os/Invoke-BucketUpdateAfterWindowsUpdate.ps1"

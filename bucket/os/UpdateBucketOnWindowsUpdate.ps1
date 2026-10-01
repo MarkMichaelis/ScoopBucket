@@ -152,6 +152,10 @@ function New-WindowsUpdateTaskDefinition {
         [string]$UserId = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     )
 
+    # A path ending in '\' right before the closing quote would escape the
+    # quote under Windows command-line parsing, so trim trailing separators.
+    $RunnerPath = [IO.Path]::TrimEndingDirectorySeparator($RunnerPath)
+    $LogRoot = [IO.Path]::TrimEndingDirectorySeparator($LogRoot)
     $arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$RunnerPath`" -LogRoot `"$LogRoot`""
     $action = New-ScheduledTaskAction -Execute $PwshPath -Argument $arguments
 
@@ -256,14 +260,17 @@ function Uninstall-UpdateBucketOnWindowsUpdate {
     )
 
     $existing = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction SilentlyContinue
+    $staged = Test-Path -LiteralPath $InstallRoot
+    # The staged folder is ACL-locked to administrators, so removing it needs
+    # elevation even when the task itself is already gone.
+    if (($existing -or $staged) -and -not (Test-IsElevated)) {
+        throw "Removing the '$TaskPath$TaskName' task and its staged runner ($InstallRoot) requires an elevated session. Re-run elevated, e.g. 'sudo scoop uninstall UpdateBucketOnWindowsUpdate'."
+    }
     if ($existing) {
-        if (-not (Test-IsElevated)) {
-            throw "Removing the '$TaskPath$TaskName' task requires an elevated session. Re-run elevated, e.g. 'sudo scoop uninstall UpdateBucketOnWindowsUpdate'."
-        }
         Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Confirm:$false
         Write-Host "Removed scheduled task '$TaskPath$TaskName'."
     }
-    if (Test-Path -LiteralPath $InstallRoot) {
+    if ($staged) {
         Remove-Item -LiteralPath $InstallRoot -Recurse -Force
     }
 }
