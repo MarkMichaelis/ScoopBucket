@@ -195,6 +195,20 @@ Describe "Behaviour $sut (unit)" -Tag 'Light', 'Unit' {
         $script:priorGitConfigGlobal = $env:GIT_CONFIG_GLOBAL
         $env:GIT_CONFIG_GLOBAL = $script:gitConfigSandbox
 
+        # ...and the sandboxes are not enough on their own. gh reads a token from
+        # the environment BEFORE its config dir, so on any runner that exports
+        # GITHUB_TOKEN (GitHub Actions does) an empty GH_CONFIG_DIR still leaves gh
+        # authenticated -- and the load-time self-invocation below would then make a
+        # real `gh auth status` call and a real `gh auth setup-git` mutation inside
+        # the Light suite, which this repo defines as side-effect-free. Clearing the
+        # token variables makes gh deterministically unauthenticated here, so the
+        # credential step always takes its skip path at load time.
+        $script:priorTokens = @{}
+        foreach ($tokenVar in 'GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN') {
+            $script:priorTokens[$tokenVar] = [Environment]::GetEnvironmentVariable($tokenVar)
+            Remove-Item "Env:\$tokenVar" -ErrorAction Ignore
+        }
+
         . $script:configurator *>$null
     }
 
@@ -209,7 +223,22 @@ Describe "Behaviour $sut (unit)" -Tag 'Light', 'Unit' {
         } else {
             $env:GIT_CONFIG_GLOBAL = $script:priorGitConfigGlobal
         }
+        foreach ($tokenVar in $script:priorTokens.Keys) {
+            if ($null -ne $script:priorTokens[$tokenVar]) {
+                Set-Item "Env:\$tokenVar" -Value $script:priorTokens[$tokenVar]
+            }
+        }
         Remove-Item -LiteralPath $script:sandbox -Recurse -Force -ErrorAction Ignore
+    }
+
+    It 'leaves the global git config untouched when merely loaded' {
+        # Guards the PR gate's own contract: Light is side-effect-free. Dot-sourcing
+        # the configurator self-invokes it, so this asserts that the load above
+        # could not have run `gh auth setup-git` -- on a developer box and equally on
+        # a CI runner whose GITHUB_TOKEN would otherwise authenticate gh.
+        if (Test-Path -LiteralPath $script:gitConfigSandbox) {
+            (Get-Content -LiteralPath $script:gitConfigSandbox -Raw) | Should -Not -Match 'credential'
+        }
     }
 
     It 'parses without syntax errors' {
@@ -364,6 +393,30 @@ Describe "Behaviour $sut (unit)" -Tag 'Light', 'Unit' {
 
             Should -Invoke Set-GitHubCliAlias -Times 1 -Exactly
             Should -Invoke Set-GitCredentialHelperFromGitHubCli -Times 1 -Exactly
+        }
+
+        It 'still configures credentials when the alias step throws unexpectedly' {
+            # Independence has to survive the failures neither step anticipated,
+            # not just the guarded ones -- the credential helper is the whole
+            # point of #434, and this script is dot-sourced mid-run by
+            # GitConfigure.ps1, so an escaping exception would take the rest of
+            # that script down with it.
+            Mock Set-GitHubCliAlias -MockWith { throw 'unexpected' }
+            Mock Set-GitCredentialHelperFromGitHubCli -MockWith { }
+
+            $captured = $null
+            { $script:captured = Invoke-GitConfigGitHubCli 3>&1 } | Should -Not -Throw
+            ($script:captured | Out-String) | Should -Match 'alias configuration failed'
+            Should -Invoke Set-GitCredentialHelperFromGitHubCli -Times 1 -Exactly
+        }
+
+        It 'warns without throwing when the credential step throws unexpectedly' {
+            Mock Set-GitHubCliAlias -MockWith { }
+            Mock Set-GitCredentialHelperFromGitHubCli -MockWith { throw 'unexpected' }
+
+            $captured = $null
+            { $script:captured = Invoke-GitConfigGitHubCli 3>&1 } | Should -Not -Throw
+            ($script:captured | Out-String) | Should -Match 'credential helper configuration failed'
         }
     }
 }
