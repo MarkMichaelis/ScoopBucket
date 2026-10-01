@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/lukesampson/scoop/master/schema.json",
+  "homepage": "https://github.com/MarkMichaelis/ScoopBucket",
+  "description": "Opt-in: register a scheduled task that runs this bucket's Update-Package '*' after Windows Update installs updates (System log, WindowsUpdateClient Event ID 19). Idempotent; reversed by uninstalling.",
+  "notes": [
+    "Install from an ELEVATED shell (e.g. 'sudo scoop install MarkMichaelis/UpdateBucketOnWindowsUpdate'): the task runs as you with highest privileges, which Windows only lets an elevated session register.",
+    "Task: \\MarkMichaelis.ScoopBucket\\UpdateBucketOnWindowsUpdate. Inspect with 'Get-ScheduledTask -TaskPath \\MarkMichaelis.ScoopBucket\\' or Task Scheduler.",
+    "Log: %LOCALAPPDATA%\\MarkMichaelis.ScoopBucket\\UpdateBucketOnWindowsUpdate\\UpdateBucketOnWindowsUpdate.log (rotated at 1 MB; one .1 generation kept).",
+    "Defender definition updates and Microsoft Store app updates also raise Event ID 19 several times a day; the runner skips the bucket update when those are the only updates installed since its last check.",
+    "The task runs only while you are logged on (no stored password); an update installed while logged off is picked up by the next Windows Update event after logon.",
+    "The runner is copied to %ProgramData%\\MarkMichaelis.ScoopBucket\\UpdateBucketOnWindowsUpdate so an unelevated process cannot rewrite what runs elevated. It still imports MarkMichaelis.ScoopBucket from the scoop bucket clone, which is as writable as your scoop install."
+  ],
+  "version": "1.00.000",
+  "url": [
+    "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/os/UpdateBucketOnWindowsUpdate.ps1",
+    "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/os/Invoke-BucketUpdateAfterWindowsUpdate.ps1"
+  ],
+  "installer": {
+    "script": [
+      "& \"$dir\\UpdateBucketOnWindowsUpdate.ps1\""
+    ]
+  },
+  "uninstaller": {
+    "script": [
+      "if (((Get-PSCallStack).Command -contains 'update_app') -or (Get-Variable -Name old_version -ErrorAction SilentlyContinue)) { Write-Host 'scoop update in progress: skipping uninstaller (#401).'; return }",
+      "& \"$dir\\UpdateBucketOnWindowsUpdate.ps1\" -Uninstall"
+    ]
+  }
+}

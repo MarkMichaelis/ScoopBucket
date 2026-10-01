@@ -160,6 +160,24 @@ This is strictly opt-in (no bundle `depends` on it), idempotent, and
 `scoop uninstall RegisterBucketModule` or
 `.\Register-BucketModule.ps1 -Remove`.
 
+#### Update the bucket after Windows Update (opt-in)
+
+`UpdateBucketOnWindowsUpdate` registers a scheduled task
+(`\MarkMichaelis.ScoopBucket\UpdateBucketOnWindowsUpdate`) that runs
+`Update-Package '*'` 10 minutes after Windows Update logs "Installation
+Successful" (System log, `Microsoft-Windows-WindowsUpdateClient` Event ID 19).
+Defender definition and Microsoft Store app updates alone do not trigger a
+run. Install it from an elevated shell, because the task runs with highest
+privileges:
+
+```powershell
+sudo scoop install MarkMichaelis/UpdateBucketOnWindowsUpdate
+Get-Content "$env:LOCALAPPDATA\MarkMichaelis.ScoopBucket\UpdateBucketOnWindowsUpdate\UpdateBucketOnWindowsUpdate.log" -Tail 50
+```
+
+Like `RegisterBucketModule`, no bundle depends on it. Reverse it with
+`sudo scoop uninstall UpdateBucketOnWindowsUpdate`.
+
 Top-level helpers for cross-bundle queries:
 
 ```powershell
