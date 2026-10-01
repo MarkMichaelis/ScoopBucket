@@ -33,6 +33,8 @@ Function Test-GhAuthenticated {
         [ValidateNotNull()]
         [scriptblock] $StatusProbe = { & gh auth status 2>&1 | Out-Null; $LASTEXITCODE }
     )
+    # -Last 1: the default probe emits exactly one object, but a caller-supplied
+    # probe that lets gh's own output through would emit the exit code last.
     $exitCode = & $StatusProbe | Select-Object -Last 1
     return ($exitCode -eq 0)
 }
@@ -68,11 +70,13 @@ Function Set-GitCredentialHelperFromGitHubCli {
     # credential.helper. When gh came from scoop that path is
     # C:\ProgramData\scoop\apps\gh\current\bin\gh.exe, so `scoop uninstall gh`
     # leaves git auth pointing at a missing executable -- re-run this script (or
-    # `gh auth setup-git`) after moving or removing gh. The path gh records is
-    # its OWN location, not the shim that launched it, so a machine carrying both
-    # a scoop shim and C:\Program Files\GitHub CLI\gh.exe gets whichever install
-    # PATH resolved first -- the PATH entry that won is echoed below to make that
-    # visible.
+    # `gh auth setup-git`) after moving or removing gh. The path gh records is its
+    # OWN location rather than the shim that launched it -- a scoop shim at
+    # scoop\shims\gh.exe records scoop\apps\gh\current\bin\gh.exe -- so on a
+    # machine carrying both a scoop gh and C:\Program Files\GitHub CLI\gh.exe the
+    # install that PATH resolved first is the one baked in. The PATH entry that
+    # won is echoed below, deliberately labelled as the PATH entry and not as the
+    # recorded helper value, since the two differ for a shim.
     [CmdletBinding()]
     param()
     $ghCommand = Get-Command gh -ErrorAction Ignore
@@ -92,7 +96,7 @@ Function Set-GitCredentialHelperFromGitHubCli {
         return
     }
 
-    Write-Host "git credential helper configured via gh auth setup-git (from $($ghCommand.Source))."
+    Write-Host "git credential helper configured via gh auth setup-git (gh on PATH: $($ghCommand.Source))."
 }
 
 Function Set-GitHubCliAlias {
@@ -131,13 +135,21 @@ Function Set-GitHubCliAlias {
 }
 
 Function Invoke-GitConfigGitHubCli {
-    # All per-user `gh`-driven configuration this bucket owns. Each step carries
-    # its own guards and warns rather than throwing, so they stay independent: a
+    # All per-user `gh`-driven configuration this bucket owns. Each step guards
+    # its own known failures and warns rather than throwing; the try/catch pairs
+    # below cover the unforeseen ones, so the steps are genuinely independent: a
     # missing gh-aliases.yml must not cost you the credential helper, and an
-    # unauthenticated gh must not cost you the aliases.
+    # unauthenticated gh must not cost you the aliases. It also keeps a surprise
+    # here from aborting the rest of GitConfigure.ps1, which dot-sources this
+    # script mid-run -- the same reason the Register-CliCompletion calls on either
+    # side of that dot-source are wrapped.
     [CmdletBinding()]
     param()
-    Set-GitHubCliAlias
-    Set-GitCredentialHelperFromGitHubCli
+    try { Set-GitHubCliAlias } catch {
+        Write-Warning "GitHub CLI alias configuration failed: $($_.Exception.Message)"
+    }
+    try { Set-GitCredentialHelperFromGitHubCli } catch {
+        Write-Warning "git credential helper configuration failed: $($_.Exception.Message)"
+    }
 }
 Invoke-GitConfigGitHubCli
