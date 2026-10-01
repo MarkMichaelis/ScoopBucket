@@ -57,28 +57,62 @@ BeforeDiscovery {
     # fallback: the dot-source throws and the install dies. scoop lands `url`
     # entries FLAT in $dir, which is exactly where a $PSScriptRoot-relative
     # sibling path looks, so listing it is the whole fix.
+    #
+    # Don't assume a script's manifest shares its basename: PowerShell.ps1 is
+    # the one installer script behind three differently-named manifests
+    # (PowerShellCore/CorePreview/Windows.json). Instead parse each manifest's
+    # own `installer.script` for the .ps1 it actually invokes, and key off
+    # that -- the same ground truth scoop itself uses.
+    $script:EntryScriptManifests = @{}
+    Get-ChildItem -Path $script:BucketRoot -Filter '*.json' -File -Recurse | ForEach-Object {
+        try { $json = Get-Content -Raw -LiteralPath $_.FullName | ConvertFrom-Json } catch { return }
+        # installer.script is either one string or an array of strings (e.g.
+        # PowerShellCore.json winget-upgrades first, THEN dot-invokes
+        # PowerShell.ps1) -- join so either shape is searched uniformly.
+        $invoke = @($json.installer.script) -join "`n"
+        if (-not $invoke) { return }
+        $entryMatch = [regex]::Match($invoke, '(?<name>[\w.-]+\.ps1)')
+        if (-not $entryMatch.Success) { return }
+        $entryPath = Join-Path $_.DirectoryName $entryMatch.Groups['name'].Value
+        if (-not $script:EntryScriptManifests.ContainsKey($entryPath)) {
+            $script:EntryScriptManifests[$entryPath] = New-Object System.Collections.Generic.List[string]
+        }
+        $script:EntryScriptManifests[$entryPath].Add($_.FullName)
+    }
+
+    # Sibling-reference idioms seen in this repo: Join-Path $PSScriptRoot
+    # '<name>.ps1' (single-quoted literal) and the double-quoted interpolated
+    # form "$PSScriptRoot\<name>.ps1" / "$PSScriptRoot/<name>.ps1" that
+    # GitConfigure.ps1 uses for its three dot-sources.
+    $script:SiblingRefPattern = "PSScriptRoot\s+'(?<sib>[^']+\.ps1)'|" +
+        '\$PSScriptRoot[\\/](?<sib>[\w.-]+\.ps1)'
+
     $script:SiblingCases = @()
     Get-ChildItem -Path $script:BucketRoot -Filter '*.ps1' -File -Recurse |
         Where-Object { $_.Name -notlike '*.Tests.ps1' } | ForEach-Object {
             $scriptPath = $_.FullName
-            $manifestPath = [System.IO.Path]::ChangeExtension($scriptPath, '.json')
-            if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return }
-            try { $json = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json } catch { return }
-            $urls = @(@($json.url) | Where-Object { $_ -is [string] })
+            if (-not $script:EntryScriptManifests.ContainsKey($scriptPath)) { return }
 
+            $ownName = $_.Name
             $text = Get-Content -Raw -LiteralPath $scriptPath
-            foreach ($match in [regex]::Matches($text, "PSScriptRoot\s+'(?<sib>[^']+\.ps1)'")) {
-                $sibling = $match.Groups['sib'].Value
-                if ($sibling -eq $_.Name) { continue }
-                $script:SiblingCases += [pscustomobject]@{
-                    Script   = $_.Name
-                    Manifest = [System.IO.Path]::GetFileName($manifestPath)
-                    Sibling  = $sibling
-                    Urls     = $urls
+            $siblings = [regex]::Matches($text, $script:SiblingRefPattern) |
+                ForEach-Object { $_.Groups['sib'].Value } |
+                Where-Object { $_ -and $_ -ne $ownName } | Select-Object -Unique
+
+            foreach ($manifestPath in $script:EntryScriptManifests[$scriptPath]) {
+                try { $json = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json } catch { continue }
+                $urls = @(@($json.url) | Where-Object { $_ -is [string] })
+                foreach ($sibling in $siblings) {
+                    $script:SiblingCases += [pscustomobject]@{
+                        Script   = $_.Name
+                        Manifest = [System.IO.Path]::GetFileName($manifestPath)
+                        Sibling  = $sibling
+                        Urls     = $urls
+                    }
                 }
             }
         }
-    $script:SiblingCases = @($script:SiblingCases | Sort-Object Script, Sibling -Unique)
+    $script:SiblingCases = @($script:SiblingCases | Sort-Object Script, Manifest, Sibling -Unique)
 }
 
 Describe 'Manifest self-referencing URLs resolve to files in the repo' -Tag 'Light' {
