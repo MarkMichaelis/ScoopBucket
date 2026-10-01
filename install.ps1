@@ -254,8 +254,8 @@ function Move-OrphanedScoopRoot {
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Root
   )
   $backup = Get-ScoopRootBackupPath -Root $Root -Timestamp (Get-Date -Format 'yyyyMMdd-HHmmss')
-  Write-Warning "'$Root' exists but has no apps\scoop; moving it to '$backup' so the installer can proceed."
   if (-not $PSCmdlet.ShouldProcess($Root, "Move orphaned scoop root to '$backup'")) { return $false }
+  Write-Warning "'$Root' exists but has no apps\scoop; moving it to '$backup' so the installer can proceed."
   try {
     Move-Item -LiteralPath $Root -Destination $backup -Force -ErrorAction Stop
   } catch {
