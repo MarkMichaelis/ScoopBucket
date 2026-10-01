@@ -95,6 +95,12 @@ Describe 'New-WindowsUpdateTaskDefinition' -Tag 'Light' {
         $def.Settings.ExecutionTimeLimit | Should -Be 'PT2H'
     }
 
+    It 'trims a trailing backslash so it cannot escape the closing quote' {
+        $trailing = New-WindowsUpdateTaskDefinition -RunnerPath 'C:\Runner Dir\runner.ps1' -LogRoot 'C:\Log Dir\' -PwshPath 'pwsh.exe' -UserId 'DOMAIN\someone'
+        $trailing.Action.Arguments | Should -Not -Match '\\"'
+        $trailing.Action.Arguments | Should -Match ([regex]::Escape('-LogRoot "C:\Log Dir"'))
+    }
+
     It 'runs as the given user with highest privileges, without a stored password' {
         $def.Principal.UserId | Should -Be 'DOMAIN\someone'
         $def.Principal.RunLevel | Should -Be 'Highest'
@@ -165,6 +171,21 @@ Describe 'Uninstall-UpdateBucketOnWindowsUpdate' -Tag 'Light' {
         Remove-Item -LiteralPath $script:tdInstall -Recurse -Force
         { Uninstall-UpdateBucketOnWindowsUpdate -TaskName 'T1' -TaskPath '\P1\' -InstallRoot $script:tdInstall } | Should -Not -Throw
         Should -Invoke Unregister-ScheduledTask -Times 0 -Exactly
+    }
+
+    It 'unelevated with the task already gone but the locked runner folder left: actionable message, folder kept' {
+        Mock Test-IsElevated { $false }
+        Mock Get-ScheduledTask { }
+        { Uninstall-UpdateBucketOnWindowsUpdate -TaskName 'T1' -TaskPath '\P1\' -InstallRoot $script:tdInstall } |
+            Should -Throw -ExpectedMessage '*elevated*'
+        Test-Path -LiteralPath $script:tdInstall | Should -BeTrue
+    }
+
+    It 'unelevated with nothing left to remove is a no-op' {
+        Mock Test-IsElevated { $false }
+        Mock Get-ScheduledTask { }
+        Remove-Item -LiteralPath $script:tdInstall -Recurse -Force
+        { Uninstall-UpdateBucketOnWindowsUpdate -TaskName 'T1' -TaskPath '\P1\' -InstallRoot $script:tdInstall } | Should -Not -Throw
     }
 
     It 'refuses to remove an existing task unelevated, with an actionable message' {
@@ -316,6 +337,14 @@ Describe 'Invoke-BucketUpdateAfterWindowsUpdate' -Tag 'Light' {
         Mock Update-Package { throw 'bucket exploded' }
         Invoke-BucketUpdateAfterWindowsUpdate -LogRoot $script:tdLog | Should -Be 1
         (Get-Content -LiteralPath $script:tdLogFile -Raw) | Should -Match 'bucket exploded'
+    }
+
+    It 'exits 1, logs, and leaves the marker alone when the event check itself fails' {
+        Mock Get-WindowsUpdateInstalledEvent { throw 'event log unavailable' }
+        Invoke-BucketUpdateAfterWindowsUpdate -LogRoot $script:tdLog | Should -Be 1
+        Should -Invoke Update-Package -Times 0 -Exactly
+        Test-Path -LiteralPath (Join-Path $script:tdLog 'last-run.txt') | Should -BeFalse
+        (Get-Content -LiteralPath $script:tdLogFile -Raw) | Should -Match 'event log unavailable'
     }
 
     It 'is twice-runnable: the second check sees no new events since the first' {
