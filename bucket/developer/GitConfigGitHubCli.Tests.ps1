@@ -73,7 +73,7 @@ Describe "Install $name" -Tag 'Heavy', 'Install' {
         }
     }
 
-    It 'executes gh iv with an issue number and emits the compact title line' {
+    It 'executes gh iv with an issue number and emits the title plus a summary by default (#440)' {
         if (-not $script:ghAuthed) {
             Set-ItResult -Skipped -Because 'gh not installed or not authenticated'
             return
@@ -84,9 +84,29 @@ Describe "Install $name" -Tag 'Heavy', 'Install' {
         }
         Push-Location $PSScriptRoot
         try {
-            $out = gh iv $script:probeIssue
+            $out = @(gh iv $script:probeIssue)
             $LASTEXITCODE | Should -Be 0
-            ($out -join "`n") | Should -Match "^#$($script:probeIssue) \S"
+            # Title line plus at least one summary line -- "(no body)" rather
+            # than nothing when the issue has no body.
+            $out.Count | Should -BeGreaterOrEqual 2
+            $out[0] | Should -Match "^#$($script:probeIssue) \S"
+            $out[1] | Should -Not -BeNullOrEmpty
+        }
+        finally { Pop-Location }
+    }
+
+    It 'reads another repository with -R, from a folder that is no repository (#440)' {
+        if (-not $script:ghAuthed -or -not $script:probeIssue) {
+            Set-ItResult -Skipped -Because 'gh not authenticated or no issues to probe'
+            return
+        }
+        Push-Location ([System.IO.Path]::GetTempPath())
+        try {
+            foreach ($form in @(@('-R', 'MarkMichaelis/ScoopBucket'), @('--repo=MarkMichaelis/ScoopBucket'))) {
+                $out = @(gh iv $script:probeIssue @form)
+                $LASTEXITCODE | Should -Be 0 -Because "gh iv <n> $($form -join ' ') must resolve the named repository"
+                $out[0] | Should -Match "^#$($script:probeIssue) \S"
+            }
         }
         finally { Pop-Location }
     }
@@ -105,20 +125,17 @@ Describe "Install $name" -Tag 'Heavy', 'Install' {
         finally { Pop-Location }
     }
 
-    It 'executes gh iv -s and adds a body summary line' {
+    It 'still accepts -s, now a no-op, so older habits keep working (#440)' {
         if (-not $script:ghAuthed -or -not $script:probeIssue) {
             Set-ItResult -Skipped -Because 'gh not authenticated or no issues to probe'
             return
         }
         Push-Location $PSScriptRoot
         try {
-            $out = @(gh iv $script:probeIssue -s)
+            $plain = @(gh iv $script:probeIssue)
+            $withS = @(gh iv $script:probeIssue -s)
             $LASTEXITCODE | Should -Be 0
-            # Title line plus at least one summary line -- the summary branch
-            # emits "(no body)" rather than nothing when the issue has no body.
-            $out.Count | Should -BeGreaterOrEqual 2
-            $out[0] | Should -Match "^#$($script:probeIssue) \S"
-            $out[1] | Should -Not -BeNullOrEmpty
+            ($withS -join "`n") | Should -BeExactly ($plain -join "`n")
         }
         finally { Pop-Location }
     }
