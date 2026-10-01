@@ -173,6 +173,30 @@ Describe "Install $name" -Tag 'Heavy', 'Install' {
         }
     }
 
+    It 'exits 2, rather than looping forever, when -R or --repo= has no repository (#440)' {
+        # Before the guard, a trailing -R made `shift 2` fail without shifting
+        # and the argument loop never ended. Each call is bounded by a job
+        # timeout so a regression fails this test instead of hanging the suite.
+        if (-not $script:ghAvailable) {
+            Set-ItResult -Skipped -Because 'gh not installed'
+            return
+        }
+        foreach ($argv in @(@('85', '-R'), @('-R'), @('85', '--repo='))) {
+            $job = Start-Job -ScriptBlock { param($a) $o = (gh iv @a 2>&1) -join "`n"; [pscustomobject]@{ Code = $LASTEXITCODE; Out = $o } } -ArgumentList (, $argv)
+            try {
+                $done = Wait-Job $job -Timeout 20
+                $done | Should -Not -BeNullOrEmpty -Because "gh iv $($argv -join ' ') must return, not loop"
+                $result = Receive-Job $job
+                $result.Code | Should -Be 2
+                $result.Out | Should -Match 'needs <owner/repo>'
+            }
+            finally {
+                Stop-Job $job -ErrorAction Ignore
+                Remove-Job $job -Force -ErrorAction Ignore
+            }
+        }
+    }
+
     It 'exits 2 with a usage message when no issue number is given' {
         if (-not $script:ghAvailable) {
             Set-ItResult -Skipped -Because 'gh not installed'
