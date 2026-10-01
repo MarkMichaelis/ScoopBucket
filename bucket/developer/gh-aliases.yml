@@ -11,11 +11,14 @@
 # one-liners dense with quotes and `$`, and a block scalar keeps them literal
 # with no escaping.
 
-# gh iv <issue-number> [-s|--summary] -- compact issue view.
-#   gh iv 390     -> "#390 <title>"
-#   gh iv 390 -s  -> title plus the first *prose* paragraph of the body,
-#                    skipping headings, blockquotes, tables, code fences and
-#                    HTML comments so the summary is never markdown scaffolding.
-# A leading '#' on the number is stripped, so `gh iv #390` works too.
+# gh iv <issue-number> [-R <owner/repo>] -- compact issue view: the title,
+# then the first *prose* paragraph of the body, skipping headings,
+# blockquotes, tables, code fences and HTML comments so the summary is never
+# markdown scaffolding (#440: the summary is the default).
+#   gh iv 390                    -> "#390 <title>" + summary
+#   gh iv 390 -R owner/repo      -> the same, for another repository; also
+#                                   --repo owner/repo and --repo=owner/repo
+# A leading '#' on the number is stripped, so `gh iv #390` works too. -s and
+# --summary are still accepted, and do nothing, so older habits keep working.
 iv: |-
-  !s=0; n=""; for a in "$@"; do case "$a" in -s|--summary) s=1;; *) n=${a#\#};; esac; done; if [ -z "$n" ]; then echo "usage: gh iv <issue-number> [-s|--summary]" >&2; exit 2; fi; if [ "$s" = 1 ]; then gh issue view "$n" --json number,title,body --jq '("#" + (.number|tostring) + " " + .title), ([(.body // "") | split("\n\n")[] | select(length > 0) | select(startswith("#") or startswith(">") or startswith("|") or startswith("```") or startswith("<!--") | not)] | first // "(no body)")'; else gh issue view "$n" --json number,title --jq '"#" + (.number|tostring) + " " + .title'; fi
+  !n=""; r=""; while [ $# -gt 0 ]; do case "$1" in -s|--summary) shift;; -R|--repo) r="$2"; shift 2;; --repo=*) r="${1#--repo=}"; shift;; *) n=${1#\#}; shift;; esac; done; if [ -z "$n" ]; then echo "usage: gh iv <issue-number> [-R <owner/repo>]" >&2; exit 2; fi; gh issue view "$n" ${r:+-R "$r"} --json number,title,body --jq '("#" + (.number|tostring) + " " + .title), ([(.body // "") | split("\n\n")[] | select(length > 0) | select(startswith("#") or startswith(">") or startswith("|") or startswith("```") or startswith("<!--") | not)] | first // "(no body)")'
