@@ -14,7 +14,10 @@
     deleted as "unreferenced" (filename greps miss URL strings), the
     manifests silently break with a 404 at `scoop update` time.
 
-    See #265.
+    Also verifies the inverse: every sibling .ps1 an installer script
+    dot-sources via $PSScriptRoot must be listed in its manifest's `url`
+    array, or it is simply absent from the scoop app dir at install time.
+    See #265, #431.
 #>
 
 BeforeDiscovery {
@@ -45,10 +48,49 @@ BeforeDiscovery {
             }
         }
     }
+
+    # The inverse check (#431): an installer script that dot-sources a sibling
+    # .ps1 via $PSScriptRoot only works if scoop actually downloaded that
+    # sibling, i.e. the manifest lists it in `url` too. Unlike a committed
+    # .jsonc snapshot -- which the module's import cmdlets can fall back to
+    # resolving from the bucket checkout -- a dot-sourced helper script has no
+    # fallback: the dot-source throws and the install dies. scoop lands `url`
+    # entries FLAT in $dir, which is exactly where a $PSScriptRoot-relative
+    # sibling path looks, so listing it is the whole fix.
+    $script:SiblingCases = @()
+    Get-ChildItem -Path $script:BucketRoot -Filter '*.ps1' -File -Recurse |
+        Where-Object { $_.Name -notlike '*.Tests.ps1' } | ForEach-Object {
+            $scriptPath = $_.FullName
+            $manifestPath = [System.IO.Path]::ChangeExtension($scriptPath, '.json')
+            if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return }
+            try { $json = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json } catch { return }
+            $urls = @(@($json.url) | Where-Object { $_ -is [string] })
+
+            $text = Get-Content -Raw -LiteralPath $scriptPath
+            foreach ($match in [regex]::Matches($text, "PSScriptRoot\s+'(?<sib>[^']+\.ps1)'")) {
+                $sibling = $match.Groups['sib'].Value
+                if ($sibling -eq $_.Name) { continue }
+                $script:SiblingCases += [pscustomobject]@{
+                    Script   = $_.Name
+                    Manifest = [System.IO.Path]::GetFileName($manifestPath)
+                    Sibling  = $sibling
+                    Urls     = $urls
+                }
+            }
+        }
+    $script:SiblingCases = @($script:SiblingCases | Sort-Object Script, Sibling -Unique)
 }
 
 Describe 'Manifest self-referencing URLs resolve to files in the repo' -Tag 'Light' {
     It 'manifest <_.Manifest> references existing local path <_.LocalPath>' -ForEach $script:UrlCases {
         Test-Path -LiteralPath $_.LocalPath -PathType Leaf | Should -BeTrue -Because "URL $($_.Url) would 404 at scoop install/update time"
+    }
+}
+
+Describe 'Dot-sourced sibling scripts are shipped by their manifest' -Tag 'Light' {
+    It '<_.Manifest> ships <_.Sibling>, dot-sourced by <_.Script>' -ForEach $script:SiblingCases {
+        $sibling = $_.Sibling
+        ($_.Urls | Where-Object { $_.EndsWith("/$sibling", [System.StringComparison]::OrdinalIgnoreCase) }) |
+            Should -Not -BeNullOrEmpty -Because "$($_.Script) dot-sources $sibling from `$PSScriptRoot, but $($_.Manifest) does not list it in url[] -- so scoop never downloads it into the app dir and the install dies there (#431)"
     }
 }
