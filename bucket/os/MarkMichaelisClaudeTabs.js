@@ -166,7 +166,7 @@ function withLock(fn) {
   const lock = path.join(tabsRoot, 'tab-roots.lock');
   fs.mkdirSync(tabsRoot, { recursive: true });
   let fd = null;
-  for (let i = 0; i < 40 && fd === null; i++) {
+  for (let i = 0; i < 140 && fd === null; i++) {
     try {
       fd = fs.openSync(lock, 'wx');
     } catch {

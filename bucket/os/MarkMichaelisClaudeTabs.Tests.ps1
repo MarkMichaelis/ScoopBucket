@@ -282,6 +282,28 @@ Describe 'Claude tabs: colors by root' -Tag 'Light', 'Bucket' {
         $lock | Should -Not -Exist
     }
 
+    It 'waits for a lock another shell holds, then assigns against what that shell wrote' {
+        New-Item -ItemType Directory -Path $script:store -Force | Out-Null
+        $lock = Join-Path $script:state 'tab-roots.lock'
+        New-Item -ItemType File -Path $lock -Force | Out-Null
+        # The other shell writes its root and releases the lock about half a second later.
+        $other = Start-Job {
+            param($lock, $file)
+            Start-Sleep -Milliseconds 500
+            '{ "version": 2, "colors": { "other/repo": "#2E86DE" }, "roots": [] }' | Set-Content -LiteralPath $file
+            Remove-Item -LiteralPath $lock
+        } -ArgumentList $lock, (Join-Path $script:store 'tab-roots.json')
+        try {
+            $color = (Get-Root $script:repo).Color
+        }
+        finally { $other | Wait-Job | Remove-Job }
+
+        $color | Should -Be '#E67E22'
+        $saved = Get-Content -LiteralPath (Join-Path $script:store 'tab-roots.json') -Raw | ConvertFrom-Json -AsHashtable
+        $saved['colors']['other/repo'] | Should -Be '#2E86DE'
+        $lock | Should -Not -Exist
+    }
+
     It 'merges a machine-local map it cannot rename only once per session' {
         $local = Join-Path $script:state 'colors.json'
         "{ `"$($script:inner.ToLowerInvariant().Replace('\', '\\'))`": `"#00838F`" }" | Set-Content -LiteralPath $local
@@ -469,6 +491,24 @@ Describe 'Claude tabs: Git Bash tabs get the same root and color' -Tag 'Light', 
         Get-BashColor (Join-Path $script:plain 'sub') | Should -Be $marked.Color
         Get-BashColor $script:inner | Should -Be (Get-Root $script:inner).Color
         Get-BashColor (Join-Path $TestDrive 'tmp') | Should -BeNullOrEmpty
+    }
+
+    It 'waits for a lock the PowerShell side holds, then assigns against what it wrote' {
+        New-Item -ItemType Directory -Path $script:store -Force | Out-Null
+        $lock = Join-Path $script:homeDir '.claude\terminal-tabs\tab-roots.lock'
+        New-Item -ItemType File -Path $lock -Force | Out-Null
+        $other = Start-Job {
+            param($lock, $file)
+            Start-Sleep -Milliseconds 500
+            '{ "version": 2, "colors": { "other/repo": "#2E86DE" }, "roots": [] }' | Set-Content -LiteralPath $file
+            Remove-Item -LiteralPath $lock
+        } -ArgumentList $lock, (Join-Path $script:store 'tab-roots.json')
+        try { $color = Get-BashColor $script:repo }
+        finally { $other | Wait-Job | Remove-Job }
+
+        $color | Should -Be '#E67E22'
+        (Get-Content -LiteralPath (Join-Path $script:store 'tab-roots.json') -Raw | ConvertFrom-Json -AsHashtable)['colors']['other/repo'] | Should -Be '#2E86DE'
+        $lock | Should -Not -Exist
     }
 
     It 'leaves a path-keyed map from an earlier version for PowerShell to migrate' {
