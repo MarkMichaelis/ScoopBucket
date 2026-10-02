@@ -128,7 +128,7 @@ function Import-WindowsTerminalSettings {
             'Remove-Variable claudeTabsModule'
         )
         $repaired = Repair-StaleLines -Path $ProfilePath -Stale 'WindowsTerminalTabs\\ClaudeTabs\.psm1' -Lines $profileLines -Companion @(
-            $staleComment, '^\s*\$claudeTabsModule = ', '^\s*if \(Test-Path \$claudeTabsModule\)', '^\s*Remove-Variable claudeTabsModule\s*$')
+            @($staleComment) + @($profileLines | Select-Object -Skip 1 | ForEach-Object { '^\s*' + [regex]::Escape($_) + '\s*$' }))
         if ($repaired -or (Add-LinesIfMissing -Path $ProfilePath -Match 'ClaudeTabs.psm1' -Lines $profileLines)) {
             $changed.Add('PowerShell profile')
         }
@@ -140,7 +140,7 @@ function Import-WindowsTerminalSettings {
             '[ -f "$HOME/.claude/scripts/claude-tabs.bash" ] && . "$HOME/.claude/scripts/claude-tabs.bash"'
         )
         $repaired = Repair-StaleLines -Path $BashrcPath -Stale 'WindowsTerminalTabs/claude-tabs\.bash' -Lines $bashLines -LfLineEndings -Companion @(
-            $staleComment, 'claude-tabs\.bash')
+            $staleComment, ('^\s*' + [regex]::Escape($bashLines[1]) + '\s*$'))
         if ($repaired -or (Add-LinesIfMissing -Path $BashrcPath -Match 'claude-tabs.bash' -Lines $bashLines -LfLineEndings)) {
             $changed.Add('.bashrc')
         }
