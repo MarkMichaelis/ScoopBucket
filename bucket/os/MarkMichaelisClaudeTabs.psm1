@@ -236,10 +236,12 @@ function Invoke-ClaudeTabStoreUpdate {
     # file so shells that discover roots at the same moment (a restored multi-tab
     # layout) cannot drop each other's entries. claude-tabs.js takes the same lock. A
     # lock older than a few seconds was left by a crashed shell and is broken.
+    # Retrying for longer than that means the update proceeds unlocked only if the lock
+    # cannot even be broken.
     param([scriptblock]$Update)
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $script:LockFile) | Out-Null
     $lock = $null
-    for ($i = 0; $i -lt 40 -and -not $lock; $i++) {
+    for ($i = 0; $i -lt 140 -and -not $lock; $i++) {
         try { $lock = [System.IO.File]::Open($script:LockFile, 'CreateNew', 'Write', 'None') }
         catch {
             $since = try { (Get-Date) - (Get-Item -LiteralPath $script:LockFile -ErrorAction Stop).LastWriteTime } catch { $null }
@@ -351,6 +353,10 @@ function Set-ClaudeTabRoot {
     if (-not $PSCmdlet.ShouldProcess($directory, "Set tab-color root $key")) { return }
     Invoke-ClaudeTabStoreUpdate {
         param($fresh)
+        # Decided again against the fresh map: another shell may have marked it meanwhile.
+        $root = Resolve-ClaudeTabRoot $directory
+        $isRoot = $root -and $root.Path.TrimEnd('\').Equals($directory.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)
+        $key = if ($isRoot) { $root.Key } else { ConvertTo-ClaudeTabMarkedKey $directory }
         if (-not $isRoot -and $key -notin $fresh.roots) { $fresh.roots.Add($key) }
         if ($Color) { $fresh.colors[$key] = $Color.ToUpperInvariant() }
         elseif (-not $fresh.colors.Contains($key)) { $fresh.colors[$key] = Get-ClaudeTabNextColor $fresh.colors }
@@ -372,7 +378,7 @@ function Remove-ClaudeTabRoot {
     if (-not $directory) {
         # A marked folder that has since been deleted: resolve the path as typed.
         $typed = if ($Path -eq '~' -or $Path -match '^~[\\/]') { $script:HomeDir.TrimEnd('\') + $Path.Substring(1) } else { $Path }
-        $directory = [System.IO.Path]::GetFullPath($typed.Replace('/', '\'), (Get-Location).ProviderPath)
+        $directory = [System.IO.Path]::GetFullPath($typed.Replace('/', '\'), (Get-Location -PSProvider FileSystem).ProviderPath)
     }
     $key = ConvertTo-ClaudeTabMarkedKey $directory
     $store = Get-ClaudeTabStore
