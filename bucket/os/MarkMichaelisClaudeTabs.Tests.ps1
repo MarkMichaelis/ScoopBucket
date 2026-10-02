@@ -336,6 +336,12 @@ Describe 'Claude tabs: colors by root' -Tag 'Light', 'Bucket' {
         @($saved['roots']) | Should -BeNullOrEmpty
     }
 
+    It 'refuses a relative path to a missing folder from a non-file-system location' {
+        Push-Location -LiteralPath 'Env:\'
+        try { { Remove-ClaudeTabRoot -Path 'gone446' } | Should -Throw '*file-system location*' }
+        finally { Pop-Location }
+    }
+
     It 'never overwrites a map it cannot read, and ignores OneDrive conflict copies' {
         New-Item -ItemType Directory -Path $script:store -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $script:store 'tab-roots.json') -Value 'not json {'

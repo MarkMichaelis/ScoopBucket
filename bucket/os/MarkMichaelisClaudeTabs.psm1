@@ -378,7 +378,12 @@ function Remove-ClaudeTabRoot {
     if (-not $directory) {
         # A marked folder that has since been deleted: resolve the path as typed.
         $typed = if ($Path -eq '~' -or $Path -match '^~[\\/]') { $script:HomeDir.TrimEnd('\') + $Path.Substring(1) } else { $Path }
-        $directory = [System.IO.Path]::GetFullPath($typed.Replace('/', '\'), (Get-Location -PSProvider FileSystem).ProviderPath)
+        $typed = $typed.Replace('/', '\')
+        $here = Get-Location
+        if (-not [System.IO.Path]::IsPathFullyQualified($typed) -and $here.Provider.Name -ne 'FileSystem') {
+            throw "Folder not found: $Path. Give a full path, or run this from a file-system location."
+        }
+        $directory = if ([System.IO.Path]::IsPathFullyQualified($typed)) { [System.IO.Path]::GetFullPath($typed) } else { [System.IO.Path]::GetFullPath($typed, $here.ProviderPath) }
     }
     $key = ConvertTo-ClaudeTabMarkedKey $directory
     $store = Get-ClaudeTabStore
