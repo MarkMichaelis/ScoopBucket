@@ -568,10 +568,19 @@ settings files without duplicating entries:
 
 - `Import-WindowsTerminalSettings` -- reopen windows and tabs after a
   reboot or crash, start at sign-in, the `Claude Tabs` theme (the selected
-  tab stands out), a Git Bash profile, and per-repository tab colors with
+  tab stands out), a Git Bash profile, and per-root tab colors with
   Claude session resume for PowerShell and Git Bash
   (`bucket/os/MarkMichaelisWindowsTerminalSettings.jsonc` plus the
-  `MarkMichaelisClaudeTabs.*` shell integration).
+  `MarkMichaelisClaudeTabs.*` shell integration). A tab takes the color of
+  the nearest root above its folder: a git repository (worktrees and
+  subfolders share it), the home folder, or a folder marked with
+  `Set-ClaudeTabRoot [-Path <dir>] [-Color '#RRGGBB']` (undo with
+  `Remove-ClaudeTabRoot`; `Get-ClaudeTabRoot` shows where the current
+  folder's color comes from). Folders under no root keep the default color.
+  Each root gets its own color, and roots are keyed by identity (GitHub
+  `owner/repo`, `~`, or the marked path relative to home) in
+  `<OneDrive>\Documents\WindowsTerminalTabs\tab-roots.json`, so a repository
+  has the same color on every machine.
 - `Import-ClaudeCodeSettings` -- the tab-session hook that keeps each tab's
   Claude session record current, the `Prompt Spotlight` theme, and the
   `Outcomes, not code` output style

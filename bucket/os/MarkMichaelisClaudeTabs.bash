@@ -1,7 +1,8 @@
 # Git Bash counterpart of ClaudeTabs.psm1, sourced from ~/.bashrc: colors the Windows
-# Terminal tab by repository and lets tabs running Claude resume their session after a
-# crash or reboot. Shares the color map and session records with the PowerShell module
-# through claude-tabs.js, so a Claude tab started from bash can be restored by either.
+# Terminal tab by root folder (repository, home, or marked) and lets tabs running Claude
+# resume their session after a crash or reboot. Shares the root map and session records
+# with the PowerShell module through claude-tabs.js, so a Claude tab started from bash
+# can be restored by either.
 
 # Only in Windows Terminal, and not in shells Claude itself runs.
 [ -n "$WT_SESSION" ] && [ -z "$CLAUDECODE" ] || return 0

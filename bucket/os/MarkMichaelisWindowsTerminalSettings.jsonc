@@ -27,11 +27,5 @@
     "name": "Git Bash",
     "startingDirectory": "%USERPROFILE%",
     "hidden": false
-  },
-  // Seeded into ~/.claude/terminal-tabs/colors.json; local entries are never overwritten.
-  // Keys are lower-case repository roots (main worktree).
-  "tabColors": {
-    "c:\\git\\codiwomplersocialmedia": "#2E86DE",
-    "c:\\git\\scoop": "#E67E22"
   }
 }

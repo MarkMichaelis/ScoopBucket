@@ -1,8 +1,11 @@
 // Helper for the Git Bash side of Windows Terminal tab colors and Claude tab restore
-// (claude-tabs.bash). Mirrors ClaudeTabs.psm1: both read and write the same color map
-// and session records, so keep the palette and rules here in sync with the module.
+// (claude-tabs.bash). Mirrors ClaudeTabs.psm1: both read and write the same root map
+// and session records, and resolve the same root, key, and color for a folder, so
+// keep the rules here in sync with the module. Migrating an earlier path-keyed map is
+// left to the module: until it has run, this helper leaves tabs uncolored.
 //
 //   color <dir>                     print the tab color for a Windows path, or nothing
+//   sequence <count>                print the first <count> colors of the color sequence
 //   shellstart <pid>                print a process's start time (Windows file time)
 //   record <token> <launchDir> <shellPid> <shellStart> <sessionId> -- <claude args...>
 //   restore <dir>                   for a tab restored into a session folder, print:
@@ -11,12 +14,16 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 const tabsRoot = path.join(os.homedir(), '.claude', 'terminal-tabs');
 const sessionsRoot = path.join(tabsRoot, 'sessions');
-const colorsFile = path.join(tabsRoot, 'colors.json');
+const env = process.env;
+const storeDir = path.join(env.OneDriveCommercial ? path.join(env.OneDriveCommercial, 'Documents')
+  : env.OneDrive ? path.join(env.OneDrive, 'Documents') : env.APPDATA || '', 'WindowsTerminalTabs');
+const rootsFile = path.join(storeDir, 'tab-roots.json');
+const legacyColorFiles = [path.join(storeDir, 'colors.json'), path.join(tabsRoot, 'colors.json')];
+const homeDir = os.homedir();
 const palette = [
   '#2E86DE', '#E67E22', '#27AE60', '#C0392B', '#8E44AD', '#16A085',
   '#D81B60', '#B7950B', '#3949AB', '#6D4C41', '#00838F', '#7CB342'];
@@ -37,37 +44,116 @@ function readJson(file) {
   }
 }
 
-function projectRoot(dir) {
-  let root = null;
-  const commonDir = run('git', ['-C', dir, 'rev-parse', '--path-format=absolute', '--git-common-dir']).replace(/\//g, '\\');
-  if (commonDir) {
-    if (path.win32.basename(commonDir).toLowerCase() === '.git') {
-      // The main worktree, even when dir is inside a linked worktree.
-      root = path.win32.dirname(commonDir);
-    } else {
-      const top = run('git', ['-C', dir, 'rev-parse', '--show-toplevel']);
-      if (top) root = top.replace(/\//g, '\\');
-    }
-  }
-  if (!root) {
-    const match = dir.match(/^[A-Za-z]:\\Git\\[^\\]+/i);
-    if (match) root = match[0];
-  }
-  return root;
+// Same sequence as Get-ClaudeTabSequenceColor: the palette, then golden-angle hues.
+function sequenceColor(index) {
+  if (index < palette.length) return palette[index];
+  const k = index - palette.length;
+  const h = ((k * 137.50776405) + 15) % 360;
+  const s = 0.62;
+  const l = [0.42, 0.32, 0.52][k % 3];
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const rgb = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.min(Math.floor(h / 60), 5)];
+  return '#' + rgb.map(v => Math.floor((v + m) * 255 + 0.5).toString(16).toUpperCase().padStart(2, '0')).join('');
 }
 
-function colorFor(root) {
-  const key = root.replace(/\\+$/, '').toLowerCase();
-  const map = {};
-  for (const [name, value] of Object.entries(readJson(colorsFile) || {})) map[name.toLowerCase()] = String(value);
-  if (map[key]) return map[key];
-  const used = new Set(Object.values(map).map(v => v.toUpperCase()));
-  let color = palette.find(c => !used.has(c));
-  if (!color) color = palette[crypto.createHash('sha256').update(key, 'utf8').digest()[0] % palette.length];
-  map[key] = color;
-  fs.mkdirSync(tabsRoot, { recursive: true });
-  fs.writeFileSync(colorsFile, JSON.stringify(map, null, 2) + '\n');
-  return color;
+function nextColor(colors) {
+  const used = new Set(Object.values(colors).map(v => String(v).toUpperCase()));
+  for (let i = 0; ; i++) {
+    const color = sequenceColor(i);
+    if (!used.has(color)) return color;
+  }
+}
+
+function repoKey(url, folder) {
+  const match = (url || '').match(/^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https?:\/\/(?:[^@/]+@)?github\.com\/)(.+)$/i);
+  if (match) {
+    let slug = match[1].replace(/\/+$/, '');
+    if (slug.toLowerCase().endsWith('.git')) slug = slug.slice(0, -4);
+    if (/^[^/]+\/[^/]+$/.test(slug)) return slug.toLowerCase();
+  }
+  return folder.replace(/\\+$/, '').split('\\').pop().toLowerCase();
+}
+
+function originUrl(commonDir) {
+  let lines;
+  try {
+    lines = fs.readFileSync(path.win32.join(commonDir, 'config'), 'utf8').split(/\r?\n/);
+  } catch {
+    return '';
+  }
+  let inOrigin = false;
+  for (const line of lines) {
+    if (/^\s*\[/.test(line)) { inOrigin = /^\s*\[remote\s+"origin"\]/.test(line); continue; }
+    const match = inOrigin && line.match(/^\s*url\s*=\s*(.+?)\s*$/);
+    if (match) return match[1];
+  }
+  return '';
+}
+
+function gitRoot(dir) {
+  const out = run('git', ['-C', dir, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--show-toplevel']);
+  const lines = out.split(/\r?\n/);
+  if (lines.length < 2) return null;
+  const commonDir = lines[0].trim().replace(/\//g, '\\');
+  const top = lines[1].trim().replace(/\//g, '\\');
+  // The main worktree, even when dir is inside a linked worktree.
+  const main = path.win32.basename(commonDir).toLowerCase() === '.git' ? path.win32.dirname(commonDir) : top;
+  return { path: top, key: repoKey(originUrl(commonDir), main) };
+}
+
+function isUnder(dir, root) {
+  const d = dir.replace(/\\+$/, '').toLowerCase();
+  const r = root.replace(/\\+$/, '').toLowerCase();
+  return d === r || d.startsWith(r + '\\');
+}
+
+function markedPath(key) {
+  return key === '~' || key.startsWith('~\\') ? homeDir.replace(/\\+$/, '') + key.slice(1) : key;
+}
+
+function loadStore() {
+  const json = readJson(rootsFile);
+  if (json && json.version === 2 && json.colors && typeof json.colors === 'object') {
+    const colors = {};
+    for (const [key, value] of Object.entries(json.colors)) colors[key.toLowerCase()] = String(value);
+    return { colors, roots: (json.roots || []).map(r => String(r).toLowerCase()), writable: true };
+  }
+  if (fs.existsSync(rootsFile)) return { colors: {}, roots: [], writable: false };  // never overwrite what we cannot read
+  if (legacyColorFiles.some(f => fs.existsSync(f))) return null;  // PowerShell migrates it first
+  return { colors: {}, roots: [], writable: true };
+}
+
+function saveStore(store) {
+  fs.mkdirSync(storeDir, { recursive: true });
+  const temp = `${rootsFile}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify({ version: 2, colors: store.colors, roots: store.roots }, null, 2) + '\n');
+  fs.renameSync(temp, rootsFile);
+}
+
+// The nearest root containing dir -- a repository, a marked folder, or home -- and its color.
+function colorFor(dir) {
+  const store = loadStore();
+  if (!store) return '';
+  const candidates = [];
+  const repo = gitRoot(dir);
+  if (repo) candidates.push(repo);
+  for (const key of store.roots) {
+    const rootPath = markedPath(key);
+    if (isUnder(dir, rootPath)) candidates.push({ path: rootPath, key });
+  }
+  if (isUnder(dir, homeDir)) candidates.push({ path: homeDir, key: '~' });
+  let best = null;
+  for (const candidate of candidates) {
+    if (!best || candidate.path.replace(/\\+$/, '').length > best.path.replace(/\\+$/, '').length) best = candidate;
+  }
+  if (!best) return '';
+  if (!store.colors[best.key]) {
+    store.colors[best.key] = nextColor(store.colors);
+    if (store.writable) saveStore(store);
+  }
+  return store.colors[best.key];
 }
 
 // Launch options worth keeping when a session is resumed (same rules as the module).
@@ -102,11 +188,12 @@ function ownerAlive(record) {
 
 const [command, ...rest] = process.argv.slice(2);
 switch (command) {
-  case 'color': {
-    const root = projectRoot(rest[0] || '');
-    if (root) process.stdout.write(colorFor(root));
+  case 'color':
+    if (rest[0]) process.stdout.write(colorFor(rest[0]));
     break;
-  }
+  case 'sequence':
+    process.stdout.write(Array.from({ length: Number(rest[0]) || 0 }, (_, i) => sequenceColor(i)).join('\n') + '\n');
+    break;
   case 'shellstart':
     process.stdout.write(shellStart(rest[0]));
     break;

@@ -1,82 +1,345 @@
 # Windows Terminal tab helpers, imported from the PowerShell profile. Installed to
-# ~/.claude/scripts/ClaudeTabs.psm1 by Import-WindowsTerminalSettings (#412).
-#  - Colors each tab by the repository its current directory belongs to. Linked
-#    worktrees and subdirectories share the repo's color; assignments persist in
-#    ~/.claude/terminal-tabs/colors.json (edit it to pick colors).
+# ~/.claude/scripts/ClaudeTabs.psm1 by Import-WindowsTerminalSettings (#412, #446).
+#  - Colors each tab by the root its current directory belongs to: the nearest git
+#    repository (linked worktrees and subfolders share the main repo's color), the
+#    home folder, or a folder marked with Set-ClaudeTabRoot. Folders under no root
+#    keep the default color. Every root gets its own color, assigned in order of
+#    first sight from an unlimited sequence, and is keyed by identity (GitHub
+#    owner/repo, "~", or a marked path) rather than by where it is cloned, so the
+#    map roams through OneDrive and a repo has the same color on every machine.
 #  - Lets tabs running Claude resume their session after a crash or reboot. While
 #    Claude runs, the tab reports a per-launch folder as its working directory;
 #    Windows Terminal saves that in its window layout, and a restored tab that
 #    starts there resumes the recorded session. tab-session-hook.js keeps the
 #    record's session ID current; claude-tabs.bash/.js are the Git Bash side and
-#    share the palette and rules below, so keep them in sync.
+#    share the root, key, and color rules below, so keep them in sync.
 
 $script:TabsRoot = Join-Path $HOME '.claude\terminal-tabs'
 $script:SessionsRoot = Join-Path $script:TabsRoot 'sessions'
-$script:ColorsFile = Join-Path $script:TabsRoot 'colors.json'
+# Session records are tied to this machine; the root map roams through OneDrive. Only
+# tab-roots.json is read, so OneDrive conflict copies (tab-roots-<PC>.json) are ignored.
+$script:StoreDir = Join-Path $(if ($env:OneDriveCommercial) { Join-Path $env:OneDriveCommercial 'Documents' } elseif ($env:OneDrive) { Join-Path $env:OneDrive 'Documents' } else { $env:APPDATA }) 'WindowsTerminalTabs'
+$script:RootsFile = Join-Path $script:StoreDir 'tab-roots.json'
+# Path-keyed maps written by earlier versions, migrated once into tab-roots.json. The
+# roaming one is left in place (an older install elsewhere may still use it); the
+# machine-local one is renamed to colors.json.migrated after it is merged.
+$script:LegacyRoamingColors = Join-Path $script:StoreDir 'colors.json'
+$script:LegacyLocalColors = Join-Path $script:TabsRoot 'colors.json'
+$script:HomeDir = $HOME
+$script:TempDir = [System.IO.Path]::GetTempPath()
+# The first colors handed out; later roots continue with Get-ClaudeTabSequenceColor.
 $script:Palette = @(
     '#2E86DE', '#E67E22', '#27AE60', '#C0392B', '#8E44AD', '#16A085',
     '#D81B60', '#B7950B', '#3949AB', '#6D4C41', '#00838F', '#7CB342')
-$script:RootCache = @{}
-$script:ColorMap = $null
-$script:ColorsStamp = $null
+$script:GitCache = @{}
+$script:Store = $null
+$script:StoreStamp = $null
 $script:ClaudeExe = $null  # tests set this; otherwise resolved from PATH
 $script:Esc = [char]27
 $script:Bel = [char]7
 
-function Get-ClaudeTabProjectRoot {
+function Get-ClaudeTabSequenceColor {
+    # Color number $Index of the unlimited sequence: the palette, then hues a golden
+    # angle apart (so neighbors in the sequence are far apart on the color wheel) at a
+    # saturation and three lightness levels that keep tab text readable.
+    param([int]$Index)
+    if ($Index -lt $script:Palette.Count) { return $script:Palette[$Index] }
+    $k = $Index - $script:Palette.Count
+    $h = (($k * 137.50776405) + 15) % 360
+    $s = 0.62
+    $l = (0.42, 0.32, 0.52)[$k % 3]
+    $c = (1 - [math]::Abs(2 * $l - 1)) * $s
+    $x = $c * (1 - [math]::Abs((($h / 60) % 2) - 1))
+    $m = $l - $c / 2
+    $rgb = switch ([math]::Floor($h / 60)) {
+        0 { $c, $x, 0 } 1 { $x, $c, 0 } 2 { 0, $c, $x } 3 { 0, $x, $c } 4 { $x, 0, $c } default { $c, 0, $x }
+    }
+    # Floor(v + 0.5), not [math]::Round (banker's rounding), to match Math.round in claude-tabs.js.
+    '#' + (($rgb | ForEach-Object { '{0:X2}' -f [int][math]::Floor(($_ + $m) * 255 + 0.5) }) -join '')
+}
+
+function Get-ClaudeTabNextColor {
+    # The first color in the sequence no root uses yet.
+    param([System.Collections.IDictionary]$Colors)
+    $used = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($value in $Colors.Values) { [void]$used.Add([string]$value) }
+    for ($i = 0; ; $i++) {
+        $color = Get-ClaudeTabSequenceColor $i
+        if (-not $used.Contains($color)) { return $color }
+    }
+}
+
+function ConvertTo-ClaudeTabRepoKey {
+    # owner/repo for a GitHub origin URL, otherwise the repository folder's name.
+    param([string]$Url, [string]$Folder)
+    if ($Url -match '^(?:git@github\.com:|ssh://git@github\.com/|https?://(?:[^@/]+@)?github\.com/)(.+)$') {
+        $slug = $Matches[1].TrimEnd('/')
+        if ($slug.EndsWith('.git', [StringComparison]::OrdinalIgnoreCase)) { $slug = $slug.Substring(0, $slug.Length - 4) }
+        if ($slug -match '^[^/]+/[^/]+$') { return $slug.ToLowerInvariant() }
+    }
+    $Folder.TrimEnd('\').Split('\')[-1].ToLowerInvariant()
+}
+
+function Get-ClaudeTabOriginUrl {
+    # remote.origin.url read straight from the repository's config file: no extra git call.
+    param([string]$CommonDir)
+    $inOrigin = $false
+    foreach ($line in (Get-Content -LiteralPath (Join-Path $CommonDir 'config') -ErrorAction SilentlyContinue)) {
+        if ($line -match '^\s*\[') { $inOrigin = $line -match '^\s*\[remote\s+"origin"\]'; continue }
+        if ($inOrigin -and $line -match '^\s*url\s*=\s*(.+?)\s*$') { return $Matches[1] }
+    }
+}
+
+function Get-ClaudeTabGitRoot {
+    # The repository $Directory is in: its worktree top (for nearest-root comparison) and
+    # the main repository's key. One git call per new directory, then cached.
     param([string]$Directory)
-    if ($script:RootCache.ContainsKey($Directory)) { return $script:RootCache[$Directory] }
-    $root = $null
-    $commonDir = git -C $Directory rev-parse --path-format=absolute --git-common-dir 2>$null
-    if ($LASTEXITCODE -eq 0 -and $commonDir) {
-        $commonDir = $commonDir.Trim().Replace('/', '\')
-        if ((Split-Path $commonDir -Leaf) -eq '.git') {
-            # The main worktree, even when $Directory is inside a linked worktree.
-            $root = Split-Path $commonDir -Parent
+    if ($script:GitCache.ContainsKey($Directory)) { return $script:GitCache[$Directory] }
+    $result = $null
+    $lines = @(git -C $Directory rev-parse --path-format=absolute --git-common-dir --show-toplevel 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $lines.Count -ge 2) {
+        $commonDir = $lines[0].Trim().Replace('/', '\')
+        $top = $lines[1].Trim().Replace('/', '\')
+        # The main worktree, even when $Directory is inside a linked worktree.
+        $main = if ((Split-Path $commonDir -Leaf) -eq '.git') { Split-Path $commonDir -Parent } else { $top }
+        $result = [pscustomobject]@{
+            Path = $top
+            Kind = 'Repository'
+            Key  = ConvertTo-ClaudeTabRepoKey -Url (Get-ClaudeTabOriginUrl $commonDir) -Folder $main
         }
+    }
+    $script:GitCache[$Directory] = $result
+    $result
+}
+
+function Test-ClaudeTabUnder {
+    param([string]$Directory, [string]$Root)
+    $d = $Directory.TrimEnd('\')
+    $r = $Root.TrimEnd('\')
+    $d.Equals($r, [StringComparison]::OrdinalIgnoreCase) -or $d.StartsWith("$r\", [StringComparison]::OrdinalIgnoreCase)
+}
+
+function ConvertTo-ClaudeTabMarkedKey {
+    # A marked root's key: relative to home ("~\documents\notes") when under it, so it
+    # roams between machines, else its absolute path. Keys are lowercase.
+    param([string]$Path)
+    $path = $Path.TrimEnd('\')
+    $homeDir = $script:HomeDir.TrimEnd('\')
+    if (Test-ClaudeTabUnder $path $homeDir) { $path = '~' + $path.Substring($homeDir.Length) }
+    if ($path.EndsWith(':')) { $path += '\' }
+    $path.ToLowerInvariant()
+}
+
+function ConvertFrom-ClaudeTabMarkedKey {
+    param([string]$Key)
+    if ($Key -eq '~' -or $Key.StartsWith('~\')) { return $script:HomeDir.TrimEnd('\') + $Key.Substring(1) }
+    $Key
+}
+
+function Get-ClaudeTabFullPath {
+    # Long-form provider path (expands 8.3 names) of an existing folder, else $null.
+    param([string]$Path)
+    try {
+        Push-Location -LiteralPath $Path -ErrorAction Stop
+        try { (Get-Location).ProviderPath } finally { Pop-Location }
+    }
+    catch { $null }
+}
+
+function Read-ClaudeTabJson {
+    param([string]$Path)
+    try { Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable -ErrorAction Stop }
+    catch { $null }
+}
+
+function Add-ClaudeTabLegacyColors {
+    # Merges a path-keyed map from an earlier version into $Store under identity keys,
+    # keeping colors and the first color seen for a key. Paths that no longer exist or
+    # are under the temp folder are dropped; a folder that is neither in a repository
+    # nor the home folder becomes a marked root.
+    param([System.Collections.IDictionary]$Store, [string]$Path)
+    $legacy = Read-ClaudeTabJson $Path
+    if ($legacy -isnot [System.Collections.IDictionary]) { return }
+    $temp = Get-ClaudeTabFullPath $script:TempDir
+    foreach ($entry in $legacy.GetEnumerator()) {
+        if ([string]$entry.Value -notmatch '^#[0-9A-Fa-f]{6}$') { continue }
+        $dir = Get-ClaudeTabFullPath $entry.Key
+        if (-not $dir -or ($temp -and (Test-ClaudeTabUnder $dir $temp))) { continue }
+        $repo = Get-ClaudeTabGitRoot $dir
+        $key = if ($repo) { $repo.Key }
+        elseif ((ConvertTo-ClaudeTabMarkedKey $dir) -eq '~') { '~' }
         else {
-            $top = git -C $Directory rev-parse --show-toplevel 2>$null
-            if ($LASTEXITCODE -eq 0 -and $top) { $root = $top.Trim().Replace('/', '\') }
+            $marked = ConvertTo-ClaudeTabMarkedKey $dir
+            if ($marked -notin $Store.roots) { $Store.roots.Add($marked) }
+            $marked
         }
+        if (-not $Store.colors.Contains($key)) { $Store.colors[$key] = ([string]$entry.Value).ToUpperInvariant() }
     }
-    if (-not $root -and $Directory -match '^[A-Za-z]:\\Git\\[^\\]+') { $root = $Matches[0] }
-    $script:RootCache[$Directory] = $root
-    $root
 }
 
-function Get-ClaudeTabColorMap {
-    $stamp = if (Test-Path -LiteralPath $script:ColorsFile) { (Get-Item -LiteralPath $script:ColorsFile).LastWriteTimeUtc }
-    if ($null -eq $script:ColorMap -or $stamp -ne $script:ColorsStamp) {
-        $map = [ordered]@{}
-        if ($stamp) {
-            try {
-                $json = Get-Content -LiteralPath $script:ColorsFile -Raw | ConvertFrom-Json
-                foreach ($property in $json.PSObject.Properties) { $map[$property.Name.ToLowerInvariant()] = [string]$property.Value }
-            }
-            catch { }
-        }
-        $script:ColorMap = $map
-        $script:ColorsStamp = $stamp
-    }
-    $script:ColorMap
+function Save-ClaudeTabStore {
+    $store = $script:Store
+    if (-not $store.Writable) { return $false }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $script:RootsFile) | Out-Null
+    $json = [ordered]@{ version = 2; colors = $store.colors; roots = @($store.roots) } | ConvertTo-Json -Depth 5
+    # Write a temp file and rename it over the map, so a reader never sees half a file.
+    $temp = "$($script:RootsFile).$PID.tmp"
+    Set-Content -LiteralPath $temp -Value $json -Encoding utf8
+    [System.IO.File]::Move($temp, $script:RootsFile, $true)
+    $script:StoreStamp = (Get-Item -LiteralPath $script:RootsFile).LastWriteTimeUtc
+    $true
 }
 
-function Get-ClaudeTabColor {
-    param([string]$ProjectRoot)
-    $key = $ProjectRoot.TrimEnd('\').ToLowerInvariant()
-    $map = Get-ClaudeTabColorMap
-    if ($map.Contains($key)) { return $map[$key] }
-    $used = @($map.Values)
-    $color = $script:Palette | Where-Object { $_ -notin $used } | Select-Object -First 1
-    if (-not $color) {
-        $hash = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($key))
-        $color = $script:Palette[$hash[0] % $script:Palette.Count]
+function Get-ClaudeTabStore {
+    # The root map: colors (key -> #RRGGBB) and roots (marked root keys). Re-read when
+    # the file changes (e.g. OneDrive syncs another machine's edit). A file that cannot
+    # be parsed is never overwritten: colors are then assigned for this session only.
+    $stamp = if (Test-Path -LiteralPath $script:RootsFile) { (Get-Item -LiteralPath $script:RootsFile).LastWriteTimeUtc }
+    if ($null -ne $script:Store -and $stamp -eq $script:StoreStamp -and -not (Test-Path -LiteralPath $script:LegacyLocalColors)) {
+        return $script:Store
     }
-    $map[$key] = $color
-    New-Item -ItemType Directory -Force -Path $script:TabsRoot | Out-Null
-    $map | ConvertTo-Json | Set-Content -LiteralPath $script:ColorsFile -Encoding utf8
-    $script:ColorsStamp = (Get-Item -LiteralPath $script:ColorsFile).LastWriteTimeUtc
-    $color
+    $store = [ordered]@{ colors = [ordered]@{}; roots = [System.Collections.Generic.List[string]]::new(); Writable = $true }
+    $dirty = $false
+    if ($stamp) {
+        $json = Read-ClaudeTabJson $script:RootsFile
+        if ($json -is [System.Collections.IDictionary] -and $json['version'] -eq 2 -and $json['colors'] -is [System.Collections.IDictionary]) {
+            foreach ($entry in $json['colors'].GetEnumerator()) { $store.colors[$entry.Key.ToLowerInvariant()] = [string]$entry.Value }
+            foreach ($root in @($json['roots'])) { if ($root) { $store.roots.Add(([string]$root).ToLowerInvariant()) } }
+        }
+        else { $store.Writable = $false }
+    }
+    else {
+        Add-ClaudeTabLegacyColors $store $script:LegacyRoamingColors
+        $dirty = $true
+    }
+    $script:Store = $store
+    $script:StoreStamp = $stamp
+    if ($store.Writable -and (Test-Path -LiteralPath $script:LegacyLocalColors)) {
+        Add-ClaudeTabLegacyColors $store $script:LegacyLocalColors
+        $dirty = $true
+    }
+    if ($dirty -and (Save-ClaudeTabStore) -and (Test-Path -LiteralPath $script:LegacyLocalColors)) {
+        Move-Item -LiteralPath $script:LegacyLocalColors -Destination "$($script:LegacyLocalColors).migrated" -Force
+    }
+    $script:Store
+}
+
+function Resolve-ClaudeTabRoot {
+    # The nearest root containing $Directory -- a repository, a marked folder, or the
+    # home folder -- or $null when it is under none.
+    param([string]$Directory)
+    $candidates = [System.Collections.Generic.List[object]]::new()
+    $repo = Get-ClaudeTabGitRoot $Directory
+    if ($repo) { $candidates.Add($repo) }
+    foreach ($key in (Get-ClaudeTabStore).roots) {
+        $path = ConvertFrom-ClaudeTabMarkedKey $key
+        if (Test-ClaudeTabUnder $Directory $path) { $candidates.Add([pscustomobject]@{ Path = $path; Kind = 'Marked'; Key = $key }) }
+    }
+    if (Test-ClaudeTabUnder $Directory $script:HomeDir) {
+        $candidates.Add([pscustomobject]@{ Path = $script:HomeDir.TrimEnd('\'); Kind = 'Home'; Key = '~' })
+    }
+    $best = $null
+    foreach ($candidate in $candidates) {
+        if (-not $best -or $candidate.Path.TrimEnd('\').Length -gt $best.Path.TrimEnd('\').Length) { $best = $candidate }
+    }
+    $best
+}
+
+function Get-ClaudeTabRootColor {
+    # The root's color, assigning (and saving) the next unused one on first sight.
+    param($Root)
+    $store = Get-ClaudeTabStore
+    if (-not $store.colors.Contains($Root.Key)) {
+        $store.colors[$Root.Key] = Get-ClaudeTabNextColor $store.colors
+        Save-ClaudeTabStore | Out-Null
+    }
+    $store.colors[$Root.Key]
+}
+
+function Resolve-ClaudeTabDirectory {
+    param([string]$Path)
+    $full = Get-ClaudeTabFullPath $Path
+    if (-not $full) { throw "Folder not found: $Path" }
+    $full
+}
+
+function Get-ClaudeTabRoot {
+    <#
+    .SYNOPSIS
+        Shows which root a folder's tab color comes from, and the color.
+    .DESCRIPTION
+        Kind is Repository, Home, Marked, or None (default tab color). A root seen for
+        the first time is assigned its color, as the tab would be.
+    .EXAMPLE
+        Get-ClaudeTabRoot
+    #>
+    [CmdletBinding()]
+    param([string]$Path = '.')
+    $directory = Resolve-ClaudeTabDirectory $Path
+    $root = Resolve-ClaudeTabRoot $directory
+    [pscustomobject]@{
+        Path  = $directory
+        Root  = $root.Path
+        Kind  = if ($root) { $root.Kind } else { 'None' }
+        Key   = $root.Key
+        Color = if ($root) { Get-ClaudeTabRootColor $root }
+    }
+}
+
+function Set-ClaudeTabRoot {
+    <#
+    .SYNOPSIS
+        Marks a folder as a tab-color root, so it and its subfolders share a color.
+    .DESCRIPTION
+        Without -Color the root gets the next unused color. On a folder that already is
+        a root (a repository's top folder, the home folder, or a marked folder) only its
+        color changes. The map roams through OneDrive.
+    .EXAMPLE
+        Set-ClaudeTabRoot ~\Documents\Notes
+    .EXAMPLE
+        Set-ClaudeTabRoot -Color '#7B1FA2'
+        Marks the current folder with that color, or just recolors it if it already is a root.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [string]$Path = '.',
+        [ValidatePattern('^#[0-9A-Fa-f]{6}$')][string]$Color
+    )
+    $directory = Resolve-ClaudeTabDirectory $Path
+    $store = Get-ClaudeTabStore
+    if (-not $store.Writable) { throw "Cannot update $($script:RootsFile): it is not valid JSON. Fix or delete it first." }
+    $root = Resolve-ClaudeTabRoot $directory
+    $isRoot = $root -and $root.Path.TrimEnd('\').Equals($directory.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)
+    $key = if ($isRoot) { $root.Key } else { ConvertTo-ClaudeTabMarkedKey $directory }
+    if (-not $PSCmdlet.ShouldProcess($directory, "Set tab-color root $key")) { return }
+    if (-not $isRoot) { $store.roots.Add($key) }
+    if ($Color) { $store.colors[$key] = $Color.ToUpperInvariant() }
+    elseif (-not $store.colors.Contains($key)) { $store.colors[$key] = Get-ClaudeTabNextColor $store.colors }
+    Save-ClaudeTabStore | Out-Null
+    Update-ClaudeTabColor
+    Get-ClaudeTabRoot -Path $directory
+}
+
+function Remove-ClaudeTabRoot {
+    <#
+    .SYNOPSIS
+        Unmarks a folder marked with Set-ClaudeTabRoot; it then takes its parent root's color.
+    .EXAMPLE
+        Remove-ClaudeTabRoot ~\Documents\Notes
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param([string]$Path = '.')
+    $directory = Get-ClaudeTabFullPath $Path
+    if (-not $directory) { $directory = $Path }  # a marked folder that has since been deleted
+    $key = ConvertTo-ClaudeTabMarkedKey $directory
+    $store = Get-ClaudeTabStore
+    if ($key -notin $store.roots) { Write-Warning "$directory is not a marked root; Get-ClaudeTabRoot shows where its color comes from."; return }
+    if (-not $store.Writable) { throw "Cannot update $($script:RootsFile): it is not valid JSON. Fix or delete it first." }
+    if (-not $PSCmdlet.ShouldProcess($directory, "Remove tab-color root $key")) { return }
+    [void]$store.roots.Remove($key)
+    $store.colors.Remove($key)
+    Save-ClaudeTabStore | Out-Null
+    Update-ClaudeTabColor
 }
 
 function Update-ClaudeTabColor {
@@ -84,9 +347,9 @@ function Update-ClaudeTabColor {
     $location = Get-Location
     if ($location.Provider.Name -ne 'FileSystem') { return }
     $directory = $location.ProviderPath
-    $root = Get-ClaudeTabProjectRoot $directory
+    $root = Resolve-ClaudeTabRoot $directory
     if ($root) {
-        $hex = (Get-ClaudeTabColor $root).TrimStart('#')
+        $hex = (Get-ClaudeTabRootColor $root).TrimStart('#')
         # OSC 4 on color index 264 sets the Windows Terminal tab color.
         [Console]::Write("$script:Esc]4;264;rgb:$($hex.Substring(0, 2))/$($hex.Substring(2, 2))/$($hex.Substring(4, 2))$script:Bel")
     }
@@ -258,4 +521,4 @@ if ($env:WT_SESSION) {
     $global:LASTEXITCODE = $exitCode
 }
 
-Export-ModuleMember -Function claude, Invoke-ClaudeTabRestore
+Export-ModuleMember -Function claude, Invoke-ClaudeTabRestore, Get-ClaudeTabRoot, Set-ClaudeTabRoot, Remove-ClaudeTabRoot

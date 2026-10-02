@@ -12,11 +12,13 @@ function Import-WindowsTerminalSettings {
             the "Claude Tabs" theme. Adds a Git Bash profile when Git for Windows is
             installed and no profile of that name exists. Every other setting is
             kept, and the file is rewritten only when something changed.
-          * Installs the tab shell integration into ~/.claude/scripts: per-repository
-            tab colors and Claude session resume, for PowerShell and Git Bash.
-            Seeds the tab color map without overwriting local entries, then adds
-            one guarded import to the PowerShell profile and one guarded source
-            line to ~/.bashrc (creating ~/.bash_profile to load it when missing).
+          * Installs the tab shell integration into ~/.claude/scripts: tab colors
+            per root folder (repository, home, or marked with Set-ClaudeTabRoot)
+            and Claude session resume, for PowerShell and Git Bash. Adds one
+            guarded import to the PowerShell profile and one guarded source line
+            to ~/.bashrc (creating ~/.bash_profile to load it when missing). Lines
+            an earlier install wrote for scripts in %LOCALAPPDATA%\WindowsTerminalTabs
+            are replaced in place, and those obsolete scripts are then removed.
 
         The committed configuration lives in the bucket, so the ConfigScript in
         OSBasePackages.ps1 passes an explicit -ConfigPath resolved from its own
@@ -28,13 +30,16 @@ function Import-WindowsTerminalSettings {
     .PARAMETER SettingsPath
         Windows Terminal settings.json (defaults to the installed Terminal's).
     .PARAMETER ClaudeHome
-        Folder receiving the scripts and the tab color map (defaults to ~/.claude).
+        Folder receiving the scripts (defaults to ~/.claude). The tab color map roams
+        in <OneDrive>\Documents\WindowsTerminalTabs and is managed by the module.
     .PARAMETER ProfilePath
         PowerShell profile that imports the tab module (defaults to $PROFILE).
     .PARAMETER BashrcPath
         Git Bash startup file that sources the bash integration (defaults to ~/.bashrc).
     .PARAMETER BashProfilePath
         Git Bash login file, created to load ~/.bashrc when missing (defaults to ~/.bash_profile).
+    .PARAMETER LegacyTabsDir
+        Where an earlier install put the tab scripts; removed once nothing loads them.
     .PARAMETER GitBashPath
         Git for Windows bash.exe; the Git Bash pieces are skipped when it is absent.
     .OUTPUTS
@@ -52,7 +57,8 @@ function Import-WindowsTerminalSettings {
         [string]$ProfilePath = $PROFILE,
         [string]$BashrcPath = (Join-Path $HOME '.bashrc'),
         [string]$BashProfilePath = (Join-Path $HOME '.bash_profile'),
-        [string]$GitBashPath = (Join-Path $env:ProgramFiles 'Git\bin\bash.exe')
+        [string]$GitBashPath = (Join-Path $env:ProgramFiles 'Git\bin\bash.exe'),
+        [string]$LegacyTabsDir = (Join-Path $env:LOCALAPPDATA 'WindowsTerminalTabs')
     )
 
     if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
@@ -111,34 +117,31 @@ function Import-WindowsTerminalSettings {
         }
     }
 
-    $colorsPath = Join-Path $ClaudeHome 'terminal-tabs\colors.json'
-    $colors = Read-JsonSettingsFile -Path $colorsPath
-    $localRepos = @($colors.Keys | ForEach-Object { $_.ToLowerInvariant() })
-    foreach ($repo in $config['tabColors'].Keys) {
-        if ($repo.ToLowerInvariant() -notin $localRepos) { $colors[$repo.ToLowerInvariant()] = $config['tabColors'][$repo] }
-    }
-    if (Write-JsonSettingsFile -Path $colorsPath -Settings $colors -Action 'Seed tab colors') {
-        $changed.Add('tab colors')
-    }
-
+    $comment = '# Windows Terminal: color tabs by root folder (repo, home, or marked); resume Claude sessions in tabs restored after a crash or reboot'
+    # Lines an earlier install (scripts in %LOCALAPPDATA%\WindowsTerminalTabs) wrote.
+    $staleComment = '^\s*# Windows Terminal: color tabs by '
     if ($ProfilePath) {
         $profileLines = @(
-            '# Windows Terminal: color tabs by repo; resume Claude sessions in tabs restored after a crash or reboot'
+            $comment
             '$claudeTabsModule = Join-Path $HOME ''.claude\scripts\ClaudeTabs.psm1'''
             'if (Test-Path $claudeTabsModule) { Import-Module $claudeTabsModule; Invoke-ClaudeTabRestore }'
             'Remove-Variable claudeTabsModule'
         )
-        if (Add-LinesIfMissing -Path $ProfilePath -Match 'ClaudeTabs.psm1' -Lines $profileLines) {
+        $repaired = Repair-StaleLines -Path $ProfilePath -Stale 'WindowsTerminalTabs\\ClaudeTabs\.psm1' -Lines $profileLines -Companion @(
+            $staleComment, '^\s*\$claudeTabsModule = ', '^\s*if \(Test-Path \$claudeTabsModule\)', '^\s*Remove-Variable claudeTabsModule\s*$')
+        if ($repaired -or (Add-LinesIfMissing -Path $ProfilePath -Match 'ClaudeTabs.psm1' -Lines $profileLines)) {
             $changed.Add('PowerShell profile')
         }
     }
 
     if ($hasGitBash) {
         $bashLines = @(
-            '# Windows Terminal: color tabs by repo; resume Claude sessions in tabs restored after a crash or reboot'
+            $comment
             '[ -f "$HOME/.claude/scripts/claude-tabs.bash" ] && . "$HOME/.claude/scripts/claude-tabs.bash"'
         )
-        if (Add-LinesIfMissing -Path $BashrcPath -Match 'claude-tabs.bash' -Lines $bashLines -LfLineEndings) {
+        $repaired = Repair-StaleLines -Path $BashrcPath -Stale 'WindowsTerminalTabs/claude-tabs\.bash' -Lines $bashLines -LfLineEndings -Companion @(
+            $staleComment, 'claude-tabs\.bash')
+        if ($repaired -or (Add-LinesIfMissing -Path $BashrcPath -Match 'claude-tabs.bash' -Lines $bashLines -LfLineEndings)) {
             $changed.Add('.bashrc')
         }
         # Git Bash starts a login shell, which reads ~/.bash_profile, not ~/.bashrc.
@@ -146,6 +149,23 @@ function Import-WindowsTerminalSettings {
         if (-not (Test-Path -LiteralPath $BashProfilePath) -and
             (Add-LinesIfMissing -Path $BashProfilePath -Match '.bashrc' -Lines @('[ -f ~/.bashrc ] && . ~/.bashrc') -LfLineEndings)) {
             $changed.Add('.bash_profile')
+        }
+    }
+
+    # The earlier install's scripts, once nothing loads them any more.
+    if ($LegacyTabsDir -and (Test-Path -LiteralPath $LegacyTabsDir -PathType Container)) {
+        $stillLoaded = foreach ($startup in $ProfilePath, $BashrcPath) {
+            if ($startup -and (Test-Path -LiteralPath $startup -PathType Leaf) -and
+                [System.IO.File]::ReadAllText($startup) -match 'WindowsTerminalTabs[\\/](ClaudeTabs\.psm1|claude-tabs\.bash)') { $startup }
+        }
+        if (-not $stillLoaded) {
+            $legacy = @('ClaudeTabs.psm1', 'claude-tabs.js', 'claude-tabs.bash' | ForEach-Object { Join-Path $LegacyTabsDir $_ } |
+                Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+            if ($legacy -and $PSCmdlet.ShouldProcess($LegacyTabsDir, 'Remove the obsolete tab scripts')) {
+                Remove-Item -LiteralPath $legacy -Force
+                if (-not (Get-ChildItem -LiteralPath $LegacyTabsDir -Force)) { Remove-Item -LiteralPath $LegacyTabsDir -Force }
+                $changed.Add('obsolete tab scripts')
+            }
         }
     }
 
