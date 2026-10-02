@@ -26,7 +26,9 @@ BeforeAll {
     $script:hook = Join-Path $PSScriptRoot '..\ai\MarkMichaelisClaudeTabSessionHook.js'
 
     $script:savedPrompt = (Get-Command -Name prompt -CommandType Function -ErrorAction Ignore).ScriptBlock
-    $script:savedEnv = @{ WT_SESSION = $env:WT_SESSION; CLAUDECODE = $env:CLAUDECODE }
+    # Cleared too: a run from inside a Claude tab would otherwise leak its own tab token.
+    $script:savedEnv = @{ WT_SESSION = $env:WT_SESSION; CLAUDECODE = $env:CLAUDECODE; CLAUDE_TAB_TOKEN = $env:CLAUDE_TAB_TOKEN }
+    $env:CLAUDE_TAB_TOKEN = $null
     $env:WT_SESSION = $null
     $env:CLAUDECODE = $null
     Remove-Variable -Name ClaudeTabOriginalPrompt, ClaudeTabPendingRestore -Scope Global -ErrorAction Ignore
@@ -36,27 +38,52 @@ BeforeAll {
 
     $script:state = Join-Path $TestDrive 'state'
     New-Item -ItemType Directory -Path (Join-Path $script:state 'sessions') -Force | Out-Null
-    & $script:tabs {
-        param($root)
-        $script:TabsRoot = $root
-        $script:SessionsRoot = Join-Path $root 'sessions'
-        $script:ColorsFile = Join-Path $root 'colors.json'
-    } $script:state
-
     function Get-LongPath([string]$Path) {
         Push-Location -LiteralPath $Path
         try { (Get-Location).ProviderPath } finally { Pop-Location }
     }
 
+    # The roaming root map, the home folder, and the temp folder all live in TestDrive.
+    $script:store = Join-Path $script:state 'od\Documents\WindowsTerminalTabs'
+    $script:homeDir = Join-Path $TestDrive 'home'
+    New-Item -ItemType Directory -Path (Join-Path $script:homeDir 'Documents\notes'), (Join-Path $TestDrive 'tmp\scratch') -Force | Out-Null
+    $script:homeDir = Get-LongPath $script:homeDir
+    & $script:tabs {
+        param($root, $store, $homeDir, $temp)
+        $script:TabsRoot = $root
+        $script:SessionsRoot = Join-Path $root 'sessions'
+        $script:StoreDir = $store
+        $script:RootsFile = Join-Path $store 'tab-roots.json'
+        $script:LegacyRoamingColors = Join-Path $store 'colors.json'
+        $script:LegacyLocalColors = Join-Path $root 'colors.json'
+        $script:HomeDir = $homeDir
+        $script:TempDir = $temp
+    } $script:state $script:store $script:homeDir (Join-Path $TestDrive 'tmp')
+
     # A main repository with a linked worktree, like this bucket's .worktrees layout.
     $script:repo = Join-Path $TestDrive 'repo'
     git init -q $script:repo
     git -C $script:repo -c user.name=test -c user.email=test@example.com commit -q --allow-empty -m init
+    git -C $script:repo remote add origin 'git@github.com:Contoso/Widget.git'
     New-Item -ItemType Directory -Path (Join-Path $script:repo 'src') | Out-Null
     $script:worktree = Join-Path $TestDrive 'repo-wt'
     git -C $script:repo worktree add -q $script:worktree -b wt 2>$null
+    $script:repo = Get-LongPath $script:repo
+    $script:worktree = Get-LongPath $script:worktree
+    # A repository under home, with an origin that is not on GitHub.
+    $script:inner = Join-Path $script:homeDir 'code\Inner'
+    git init -q $script:inner
+    git -C $script:inner remote add origin 'https://dev.azure.com/contoso/proj/_git/inner'
     $script:plain = Join-Path $TestDrive 'plain'
-    New-Item -ItemType Directory -Path $script:plain | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $script:plain 'sub') -Force | Out-Null
+    $script:plain = Get-LongPath $script:plain
+
+    function Get-Root([string]$Path) { Get-ClaudeTabRoot -Path $Path }
+    function Reset-TabColors {
+        Remove-Item -LiteralPath $script:store -Recurse -Force -ErrorAction Ignore
+        Remove-Item -LiteralPath (Join-Path $script:state 'colors.json*') -Force -ErrorAction Ignore
+        & $script:tabs { $script:Store = $null; $script:StoreStamp = $null; $script:GitCache = @{} }
+    }
 
     # Fake claude: records its arguments, its tab token, and whether the record existed.
     $script:fakeOut = Join-Path $TestDrive 'fake-out.txt'
@@ -95,43 +122,150 @@ AfterAll {
     Remove-Variable -Name ClaudeTabOriginalPrompt, ClaudeTabPendingRestore -Scope Global -ErrorAction Ignore
     $env:WT_SESSION = $script:savedEnv.WT_SESSION
     $env:CLAUDECODE = $script:savedEnv.CLAUDECODE
+    $env:CLAUDE_TAB_TOKEN = $script:savedEnv.CLAUDE_TAB_TOKEN
     git -C $script:repo worktree remove --force $script:worktree 2>$null
     # git marks object files read-only, which TestDrive cleanup cannot delete.
-    Remove-Item -LiteralPath $script:repo, $script:worktree -Recurse -Force -ErrorAction Ignore
+    Remove-Item -LiteralPath $script:repo, $script:worktree, $script:inner -Recurse -Force -ErrorAction Ignore
 }
 
-Describe 'Claude tabs: colors by repository' -Tag 'Light', 'Bucket' {
-    BeforeEach {
-        Remove-Item -LiteralPath (Join-Path $script:state 'colors.json') -ErrorAction Ignore
-        & $script:tabs { $script:ColorMap = $null; $script:RootCache = @{} }
+Describe 'Claude tabs: colors by root' -Tag 'Light', 'Bucket' {
+    BeforeEach { Reset-TabColors }
+
+    It 'colors a repository, its subfolders, and its linked worktrees as one root keyed by its GitHub identity' {
+        $roots = foreach ($dir in $script:repo, (Join-Path $script:repo 'src'), $script:worktree) { Get-Root $dir }
+
+        $roots.Kind | Should -Be @('Repository', 'Repository', 'Repository')
+        $roots.Key | Should -Be @('contoso/widget', 'contoso/widget', 'contoso/widget')
+        @($roots.Color | Select-Object -Unique).Count | Should -Be 1
+        $roots[0].Color | Should -Match '^#[0-9A-F]{6}$'
     }
 
-    It 'gives a repository, its subfolders, and its linked worktrees the same root' {
-        $expected = Get-LongPath $script:repo
-        foreach ($dir in $script:repo, (Join-Path $script:repo 'src'), $script:worktree) {
-            $root = & $script:tabs { param($d) Get-ClaudeTabProjectRoot $d } $dir
-            Get-LongPath $root | Should -Be $expected -Because "$dir belongs to the repository"
+    It 'keys a repository by its GitHub owner/repo whatever the origin form, else by its folder name' -TestCases @(
+        @{ Url = 'git@github.com:Owner/Repo.git'; Key = 'owner/repo' }
+        @{ Url = 'ssh://git@github.com/Owner/Repo'; Key = 'owner/repo' }
+        @{ Url = 'https://github.com/Owner/Repo/'; Key = 'owner/repo' }
+        @{ Url = 'https://token@github.com/Owner/Repo.git/'; Key = 'owner/repo' }
+        @{ Url = 'https://dev.azure.com/o/p/_git/repo'; Key = 'clone' }
+        @{ Url = ''; Key = 'clone' }
+    ) {
+        param($Url, $Key)
+        & $script:tabs { param($u) ConvertTo-ClaudeTabRepoKey -Url $u -Folder 'D:\Git\Clone' } $Url | Should -Be $Key
+    }
+
+    It 'colors the home folder and its subfolders as one root, while a repository under home keeps its own' {
+        $homeRoot = Get-Root $script:homeDir
+        $notes = Get-Root (Join-Path $script:homeDir 'Documents\notes')
+        $inner = Get-Root $script:inner
+
+        $homeRoot.Kind, $homeRoot.Key | Should -Be @('Home', '~')
+        $notes.Key | Should -Be '~'
+        $notes.Color | Should -Be $homeRoot.Color
+        $inner.Kind, $inner.Key | Should -Be @('Repository', 'inner')
+        $inner.Color | Should -Not -Be $homeRoot.Color
+    }
+
+    It 'leaves folders under no root with the default color' {
+        $root = Get-Root $script:plain
+
+        $root.Kind | Should -Be 'None'
+        $root.Color | Should -BeNullOrEmpty
+    }
+
+    It 'marks a folder as a root of its own, keyed relative to home when under it' {
+        $plain = Set-ClaudeTabRoot -Path $script:plain
+        $documents = Set-ClaudeTabRoot -Path (Join-Path $script:homeDir 'Documents')
+
+        $sub = Get-Root (Join-Path $script:plain 'sub')
+        $sub.Kind, $sub.Key, $sub.Color | Should -Be @('Marked', $script:plain.ToLowerInvariant(), $plain.Color)
+        $notes = Get-Root (Join-Path $script:homeDir 'Documents\notes')
+        $notes.Key, $notes.Color | Should -Be @('~\documents', $documents.Color)
+        (Get-Root $script:homeDir).Key | Should -Be '~'
+        @($plain.Color, $documents.Color, (Get-Root $script:homeDir).Color, (Get-Root $script:repo).Color | Select-Object -Unique).Count | Should -Be 4
+    }
+
+    It 'uses a color given when marking, and only recolors a folder that already is a root' {
+        Set-ClaudeTabRoot -Path $script:plain -Color '#abcdef' | Out-Null
+        Set-ClaudeTabRoot -Path $script:repo -Color '#123456' | Out-Null
+        Set-ClaudeTabRoot -Path $script:plain -Color '#654321' | Out-Null
+
+        (Get-Root (Join-Path $script:plain 'sub')).Color | Should -Be '#654321'
+        (Get-Root $script:worktree).Color | Should -Be '#123456'
+        $saved = Get-Content -LiteralPath (Join-Path $script:store 'tab-roots.json') -Raw | ConvertFrom-Json -AsHashtable
+        @($saved['roots']) | Should -Be @($script:plain.ToLowerInvariant())
+    }
+
+    It 'unmarks a root, so its folders go back to their parent root' {
+        Set-ClaudeTabRoot -Path (Join-Path $script:homeDir 'Documents') | Out-Null
+
+        Remove-ClaudeTabRoot -Path (Join-Path $script:homeDir 'Documents')
+
+        (Get-Root (Join-Path $script:homeDir 'Documents\notes')).Kind | Should -Be 'Home'
+        Remove-ClaudeTabRoot -Path $script:repo -WarningVariable warned -WarningAction SilentlyContinue
+        $warned | Should -Not -BeNullOrEmpty
+    }
+
+    It 'hands out the palette first, then colors that do not repeat, skipping colors already taken' {
+        $sequence = & $script:tabs { 0..299 | ForEach-Object { Get-ClaudeTabSequenceColor $_ } }
+
+        $sequence[0..11] | Should -Be @('#2E86DE', '#E67E22', '#27AE60', '#C0392B', '#8E44AD', '#16A085', '#D81B60', '#B7950B', '#3949AB', '#6D4C41', '#00838F', '#7CB342')
+        @($sequence | Select-Object -Unique).Count | Should -Be 300
+        & $script:tabs { Get-ClaudeTabNextColor ([ordered]@{ a = '#2e86de'; b = '#27AE60' }) } | Should -Be '#E67E22'
+    }
+
+    It 'keeps a root''s color across sessions in a roaming map' {
+        $first = (Get-Root $script:repo).Color
+        & $script:tabs { $script:Store = $null; $script:GitCache = @{} }
+
+        (Get-Root $script:worktree).Color | Should -Be $first
+        $saved = Get-Content -LiteralPath (Join-Path $script:store 'tab-roots.json') -Raw | ConvertFrom-Json -AsHashtable
+        $saved['version'] | Should -Be 2
+        $saved['colors']['contoso/widget'] | Should -Be $first
+    }
+
+    It 'calls git once per new folder' {
+        Mock git -ModuleName MarkMichaelisClaudeTabs { & (Get-Command git -CommandType Application | Select-Object -First 1) @args }
+
+        1..3 | ForEach-Object { Get-Root (Join-Path $script:repo 'src') } | Out-Null
+
+        Should -Invoke git -ModuleName MarkMichaelisClaudeTabs -Times 1 -Exactly
+    }
+
+    It 'migrates path-keyed maps to identity keys, keeping colors and dropping missing and temp folders' {
+        New-Item -ItemType Directory -Path $script:store -Force | Out-Null
+        $roaming = [ordered]@{
+            $script:repo.ToLowerInvariant()                         = '#C0392B'
+            $script:homeDir.ToLowerInvariant()                         = '#8E44AD'
+            $script:plain.ToLowerInvariant()                        = '#16A085'
+            'c:\no\such\folder446'                                  = '#B7950B'
+            (Join-Path $TestDrive 'tmp\scratch').ToLowerInvariant() = '#3949AB'
         }
+        $roaming | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $script:store 'colors.json')
+        $local = [ordered]@{ $script:worktree.ToLowerInvariant() = '#D81B60'; $script:inner.ToLowerInvariant() = '#00838F' }
+        $local | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $script:state 'colors.json')
+
+        (Get-Root $script:repo).Color | Should -Be '#C0392B'
+
+        $saved = Get-Content -LiteralPath (Join-Path $script:store 'tab-roots.json') -Raw | ConvertFrom-Json -AsHashtable
+        $saved['colors'].Keys | Sort-Object | Should -Be (@('~', 'contoso/widget', 'inner', $script:plain.ToLowerInvariant()) | Sort-Object)
+        $saved['colors']['~'] | Should -Be '#8E44AD'
+        $saved['colors']['inner'] | Should -Be '#00838F'
+        @($saved['roots']) | Should -Be @($script:plain.ToLowerInvariant())
+        Join-Path $script:state 'colors.json' | Should -Not -Exist
+        Join-Path $script:state 'colors.json.migrated' | Should -Exist
+        Join-Path $script:store 'colors.json' | Should -Exist
     }
 
-    It 'leaves folders outside any repository uncolored' {
-        & $script:tabs { param($d) Get-ClaudeTabProjectRoot $d } $script:plain | Should -BeNullOrEmpty
-    }
+    It 'never overwrites a map it cannot read, and ignores OneDrive conflict copies' {
+        New-Item -ItemType Directory -Path $script:store -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:store 'tab-roots.json') -Value 'not json {'
+        '{ "version": 2, "colors": { "contoso/widget": "#ABCDEF" }, "roots": [] }' |
+            Set-Content -LiteralPath (Join-Path $script:store 'tab-roots-OTHERPC.json')
 
-    It 'treats the first folder under C:\Git as the project when it is not a repository' {
-        & $script:tabs { Get-ClaudeTabProjectRoot 'C:\Git\NoSuchRepo412\sub' } | Should -Be 'C:\Git\NoSuchRepo412'
-    }
+        $color = (Get-Root $script:repo).Color
 
-    It 'keeps committed colors and gives a new repository an unused, stable color' {
-        '{ "c:\\git\\one": "#2E86DE", "c:\\git\\two": "#E67E22" }' | Set-Content -LiteralPath (Join-Path $script:state 'colors.json')
-
-        $new = & $script:tabs { Get-ClaudeTabColor 'C:\Git\Three' }
-        & $script:tabs { $script:ColorMap = $null }
-        $again = & $script:tabs { Get-ClaudeTabColor 'c:\git\three' }
-
-        (& $script:tabs { Get-ClaudeTabColor 'C:\Git\One' }) | Should -Be '#2E86DE'
-        $new | Should -Not -BeIn @('#2E86DE', '#E67E22')
-        $again | Should -Be $new
+        $color | Should -Be '#2E86DE'
+        (Get-Content -LiteralPath (Join-Path $script:store 'tab-roots.json') -Raw).Trim() | Should -Be 'not json {'
+        { Set-ClaudeTabRoot -Path $script:plain } | Should -Throw '*not valid JSON*'
     }
 }
 
@@ -244,6 +378,49 @@ Describe 'Claude tabs: prompt' -Tag 'Light', 'Bucket' {
     }
 }
 
+Describe 'Claude tabs: Git Bash tabs get the same root and color' -Tag 'Light', 'Bucket' -Skip:(-not $hasNode) {
+    BeforeAll {
+        # The helper finds the roaming map and home folder the way the module does.
+        $script:savedParityEnv = @{ USERPROFILE = $env:USERPROFILE; OneDriveCommercial = $env:OneDriveCommercial }
+        $env:USERPROFILE = $script:homeDir
+        $env:OneDriveCommercial = Join-Path $script:state 'od'
+        function Get-BashColor([string]$Path) { node $script:helper color $Path }
+    }
+    AfterAll {
+        $env:USERPROFILE = $script:savedParityEnv.USERPROFILE
+        $env:OneDriveCommercial = $script:savedParityEnv.OneDriveCommercial
+    }
+    BeforeEach { Reset-TabColors }
+
+    It 'computes the same color sequence' {
+        $node = @(node $script:helper sequence 120)
+        $ps = & $script:tabs { 0..119 | ForEach-Object { Get-ClaudeTabSequenceColor $_ } }
+
+        $node | Should -Be $ps
+    }
+
+    It 'resolves repositories, home, marked roots, and unrooted folders as PowerShell does' {
+        $bashRepo = Get-BashColor (Join-Path $script:repo 'src')
+        $bashHome = Get-BashColor (Join-Path $script:homeDir 'Documents\notes')
+        $marked = Set-ClaudeTabRoot -Path $script:plain
+
+        $bashRepo | Should -Match '^#[0-9A-F]{6}$'
+        (Get-Root $script:worktree).Color | Should -Be $bashRepo
+        (Get-Root $script:homeDir).Color | Should -Be $bashHome
+        Get-BashColor (Join-Path $script:plain 'sub') | Should -Be $marked.Color
+        Get-BashColor $script:inner | Should -Be (Get-Root $script:inner).Color
+        Get-BashColor (Join-Path $TestDrive 'tmp') | Should -BeNullOrEmpty
+    }
+
+    It 'leaves a path-keyed map from an earlier version for PowerShell to migrate' {
+        New-Item -ItemType Directory -Path $script:store -Force | Out-Null
+        '{ "c:\\git\\x": "#2E86DE" }' | Set-Content -LiteralPath (Join-Path $script:store 'colors.json')
+
+        Get-BashColor $script:repo | Should -BeNullOrEmpty
+        Join-Path $script:store 'tab-roots.json' | Should -Not -Exist
+    }
+}
+
 Describe 'Claude tabs: Git Bash helper and tab-session hook' -Tag 'Light', 'Bucket' -Skip:(-not $hasNode) {
     BeforeAll {
         $script:nodeHome = Join-Path $TestDrive 'node-home'
@@ -264,21 +441,6 @@ Describe 'Claude tabs: Git Bash helper and tab-session hook' -Tag 'Light', 'Buck
         $env:USERPROFILE = $script:savedNodeEnv.USERPROFILE
         $env:CLAUDE_TAB_TOKEN = $script:savedNodeEnv.CLAUDE_TAB_TOKEN
         $env:CLAUDE_PID = $script:savedNodeEnv.CLAUDE_PID
-    }
-
-    It 'gives Git Bash tabs the same colors PowerShell tabs read' {
-        $bashColor = node $script:helper color (Join-Path $script:repo 'src')
-        & $script:tabs { param($f) $script:ColorsFile = $f; $script:ColorMap = $null; $script:RootCache = @{} } (Join-Path $script:nodeHome '.claude\terminal-tabs\colors.json')
-        try {
-            $psColor = & $script:tabs { param($d) Get-ClaudeTabColor (Get-ClaudeTabProjectRoot $d) } $script:worktree
-        }
-        finally {
-            & $script:tabs { param($f) $script:ColorsFile = $f; $script:ColorMap = $null } (Join-Path $script:state 'colors.json')
-        }
-
-        $bashColor | Should -Match '^#[0-9A-F]{6}$'
-        $psColor | Should -Be $bashColor
-        node $script:helper color $script:plain | Should -BeNullOrEmpty
     }
 
     It 'records a session through the hook and keeps the shell start time exact' {

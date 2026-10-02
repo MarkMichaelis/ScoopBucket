@@ -22,7 +22,8 @@ BeforeAll {
         Import-WindowsTerminalSettings -ConfigPath $script:wtConfig `
             -SettingsPath (Join-Path $Root 'wt\settings.json') -ClaudeHome (Join-Path $Root '.claude') `
             -ProfilePath (Join-Path $Root 'profile.ps1') -BashrcPath (Join-Path $Root '.bashrc') `
-            -BashProfilePath (Join-Path $Root '.bash_profile') -GitBashPath $gitBash -WhatIf:$WhatIf
+            -BashProfilePath (Join-Path $Root '.bash_profile') -GitBashPath $gitBash -WhatIf:$WhatIf `
+            -LegacyTabsDir (Join-Path $Root 'legacy')
     }
 
     function Invoke-ClaudeImport {
@@ -90,16 +91,50 @@ Describe 'Import-WindowsTerminalSettings' -Tag 'Light', 'Module' {
         [System.IO.File]::ReadAllText((Join-Path $scripts 'claude-tabs.bash')) | Should -Not -Match "`r"
     }
 
-    It 'seeds tab colors without overwriting local choices' {
-        $colors = Join-Path $script:root '.claude\terminal-tabs\colors.json'
-        Set-TestFile $colors '{ "c:\\git\\scoop": "#111111", "c:\\git\\other": "#222222" }'
+    It 'replaces the profile and .bashrc lines an earlier install wrote, in place, then removes its scripts' {
+        $profilePath = Join-Path $script:root 'profile.ps1'
+        Set-TestFile $profilePath (@(
+                'Import-Module posh-git'
+                '# Windows Terminal: color tabs by repo; resume Claude sessions in tabs restored after a crash or reboot'
+                '$claudeTabsModule = Join-Path $env:LOCALAPPDATA ''WindowsTerminalTabs\ClaudeTabs.psm1'''
+                'if (Test-Path $claudeTabsModule) { Import-Module $claudeTabsModule; Invoke-ClaudeTabRestore }'
+                'Remove-Variable claudeTabsModule'
+                'Import-Module Other'
+            ) -join "`r`n")
+        [System.IO.File]::WriteAllText((Join-Path $script:root '.bashrc'), (@(
+                'alias ll=ls'
+                '# Windows Terminal: color tabs by repo; resume Claude sessions in tabs restored after a crash or reboot'
+                '_wtt="$(cygpath -u "$LOCALAPPDATA")/WindowsTerminalTabs/claude-tabs.bash"; [ -f "$_wtt" ] && . "$_wtt"; unset _wtt'
+                ''
+            ) -join "`n"))
+        foreach ($name in 'ClaudeTabs.psm1', 'claude-tabs.js', 'claude-tabs.bash') { Set-TestFile (Join-Path $script:root "legacy\$name") 'old' }
 
-        Invoke-WtImport -Root $script:root | Out-Null
+        $first = Invoke-WtImport -Root $script:root
+        $second = Invoke-WtImport -Root $script:root
 
-        $c = Read-TestJson $colors
-        $c['c:\git\scoop'] | Should -Be '#111111'
-        $c['c:\git\other'] | Should -Be '#222222'
-        $c['c:\git\codiwomplersocialmedia'] | Should -Be '#2E86DE'
+        $first.Changed | Should -Contain 'PowerShell profile'
+        $first.Changed | Should -Contain '.bashrc'
+        $first.Changed | Should -Contain 'obsolete tab scripts'
+        $second.Changed | Should -BeNullOrEmpty
+        $profileLines = Get-Content -LiteralPath $profilePath
+        $profileLines.Count | Should -Be 6
+        $profileLines[0] | Should -Be 'Import-Module posh-git'
+        $profileLines[2] | Should -Be '$claudeTabsModule = Join-Path $HOME ''.claude\scripts\ClaudeTabs.psm1'''
+        $profileLines[5] | Should -Be 'Import-Module Other'
+        $bashrc = [System.IO.File]::ReadAllText((Join-Path $script:root '.bashrc'))
+        $bashrc | Should -Not -Match 'WindowsTerminalTabs|\r'
+        @($bashrc -split "`n" | Where-Object { $_ -match 'claude-tabs\.bash' }).Count | Should -Be 1
+        $bashrc | Should -Match '^alias ll=ls\n'
+        Join-Path $script:root 'legacy' | Should -Not -Exist
+    }
+
+    It 'keeps the earlier install''s scripts while a startup file still loads them' {
+        Set-TestFile (Join-Path $script:root '.bashrc') '_wtt="$(cygpath -u "$LOCALAPPDATA")/WindowsTerminalTabs/claude-tabs.bash"'
+        Set-TestFile (Join-Path $script:root 'legacy\claude-tabs.bash') 'old'
+
+        Invoke-WtImport -Root $script:root -NoGitBash | Out-Null
+
+        Join-Path $script:root 'legacy\claude-tabs.bash' | Should -Exist
     }
 
     It 'adds the profile import and the bash source line exactly once' {

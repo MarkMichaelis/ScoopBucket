@@ -98,3 +98,38 @@ function Get-WindowsTerminalSettingsPath {
     $found = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
     if ($found) { $found } else { $candidates[0] }
 }
+
+function Repair-StaleLines {
+    # Replaces lines an earlier install wrote: when $Path has a line matching $Stale,
+    # removes it and every line matching one of $Companion (the rest of that block), and
+    # puts $Lines where the block was. Returns $false, changing nothing, when no line
+    # matches $Stale -- callers then fall back to Add-LinesIfMissing.
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Stale,
+        [string[]]$Companion = @(),
+        [Parameter(Mandatory)][string[]]$Lines,
+        [switch]$LfLineEndings
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    $current = [System.IO.File]::ReadAllText($Path)
+    $existing = $current -split "`r?`n"
+    if (-not ($existing | Where-Object { $_ -match $Stale })) { return $false }
+    if (-not $PSCmdlet.ShouldProcess($Path, "Replace lines matching $Stale")) { return $false }
+
+    $newline = if ($LfLineEndings) { "`n" } elseif ($current.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $kept = [System.Collections.Generic.List[string]]::new()
+    $inserted = $false
+    foreach ($line in $existing) {
+        $isStale = $line -match $Stale -or @($Companion | Where-Object { $line -match $_ }).Count -gt 0
+        if (-not $isStale) { $kept.Add($line); continue }
+        if (-not $inserted) { $kept.AddRange([string[]]$Lines); $inserted = $true }
+    }
+    [System.IO.File]::WriteAllText($Path, ($kept -join $newline), [System.Text.UTF8Encoding]::new($hasBom))
+    $true
+}
