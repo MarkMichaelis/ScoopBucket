@@ -25,6 +25,9 @@ $script:RootsFile = Join-Path $script:StoreDir 'tab-roots.json'
 # machine-local one is renamed to colors.json.migrated after it is merged.
 $script:LegacyRoamingColors = Join-Path $script:StoreDir 'colors.json'
 $script:LegacyLocalColors = Join-Path $script:TabsRoot 'colors.json'
+$script:LocalMerged = $false
+# Local, not in OneDrive: it only has to keep this machine's shells from racing.
+$script:LockFile = Join-Path $script:TabsRoot 'tab-roots.lock'
 $script:HomeDir = $HOME
 $script:TempDir = [System.IO.Path]::GetTempPath()
 # The first colors handed out; later roots continue with Get-ClaudeTabSequenceColor.
@@ -82,6 +85,7 @@ function ConvertTo-ClaudeTabRepoKey {
 
 function Get-ClaudeTabOriginUrl {
     # remote.origin.url read straight from the repository's config file: no extra git call.
+    # (url.<base>.insteadOf rewrites and config includes are not applied.)
     param([string]$CommonDir)
     $inOrigin = $false
     foreach ($line in (Get-Content -LiteralPath (Join-Path $CommonDir 'config') -ErrorAction SilentlyContinue)) {
@@ -194,10 +198,9 @@ function Get-ClaudeTabStore {
     # The root map: colors (key -> #RRGGBB) and roots (marked root keys). Re-read when
     # the file changes (e.g. OneDrive syncs another machine's edit). A file that cannot
     # be parsed is never overwritten: colors are then assigned for this session only.
+    param([switch]$Fresh)
     $stamp = if (Test-Path -LiteralPath $script:RootsFile) { (Get-Item -LiteralPath $script:RootsFile).LastWriteTimeUtc }
-    if ($null -ne $script:Store -and $stamp -eq $script:StoreStamp -and -not (Test-Path -LiteralPath $script:LegacyLocalColors)) {
-        return $script:Store
-    }
+    if (-not $Fresh -and $null -ne $script:Store -and $stamp -eq $script:StoreStamp) { return $script:Store }
     $store = [ordered]@{ colors = [ordered]@{}; roots = [System.Collections.Generic.List[string]]::new(); Writable = $true }
     $dirty = $false
     if ($stamp) {
@@ -214,14 +217,47 @@ function Get-ClaudeTabStore {
     }
     $script:Store = $store
     $script:StoreStamp = $stamp
-    if ($store.Writable -and (Test-Path -LiteralPath $script:LegacyLocalColors)) {
+    # Merged once per session: if it cannot be renamed away, it is retried next session
+    # rather than on every prompt.
+    $mergeLocal = $store.Writable -and -not $script:LocalMerged -and (Test-Path -LiteralPath $script:LegacyLocalColors)
+    if ($mergeLocal) {
+        $script:LocalMerged = $true
         Add-ClaudeTabLegacyColors $store $script:LegacyLocalColors
         $dirty = $true
     }
-    if ($dirty -and (Save-ClaudeTabStore) -and (Test-Path -LiteralPath $script:LegacyLocalColors)) {
-        Move-Item -LiteralPath $script:LegacyLocalColors -Destination "$($script:LegacyLocalColors).migrated" -Force
+    if ($dirty -and (Save-ClaudeTabStore) -and $mergeLocal) {
+        Move-Item -LiteralPath $script:LegacyLocalColors -Destination "$($script:LegacyLocalColors).migrated" -Force -ErrorAction SilentlyContinue
     }
     $script:Store
+}
+
+function Invoke-ClaudeTabStoreUpdate {
+    # Runs $Update against a fresh read of the map and saves the result, holding a lock
+    # file so shells that discover roots at the same moment (a restored multi-tab
+    # layout) cannot drop each other's entries. claude-tabs.js takes the same lock. A
+    # lock older than a few seconds was left by a crashed shell and is broken.
+    param([scriptblock]$Update)
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $script:LockFile) | Out-Null
+    $lock = $null
+    for ($i = 0; $i -lt 40 -and -not $lock; $i++) {
+        try { $lock = [System.IO.File]::Open($script:LockFile, 'CreateNew', 'Write', 'None') }
+        catch {
+            $since = try { (Get-Date) - (Get-Item -LiteralPath $script:LockFile -ErrorAction Stop).LastWriteTime } catch { $null }
+            if ($since -and $since.TotalSeconds -gt 5) { Remove-Item -LiteralPath $script:LockFile -Force -ErrorAction SilentlyContinue }
+            else { Start-Sleep -Milliseconds 50 }
+        }
+    }
+    try {
+        $result = & $Update (Get-ClaudeTabStore -Fresh)
+        Save-ClaudeTabStore | Out-Null
+        $result
+    }
+    finally {
+        if ($lock) {
+            $lock.Dispose()
+            Remove-Item -LiteralPath $script:LockFile -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Resolve-ClaudeTabRoot {
@@ -249,11 +285,12 @@ function Get-ClaudeTabRootColor {
     # The root's color, assigning (and saving) the next unused one on first sight.
     param($Root)
     $store = Get-ClaudeTabStore
-    if (-not $store.colors.Contains($Root.Key)) {
-        $store.colors[$Root.Key] = Get-ClaudeTabNextColor $store.colors
-        Save-ClaudeTabStore | Out-Null
+    if ($store.colors.Contains($Root.Key)) { return $store.colors[$Root.Key] }
+    Invoke-ClaudeTabStoreUpdate {
+        param($fresh)
+        if (-not $fresh.colors.Contains($Root.Key)) { $fresh.colors[$Root.Key] = Get-ClaudeTabNextColor $fresh.colors }
+        $fresh.colors[$Root.Key]
     }
-    $store.colors[$Root.Key]
 }
 
 function Resolve-ClaudeTabDirectory {
@@ -312,11 +349,13 @@ function Set-ClaudeTabRoot {
     $isRoot = $root -and $root.Path.TrimEnd('\').Equals($directory.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)
     $key = if ($isRoot) { $root.Key } else { ConvertTo-ClaudeTabMarkedKey $directory }
     if (-not $PSCmdlet.ShouldProcess($directory, "Set tab-color root $key")) { return }
-    if (-not $isRoot) { $store.roots.Add($key) }
-    if ($Color) { $store.colors[$key] = $Color.ToUpperInvariant() }
-    elseif (-not $store.colors.Contains($key)) { $store.colors[$key] = Get-ClaudeTabNextColor $store.colors }
-    Save-ClaudeTabStore | Out-Null
-    Update-ClaudeTabColor
+    Invoke-ClaudeTabStoreUpdate {
+        param($fresh)
+        if (-not $isRoot -and $key -notin $fresh.roots) { $fresh.roots.Add($key) }
+        if ($Color) { $fresh.colors[$key] = $Color.ToUpperInvariant() }
+        elseif (-not $fresh.colors.Contains($key)) { $fresh.colors[$key] = Get-ClaudeTabNextColor $fresh.colors }
+    }
+    try { Update-ClaudeTabColor } catch { }
     Get-ClaudeTabRoot -Path $directory
 }
 
@@ -330,16 +369,22 @@ function Remove-ClaudeTabRoot {
     [CmdletBinding(SupportsShouldProcess)]
     param([string]$Path = '.')
     $directory = Get-ClaudeTabFullPath $Path
-    if (-not $directory) { $directory = $Path }  # a marked folder that has since been deleted
+    if (-not $directory) {
+        # A marked folder that has since been deleted: resolve the path as typed.
+        $typed = if ($Path -eq '~' -or $Path -match '^~[\\/]') { $script:HomeDir.TrimEnd('\') + $Path.Substring(1) } else { $Path }
+        $directory = [System.IO.Path]::GetFullPath($typed.Replace('/', '\'), (Get-Location).ProviderPath)
+    }
     $key = ConvertTo-ClaudeTabMarkedKey $directory
     $store = Get-ClaudeTabStore
     if ($key -notin $store.roots) { Write-Warning "$directory is not a marked root; Get-ClaudeTabRoot shows where its color comes from."; return }
     if (-not $store.Writable) { throw "Cannot update $($script:RootsFile): it is not valid JSON. Fix or delete it first." }
     if (-not $PSCmdlet.ShouldProcess($directory, "Remove tab-color root $key")) { return }
-    [void]$store.roots.Remove($key)
-    $store.colors.Remove($key)
-    Save-ClaudeTabStore | Out-Null
-    Update-ClaudeTabColor
+    Invoke-ClaudeTabStoreUpdate {
+        param($fresh)
+        [void]$fresh.roots.Remove($key)
+        $fresh.colors.Remove($key)
+    }
+    try { Update-ClaudeTabColor } catch { }
 }
 
 function Update-ClaudeTabColor {
@@ -517,7 +562,7 @@ if ($env:WT_SESSION) {
     $exitCode = $global:LASTEXITCODE
     Remove-StaleClaudeTabRecords
     Initialize-ClaudeTabRestore
-    Update-ClaudeTabColor
+    try { Update-ClaudeTabColor } catch { }
     $global:LASTEXITCODE = $exitCode
 }
 

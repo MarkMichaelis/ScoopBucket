@@ -103,6 +103,7 @@ Describe 'Import-WindowsTerminalSettings' -Tag 'Light', 'Module' {
             ) -join "`r`n")
         [System.IO.File]::WriteAllText((Join-Path $script:root '.bashrc'), (@(
                 'alias ll=ls'
+                '# note to self: claude-tabs.bash comes from the scoop bucket'
                 '# Windows Terminal: color tabs by repo; resume Claude sessions in tabs restored after a crash or reboot'
                 '_wtt="$(cygpath -u "$LOCALAPPDATA")/WindowsTerminalTabs/claude-tabs.bash"; [ -f "$_wtt" ] && . "$_wtt"; unset _wtt'
                 ''
@@ -123,8 +124,8 @@ Describe 'Import-WindowsTerminalSettings' -Tag 'Light', 'Module' {
         $profileLines[5] | Should -Be 'Import-Module Other'
         $bashrc = [System.IO.File]::ReadAllText((Join-Path $script:root '.bashrc'))
         $bashrc | Should -Not -Match 'WindowsTerminalTabs|\r'
-        @($bashrc -split "`n" | Where-Object { $_ -match 'claude-tabs\.bash' }).Count | Should -Be 1
-        $bashrc | Should -Match '^alias ll=ls\n'
+        @($bashrc -split "`n" | Where-Object { $_ -match '^\[ -f .*claude-tabs\.bash' }).Count | Should -Be 1
+        $bashrc | Should -Match '^alias ll=ls\n# note to self: claude-tabs\.bash comes from the scoop bucket\n'
         Join-Path $script:root 'legacy' | Should -Not -Exist
     }
 

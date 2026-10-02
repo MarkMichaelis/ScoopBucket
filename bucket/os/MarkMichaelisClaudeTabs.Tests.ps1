@@ -56,6 +56,7 @@ BeforeAll {
         $script:RootsFile = Join-Path $store 'tab-roots.json'
         $script:LegacyRoamingColors = Join-Path $store 'colors.json'
         $script:LegacyLocalColors = Join-Path $root 'colors.json'
+        $script:LockFile = Join-Path $root 'tab-roots.lock'
         $script:HomeDir = $homeDir
         $script:TempDir = $temp
     } $script:state $script:store $script:homeDir (Join-Path $TestDrive 'tmp')
@@ -82,7 +83,7 @@ BeforeAll {
     function Reset-TabColors {
         Remove-Item -LiteralPath $script:store -Recurse -Force -ErrorAction Ignore
         Remove-Item -LiteralPath (Join-Path $script:state 'colors.json*') -Force -ErrorAction Ignore
-        & $script:tabs { $script:Store = $null; $script:StoreStamp = $null; $script:GitCache = @{} }
+        & $script:tabs { $script:Store = $null; $script:StoreStamp = $null; $script:GitCache = @{}; $script:LocalMerged = $false }
     }
 
     # Fake claude: records its arguments, its tab token, and whether the record existed.
@@ -253,6 +254,64 @@ Describe 'Claude tabs: colors by root' -Tag 'Light', 'Bucket' {
         Join-Path $script:state 'colors.json' | Should -Not -Exist
         Join-Path $script:state 'colors.json.migrated' | Should -Exist
         Join-Path $script:store 'colors.json' | Should -Exist
+    }
+
+    It 'keeps a root another shell added after this one read the map' {
+        (Get-Root $script:repo).Color | Should -Be '#2E86DE'
+        # Another shell adds a root within the same file-time tick, so this shell's cached
+        # copy still looks current.
+        $file = Join-Path $script:store 'tab-roots.json'
+        '{ "version": 2, "colors": { "contoso/widget": "#2E86DE", "other/repo": "#E67E22" }, "roots": [] }' | Set-Content -LiteralPath $file
+        & $script:tabs { param($f) $script:StoreStamp = (Get-Item -LiteralPath $f).LastWriteTimeUtc } $file
+
+        $homeColor = (Get-Root $script:homeDir).Color
+
+        $homeColor | Should -Be '#27AE60'
+        $saved = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json -AsHashtable
+        $saved['colors']['other/repo'] | Should -Be '#E67E22'
+        $saved['colors']['~'] | Should -Be '#27AE60'
+    }
+
+    It 'breaks a lock left by a crashed shell' {
+        New-Item -ItemType Directory -Path $script:state -Force | Out-Null
+        $lock = Join-Path $script:state 'tab-roots.lock'
+        New-Item -ItemType File -Path $lock -Force | Out-Null
+        (Get-Item -LiteralPath $lock).LastWriteTime = (Get-Date).AddMinutes(-1)
+
+        (Get-Root $script:repo).Color | Should -Be '#2E86DE'
+        $lock | Should -Not -Exist
+    }
+
+    It 'merges a machine-local map it cannot rename only once per session' {
+        $local = Join-Path $script:state 'colors.json'
+        "{ `"$($script:inner.ToLowerInvariant().Replace('\', '\\'))`": `"#00838F`" }" | Set-Content -LiteralPath $local
+        $handle = [System.IO.File]::Open($local, 'Open', 'Read', 'Read')  # blocks the rename
+        try {
+            (Get-Root $script:inner).Color | Should -Be '#00838F'
+            $stamp = (Get-Item -LiteralPath (Join-Path $script:store 'tab-roots.json')).LastWriteTimeUtc
+            Mock git -ModuleName MarkMichaelisClaudeTabs { & (Get-Command git -CommandType Application | Select-Object -First 1) @args }
+
+            1..3 | ForEach-Object { Get-Root $script:inner } | Out-Null
+
+            Should -Invoke git -ModuleName MarkMichaelisClaudeTabs -Times 0 -Exactly
+            (Get-Item -LiteralPath (Join-Path $script:store 'tab-roots.json')).LastWriteTimeUtc | Should -Be $stamp
+        }
+        finally { $handle.Dispose() }
+        $local | Should -Exist
+    }
+
+    It 'unmarks a marked folder that has since been deleted, given a relative path' {
+        $gone = Join-Path $TestDrive 'gone446'
+        New-Item -ItemType Directory -Path $gone | Out-Null
+        Set-ClaudeTabRoot -Path $gone | Out-Null
+        Remove-Item -LiteralPath $gone
+        Push-Location -LiteralPath $TestDrive
+        try { Remove-ClaudeTabRoot -Path 'gone446' -WarningVariable warned -WarningAction SilentlyContinue }
+        finally { Pop-Location }
+
+        $warned | Should -BeNullOrEmpty
+        $saved = Get-Content -LiteralPath (Join-Path $script:store 'tab-roots.json') -Raw | ConvertFrom-Json -AsHashtable
+        @($saved['roots']) | Should -BeNullOrEmpty
     }
 
     It 'never overwrites a map it cannot read, and ignores OneDrive conflict copies' {

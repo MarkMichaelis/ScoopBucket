@@ -149,11 +149,44 @@ function colorFor(dir) {
     if (!best || candidate.path.replace(/\\+$/, '').length > best.path.replace(/\\+$/, '').length) best = candidate;
   }
   if (!best) return '';
-  if (!store.colors[best.key]) {
-    store.colors[best.key] = nextColor(store.colors);
-    if (store.writable) saveStore(store);
+  if (store.colors[best.key]) return store.colors[best.key];
+  return withLock(() => {
+    const fresh = loadStore() || store;
+    if (!fresh.colors[best.key]) {
+      fresh.colors[best.key] = nextColor(fresh.colors);
+      if (fresh.writable) saveStore(fresh);
+    }
+    return fresh.colors[best.key];
+  });
+}
+
+// Same lock file protocol as Invoke-ClaudeTabStoreUpdate: exclusive create, delete when
+// done, break a lock older than a few seconds (left by a crashed shell).
+function withLock(fn) {
+  const lock = path.join(tabsRoot, 'tab-roots.lock');
+  fs.mkdirSync(tabsRoot, { recursive: true });
+  let fd = null;
+  for (let i = 0; i < 40 && fd === null; i++) {
+    try {
+      fd = fs.openSync(lock, 'wx');
+    } catch {
+      let since = null;
+      try { since = Date.now() - fs.statSync(lock).mtimeMs; } catch { }
+      if (since !== null && since > 5000) {
+        try { fs.unlinkSync(lock); } catch { }
+      } else {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+      }
+    }
   }
-  return store.colors[best.key];
+  try {
+    return fn();
+  } finally {
+    if (fd !== null) {
+      fs.closeSync(fd);
+      try { fs.unlinkSync(lock); } catch { }
+    }
+  }
 }
 
 // Launch options worth keeping when a session is resumed (same rules as the module).
