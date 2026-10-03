@@ -68,6 +68,11 @@ function Get-PowerShellHostPath {
     .SYNOPSIS
         Path to the PowerShell executable hosting this session, so a child
         process runs the same edition (pwsh vs powershell) the caller is on.
+
+        Falls back to 'pwsh' on PATH when the hosting process is not itself a
+        PowerShell executable -- the module can be imported into a runspace
+        embedded in an arbitrary host (a .NET app, an editor extension host),
+        and `& <that host> -File scoop.ps1` would be nonsense.
     #>
     [OutputType([string])]
     [CmdletBinding()]
@@ -75,11 +80,48 @@ function Get-PowerShellHostPath {
 
     try {
         $path = (Get-Process -Id $PID).Path
-        if ($path) { return $path }
+        if ($path) {
+            $leaf = [System.IO.Path]::GetFileNameWithoutExtension($path)
+            if ($leaf -in @('pwsh', 'powershell')) { return $path }
+            Write-Verbose "Get-PowerShellHostPath: hosting process '$leaf' is not a PowerShell executable; falling back to pwsh on PATH."
+        }
     } catch {
         Write-Verbose "Get-PowerShellHostPath: could not resolve the host executable: $($_.Exception.Message)"
     }
+    # Prefer pwsh, but accept Windows PowerShell when that is all there is.
+    foreach ($candidate in 'pwsh', 'powershell') {
+        $cmd = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($cmd -and $cmd.Source) { return $cmd.Source }
+    }
     return 'pwsh'
+}
+
+function Test-ScoopCommandRunsManifestScript {
+    <#
+    .SYNOPSIS
+        Does this scoop subcommand execute a manifest's installer / uninstaller
+        script (and therefore have to run out of process)?
+
+    .DESCRIPTION
+        The list is not a guess. In scoop 0.6.0 exactly three libexec commands
+        reach install_app / uninstall_app / Invoke-HookScript --
+        scoop-install.ps1, scoop-uninstall.ps1 and scoop-update.ps1 -- and
+        scoop-import.ps1 dot-sources scoop-install.ps1 to do its work. Verify
+        with:
+
+            Select-String -Pattern 'install_app|uninstall_app|Invoke-HookScript' `
+                -Path (Join-Path $env:SCOOP 'apps/scoop/current/libexec/scoop-*.ps1')
+
+        Everything else (list, status, info, which, prefix, search, cat, home,
+        export, bucket, hold, cleanup, cache, ...) is read-only with respect to
+        app contents and stays in-process, where it costs nothing.
+    #>
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param([string]$Command)
+
+    return ([string]$Command).ToLowerInvariant() -in @('install', 'uninstall', 'update', 'import')
 }
 
 function Invoke-ScoopCommand {
@@ -100,6 +142,7 @@ function Invoke-ScoopCommand {
     .PARAMETER ArgumentList
         The scoop argument vector, e.g. @('install', '-g', 'main/ripgrep').
     #>
+    [OutputType([string])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, ValueFromRemainingArguments)][string[]]$ArgumentList
@@ -120,7 +163,15 @@ function Invoke-ScoopCommand {
     $PSNativeCommandUseErrorActionPreference = $false
 
     $psHost = Get-PowerShellHostPath
-    Write-Verbose "Invoke-ScoopCommand: $psHost -NoProfile -File $entry $($ArgumentList -join ' ')"
+    # Quote each argument in the log so a path containing a space doesn't render
+    # as a command line that isn't what actually ran (the real invocation splats
+    # the array, so every element is passed as one argument regardless).
+    $quoted = ($ArgumentList | ForEach-Object { '"{0}"' -f $_ }) -join ' '
+    Write-Verbose "Invoke-ScoopCommand: $psHost -NoProfile -File ""$entry"" $quoted"
+    # Clear first: if the host executable itself cannot be launched, `&` throws
+    # without ever setting $LASTEXITCODE, and republishing a stale value from an
+    # unrelated earlier command would read as a successful scoop run.
+    $global:LASTEXITCODE = $null
     & $psHost -NoProfile -ExecutionPolicy Bypass -File $entry @ArgumentList
     # Capture before anything else can clobber it, then republish so callers
     # reading $LASTEXITCODE straight after this call see scoop's code.

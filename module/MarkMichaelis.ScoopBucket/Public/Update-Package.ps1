@@ -336,11 +336,26 @@ function Update-Package {
             $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
         }
         Write-UpdateStatus "Update-Package: dispatching $($entry.Names -join ', ') via $($entry.Bundle)..."
-        $results.AddRange([object[]]@(
-            Invoke-PackageUpdate -Packages $pkgObjects -Bundle $entry.Bundle `
-                -Name @($entry.Names) -WhatIf:$isWhatIf -SkipCompletion:$SkipCompletion `
-                -PackageTimeoutMinutes $PackageTimeoutMinutes `
-                -ErrorAction Continue -ErrorVariable +pkgErrors))
+        # -ErrorAction/-ErrorVariable only tame the driver's NON-terminating
+        # PackageUpdateFailed records. A terminating error from the driver's own
+        # setup or teardown propagates regardless, skips its result emission, and
+        # used to abort the whole sweep -- the #451 failure mode, which surfaced
+        # on the install side first but is identical here. Keep each bundle's
+        # blast radius to that bundle.
+        try {
+            $results.AddRange([object[]]@(
+                Invoke-PackageUpdate -Packages $pkgObjects -Bundle $entry.Bundle `
+                    -Name @($entry.Names) -WhatIf:$isWhatIf -SkipCompletion:$SkipCompletion `
+                    -PackageTimeoutMinutes $PackageTimeoutMinutes `
+                    -ErrorAction Continue -ErrorVariable +pkgErrors))
+        } catch [System.Management.Automation.PipelineStoppedException] {
+            throw
+        } catch {
+            $failure = New-BundleDispatchFailure -Bundle $entry.Bundle -Operation 'Update' -Message $_.Exception.Message
+            $pkgErrors.Add($failure.Error)
+            $PSCmdlet.WriteError($failure.Error)
+            $results.Add($failure)
+        }
     }
 
     # Dispatch (b): full-bundle update.
@@ -350,11 +365,20 @@ function Update-Package {
             $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
         }
         Write-UpdateStatus "Update-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
-        $results.AddRange([object[]]@(
-            Invoke-PackageUpdate -Packages $pkgObjects -Bundle $b.Bundle `
-                -WhatIf:$isWhatIf -SkipCompletion:$SkipCompletion `
-                -PackageTimeoutMinutes $PackageTimeoutMinutes `
-                -ErrorAction Continue -ErrorVariable +pkgErrors))
+        try {
+            $results.AddRange([object[]]@(
+                Invoke-PackageUpdate -Packages $pkgObjects -Bundle $b.Bundle `
+                    -WhatIf:$isWhatIf -SkipCompletion:$SkipCompletion `
+                    -PackageTimeoutMinutes $PackageTimeoutMinutes `
+                    -ErrorAction Continue -ErrorVariable +pkgErrors))
+        } catch [System.Management.Automation.PipelineStoppedException] {
+            throw
+        } catch {
+            $failure = New-BundleDispatchFailure -Bundle $b.Bundle -Operation 'Update' -Message $_.Exception.Message
+            $pkgErrors.Add($failure.Error)
+            $PSCmdlet.WriteError($failure.Error)
+            $results.Add($failure)
+        }
     }
 
     # Dispatch (c): bare manifests — no declarative [Package] metadata,

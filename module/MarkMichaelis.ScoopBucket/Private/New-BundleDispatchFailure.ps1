@@ -15,6 +15,27 @@
 # `$?`, while the next bundle still gets its turn.
 
 function New-BundleDispatchFailure {
+    <#
+    .SYNOPSIS
+        Build the Failed [PackageResult] (with its ErrorRecord attached) for a
+        bundle dispatch that died before the driver could report outcomes.
+
+    .PARAMETER Bundle
+        The bundle whose dispatch failed. Becomes the result's Bundle and, when
+        -Name is not supplied, its Name.
+
+    .PARAMETER Message
+        The failure reason, surfaced in the summary row's Details column.
+
+    .PARAMETER Name
+        Row label when the failure belongs to something narrower than the whole
+        bundle (e.g. a single bare manifest).
+
+    .PARAMETER Operation
+        Install (default), Update or Uninstall. Also selects the
+        'Package<Operation>Failed' FullyQualifiedErrorId that the callers'
+        summary counts filter on.
+    #>
     [OutputType([PackageResult])]
     [CmdletBinding()]
     param(

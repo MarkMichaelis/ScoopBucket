@@ -20,8 +20,8 @@ function Update-AllScoopPackages {
 
     Write-UpdateStatus "Sweeping scoop (scoop update *)..."
     Write-Verbose "  scoop $($updateArgs -join ' ')"
-    # Merge all streams; scoop writes its per-app status via Write-Host
-    # which lands on the Information stream in PS7 (same rationale as
+    # Merge every stream; scoop per-app Write-Host status reaches us as the
+    # child process stdout now the call is out of process (same rationale as
     # Update-ScoopPackage).
     # Out of process: `scoop update *` re-runs every outdated app's
     # installer.script, which re-imports this module with -Force. See
