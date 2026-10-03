@@ -21,13 +21,22 @@ $Packages = [Package[]]@(
         Installer = 'choco'
         Id        = 'Office365ProPlus'
         CISkip    = 'Requires GUI session and license activation (choco exit 17004); skipped in CI.'
-        Notes     = 'Choco package is the only unattended path; winget Office IDs require an interactive sign-in.'
+        Notes     = 'Choco package is the only unattended path; winget Office IDs require an interactive sign-in. Re-confirmed in #465: winget does publish Microsoft.Office (16.0.20228.20124), but it is an Office Deployment Tool wrapper that needs configuration XML and tenant sign-in, so README rule 3 (last resort) is correctly invoked here. Deployment-specific -- do not reclassify without checking the tenant''s activation story.'
     }
     [Package]@{
         Name      = 'Microsoft Teams'
-        Installer = 'choco'
-        Id        = 'Microsoft-Teams'
-        DependsOn = @('Microsoft 365 Apps for Enterprise')
+        Installer = 'winget'
+        Id        = 'Microsoft.Teams'
+        # DependsOn deliberately absent. It used to name 'Microsoft 365 Apps
+        # for Enterprise', which is not an ordering hint: Resolve-PackageOrder
+        # BFS-expands DependsOn transitively whenever -Name is passed, and
+        # Install-Package always passes -Name (#450). So
+        # `Install-Package -Name 'Microsoft Teams'` resolved Office365ProPlus
+        # into the install set -- the heaviest package in the bucket, whose own
+        # CISkip records that it needs a GUI session and license activation.
+        # Asking for a chat client must not schedule all of Office. Teams does
+        # not require Office to run. Same foot-gun as Aspire/Visual Studio.
+        Notes     = 'A CLIENT FIX, not just an engine reclassification (#465). The previous declaration was choco ''Microsoft-Teams'' at 1.8.0.27654 -- byte-identical to what winget publishes as Microsoft.Teams.Classic (1.8.00.27654), i.e. Teams CLASSIC, the client Microsoft has moved to end of support. The bucket was therefore installing a retired client, which no engine swap alone would have fixed. This now targets the current client: winget Microsoft.Teams, 26198.304.4946.9672. New Teams is MSIX-only, so --scope machine means provisioning -- that is the #85 shape (runFullTrust, interactive desktop, sideloading) and tenant policy applies, which the owner accepted. Do not retarget this at Microsoft.Teams.Classic. DependsOn was also cut; see the comment above. Migration from the old choco install: `choco uninstall microsoft-teams -y` (see #464).'
     }
     [Package]@{
         # Issue #173. Office16 ships seven user-facing GUI apps under

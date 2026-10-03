@@ -11,6 +11,8 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 
 # Refs:
 #   #5/#6/#7/#10/#12  scoop extras for apps with no machine-scope winget installer
+#   #465             engine-preference audit: per-entry engine rationale now lives
+#                    in each Package's Notes; notion/exiftool await an owner ruling
 #   #8/#46            Pushbullet: no maintained installer; CISkip
 #   #9/#11/#394       Snagit / Todoist / Kindle via Microsoft Store (winget --source msstore)
 #   #13/#46           DbxCli delisted from choco; install via local bucket manifest
@@ -20,11 +22,11 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 $Packages = [Package[]]@(
     [Package]@{
         Name        = 'exiftool'
-        Installer   = 'choco'
-        Id          = 'exiftool'
+        Installer   = 'winget'
+        Id          = 'OliverBetz.ExifTool'
         CliCommands = @('exiftool')
         Completion  = 'auto'
-        Notes       = 'exiftool has no completion subcommand and no PSCompletions entry. Hand-curated common-options list (full surface is ~500 tag names).'
+        Notes       = 'winget per the README engine preference: choco is rule 3 (last resort) and nothing forces it here, so the owner ruled this moves (#465). OliverBetz.ExifTool is the same software at the same version as choco''s exiftool 13.59.0 -- 13.59, machine-scope inno installer, resolves at --scope machine. Worth knowing: the two are different repackagers of Phil Harvey''s ExifTool (choco''s is mkevenaar''s automatic package wrapping the exiftool.org distribution, winget''s is Oliver Betz''s installer, which exiftool.org itself links); neither is upstream, since Phil Harvey ships only a zip. The engine change also moves the `exiftool` command from Chocolatey''s shim directory to the PATH entry the Inno installer adds, so an existing choco install must be removed first (`choco uninstall exiftool -y`) or two copies compete -- see #464. exiftool has no completion subcommand and no PSCompletions entry. Hand-curated common-options list (full surface is ~500 tag names).'
         ExpectedCompletions = @{ exiftool = @('-help','-overwrite_original','-r') }
         NativeCommandScript = {
             @"
@@ -42,7 +44,8 @@ Register-ArgumentCompleter -Native -CommandName exiftool -ScriptBlock {
 "@
         }
     }
-    [Package]@{ Name = 'GeoSetter';        Installer = 'choco';  Id = 'geosetter' }
+    [Package]@{ Name = 'GeoSetter';        Installer = 'choco';  Id = 'geosetter'
+                Notes = 'choco is correct here under README rule 3 (last resort) because the higher tiers genuinely lack the package: `winget search geosetter` and `winget search "geo setter"` both return "No package found matching input criteria", and there is no scoop manifest either. GeoSetter is abandoned freeware (3.4.16), so that will not change. Verified in #465.' }
 
     [Package]@{
         Name        = 'DbxCli'
@@ -80,7 +83,7 @@ Register-ArgumentCompleter -Native -CommandName dbxcli -ScriptBlock {
         Id          = 'main/espeak-ng'
         CliCommands = @('espeak-ng')
         Completion  = 'auto'
-        Notes       = 'espeak-ng has no completion subcommand and no PSCompletions entry. Hand-curated flag list.'
+        Notes       = 'Stays on scoop: winget eSpeak-NG.eSpeak-NG carries the same version (1.52.0) and the same espeak-ng.msi, but `winget show --id eSpeak-NG.eSpeak-NG --exact --scope machine` returns "No applicable installer found" -- there is no machine-scope installer, and the manifest also declares a Microsoft.VCRedist.2015+.x64 dependency. README rule 2 applies (winget lacks a usable package). #6 still holds; re-confirmed in #465. espeak-ng has no completion subcommand and no PSCompletions entry. Hand-curated flag list.'
         ExpectedCompletions = @{ 'espeak-ng' = @('--help','-v','-s') }
         NativeCommandScript = {
             @"
@@ -97,9 +100,12 @@ Register-ArgumentCompleter -Native -CommandName espeak-ng -ScriptBlock {
 "@
         }
     }
-    [Package]@{ Name = 'Notion';           Installer = 'scoop';  Id = 'extras/notion' }
-    [Package]@{ Name = 'Spotify';          Installer = 'scoop';  Id = 'extras/spotify' }
-    [Package]@{ Name = 'Zoom';             Installer = 'scoop';  Id = 'extras/zoom' }
+    [Package]@{ Name = 'Notion';           Installer = 'winget'; Id = 'Notion.Notion'
+                Notes = 'winget per the README engine preference; the owner ruled this moves and accepted the MSIX packaging shape (#465). Notion.Notion is 7.36.1, the same version extras/notion ships. NOTE THE PACKAGING DIFFERENCE from the scoop install it replaces: winget''s default installer for this id is nullsoft (per-user), and it is only at --scope machine that it resolves to an MSIX (Notion-7.36.1.msix) -- so this entry depends on machine scope selecting the MSIX, and must not be given Scope = ''user''. MSIX at machine context is provisioning: it needs runFullTrust on an interactive desktop with sideloading enabled, which is the shape that failed for Claude Desktop on headless runners in #85 (-1978334957). #7 recorded the original reason for scoop (no machine-scope installer existed then); that is no longer true. Migrating an existing scoop install needs `scoop uninstall notion` first -- see #464.' }
+    [Package]@{ Name = 'Spotify';          Installer = 'scoop';  Id = 'extras/spotify'
+                Notes = 'Stays on scoop: winget Spotify.Spotify carries the same version (1.3.3.264.gdaf3b824) but `winget show --id Spotify.Spotify --exact --scope machine` returns "No applicable installer found" -- Spotify ships a per-user installer only. README rule 2 applies. #10 still holds; re-confirmed in #465.' }
+    [Package]@{ Name = 'Zoom';             Installer = 'scoop';  Id = 'extras/zoom'
+                Notes = 'Stays on scoop: winget Zoom.Zoom.EXE carries the same version (7.2.1 (48556)) but `winget show --id Zoom.Zoom.EXE --exact --scope machine` returns "No applicable installer found". (Zoom''s machine-wide MSI is a separate admin-only download, not this winget id.) README rule 2 applies. #12 still holds; re-confirmed in #465.' }
 
     [Package]@{ Name = 'Bitwarden';        Installer = 'winget'; Id = 'Bitwarden.Bitwarden'
                 Companions = @('Bitwarden CLI') }
