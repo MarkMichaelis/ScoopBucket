@@ -163,6 +163,34 @@ function Invoke-PackageUninstall {
             }
             $state  = $result.State
             $reason = $result.Reason
+
+            # A reclassified package may still have its PREVIOUS engine's copy
+            # on the machine; the declared engine's uninstall cannot see it, so
+            # without this the old install is orphaned -- shims and all -- and
+            # keeps answering on PATH after the package was "removed" (#464).
+            $prevInstaller = ''
+            if ($pkg.PSObject.Properties['PreviousInstaller']) { $prevInstaller = [string]$pkg.PreviousInstaller }
+            if ($prevInstaller -and $pkg.Installer -ne 'custom') {
+                Write-UpdateStatus -Activity 'Uninstall-Package' "  [predecessor] $($pkg.Name): also removing the $prevInstaller install"
+                try {
+                    $prevResult = Invoke-PredecessorUninstall -Package $pkg -WhatIf:$DryRun
+                } catch {
+                    $prevResult = @{ State = 'Failed'; Reason = "predecessor uninstall threw: $($_.Exception.Message)" }
+                }
+                if ($prevResult.State -eq 'Failed') {
+                    # Report it, but don't undo a successful primary removal:
+                    # a Failed row with the engine named is more useful than
+                    # pretending the package is still installed.
+                    & $failPackage $pkg "Removed the $($pkg.Installer) install but the $prevInstaller predecessor ($($pkg.PreviousId)) failed to uninstall: $($prevResult.Reason)"
+                    continue
+                }
+                if ($prevResult.State -eq 'Uninstalled') {
+                    # The predecessor WAS present, so something really was
+                    # removed even when the declared engine had nothing.
+                    $state  = 'Uninstalled'
+                    $reason = "Also removed the $prevInstaller predecessor ($($pkg.PreviousId))."
+                }
+            }
         } catch {
             & $failPackage $pkg "Uninstall threw: $($_.Exception.Message)"
             continue

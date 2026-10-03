@@ -96,6 +96,15 @@ function Invoke-PackageUpdate {
     $idx    = 0
     $isCi   = [bool]$env:CI
 
+    # Engine ownership map for the cross-engine gate in the loop (#464).
+    # Resolved once per run; see Invoke-PackageInstall for the rationale.
+    $engineRoots = $null
+    try {
+        $engineRoots = Get-EngineRootMap
+    } catch {
+        Write-Warning "Invoke-PackageUpdate: could not map engine directories ($($_.Exception.Message)); cross-engine install detection is unavailable this run."
+    }
+
     # Record a per-package outcome. Emission of the PackageResult
     # objects is deferred until after the run so interactive (uncaptured)
     # runs render a single table instead of one header-per-row mini-table
@@ -194,6 +203,33 @@ function Invoke-PackageUpdate {
         }
 
         Write-UpdateStatus "Updating $($pkg.Name) ($($pkg.Installer))..." -PercentComplete $pct
+
+        # --- Cross-engine gate (#464) --------------------------------------
+        # This is where the defect was most dangerous: when another engine's
+        # copy shadows the declared one on PATH, the engine upgrade below
+        # faithfully upgrades the copy that is NOT being executed, so the
+        # machine reports itself current while running a stale binary. Report
+        # it instead of producing that reading. Migration is not attempted
+        # here -- removing the shadowing copy would leave the machine with no
+        # install at all until something installs the new one, so the fix is
+        # Install-Package, which migrates and installs in one step.
+        try {
+            $conflictArgs = @{ Package = $pkg }
+            if ($engineRoots) { $conflictArgs['EngineRoot'] = $engineRoots }
+            $engineConflict = Get-PackageEngineConflict @conflictArgs
+        } catch {
+            $engineConflict = $null
+            Write-Warning "  $($pkg.Name): cross-engine install detection failed ($($_.Exception.Message)); proceeding with the declared engine."
+        }
+        if ($engineConflict) {
+            $hint = if ($engineConflict.Declared) {
+                "Run Install-Package -Name '$($pkg.Name)' to migrate it (the declared predecessor is removed first), or remove it by hand: $($engineConflict.UninstallCommand)"
+            } else {
+                "Remove the $($engineConflict.Engine) copy: $($engineConflict.UninstallCommand)"
+            }
+            & $failPackage $pkg ("'$($engineConflict.Cli)' on PATH resolves to $($engineConflict.Path), owned by $($engineConflict.Engine), not the declared $($engineConflict.DeclaredInstaller) install. Upgrading would move the copy that is not the one running. $hint")
+            continue
+        }
 
         try {
             if ($pkg.HoldUpgrade) {

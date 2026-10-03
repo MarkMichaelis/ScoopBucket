@@ -30,7 +30,14 @@ function Uninstall-ScoopPackage {
         }
     }
 
-    $uninstallArgs = @('uninstall', $appName)
+    # Scope must mirror Install-ScoopPackage: scoop keeps global (-g) and user
+    # installs in separate roots, and `scoop uninstall <app>` against a -g
+    # install reports "isn't installed" and exits non-zero WITHOUT removing
+    # anything. That silently left the old copy in place during a cross-engine
+    # migration -- which is the duplicate the migration exists to avoid (#464).
+    $uninstallArgs = @('uninstall')
+    if ($Package.Scope -ne 'user') { $uninstallArgs += '-g' }
+    $uninstallArgs += $appName
 
     if ($WhatIf) {
         Write-Host "  [WhatIf] scoop $($uninstallArgs -join ' ')"
