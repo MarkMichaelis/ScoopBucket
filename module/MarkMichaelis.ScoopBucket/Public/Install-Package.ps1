@@ -380,6 +380,20 @@ function Install-Package {
         }
     }
 
+    # $pkgErrors is collected across every dispatch loop precisely so the run can
+    # end with one unmissable line saying the sweep continued past failures --
+    # it was never reported, so a machine that converged only partway looked
+    # exactly like a clean run (#451). Mirrors Update-Package (#272).
+    #
+    # A terminating error inside an engine or script also leaks (duplicated)
+    # into -ErrorVariable, a PowerShell quirk, but those carry their original
+    # FullyQualifiedErrorId rather than 'PackageInstallFailed'. Filtering keeps
+    # the reported count equal to the real number of failed packages.
+    $failed = @($pkgErrors | Where-Object { $_.FullyQualifiedErrorId -like 'PackageInstallFailed*' })
+    if ($failed.Count -gt 0) {
+        Write-Warning "Install-Package: $($failed.Count) package install(s) failed; the sweep continued past each failure. See errors above for details."
+    }
+
     # Emit the collected results through the summary view: changed rows only by
     # default (with a one-line host summary of the rest), or every row under
     # -IncludeUnchanged. See #283.

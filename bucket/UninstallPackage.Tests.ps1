@@ -81,9 +81,16 @@ Describe 'Uninstall engine dispatchers' -Tag 'Light','Module' {
 
         It 'strips the bucket prefix and calls scoop uninstall with the bare app name' {
             $script:captured = $null
+            # The read-only presence probe still goes through the in-process
+            # `scoop` wrapper; the mutating `scoop uninstall` goes out of
+            # process via Invoke-ScoopCommand (#451).
             Mock -ModuleName MarkMichaelis.ScoopBucket scoop {
                 if ($args[0] -eq 'list') { return "ripgrep 13.0.0" }
-                $script:captured = $args
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-ScoopCommand {
+                $script:captured = $ArgumentList
                 $global:LASTEXITCODE = 0
                 return ''
             }
