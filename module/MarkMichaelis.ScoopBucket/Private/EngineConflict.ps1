@@ -333,22 +333,32 @@ function Resolve-EngineUninstallCommand {
                 }
                 if ($m.Success) { $target = $m.Groups['app'].Value }
             }
-            # Decide -g from scoop's ACTUAL configured roots. Global first: when
-            # SCOOP and SCOOP_GLOBAL coincide, -g is the arrangement that holds
-            # a machine-wide install, and -g is also what a bundle install
-            # creates (Install-ScoopPackage passes it for any non-user scope).
+            # Decide -g from scoop's ACTUAL configured roots, longest match
+            # wins -- the same rule Resolve-PathOwningEngine uses, and the only
+            # one that survives nesting: with SCOOP_GLOBAL=C:\scoop and
+            # SCOOP=C:\scoop\user, a global-first check would claim every user
+            # install too. Global breaks an exact-length tie, because when the
+            # two roots are literally the same directory -g is the arrangement
+            # holding a machine-wide install (and what a bundle install creates,
+            # since Install-ScoopPackage passes -g for any non-user scope).
             $scopes = if ($ScoopScopeRoot) { $ScoopScopeRoot } else { Get-ScoopScopeRoot }
-            $isUnder = {
-                param($Roots)
+            $longestUnder = {
+                param([string]$Subject, $Roots)
+                $best = -1
                 foreach ($r in @($Roots)) {
                     if (-not $r) { continue }
                     $n = ([string]$r).Replace('/', '\').TrimEnd('\')
-                    if ($n -and $normPath.StartsWith("$n\", [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+                    if ($n -and $Subject.StartsWith("$n\", [System.StringComparison]::OrdinalIgnoreCase) -and
+                        $n.Length -gt $best) {
+                        $best = $n.Length
+                    }
                 }
-                return $false
+                return $best
             }
-            if (& $isUnder $scopes['Global']) { return "scoop uninstall -g $target" }
-            if (& $isUnder $scopes['User'])   { return "scoop uninstall $target" }
+            $globalDepth = & $longestUnder $normPath $scopes['Global']
+            $userDepth   = & $longestUnder $normPath $scopes['User']
+            if ($globalDepth -ge 0 -and $globalDepth -ge $userDepth) { return "scoop uninstall -g $target" }
+            if ($userDepth -ge 0) { return "scoop uninstall $target" }
 
             # Neither configured root matched (an unusual layout, or roots we
             # could not read). Fall back to the user-profile heuristic rather

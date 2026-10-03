@@ -264,7 +264,21 @@ function Install-Package {
             foreach ($p in $b.Packages) {
                 $prevId = if ($p.PSObject.Properties['PreviousId']) { [string]$p.PreviousId } else { '' }
                 if ($prevId -and (($prevId -split '/')[-1] -ieq $n)) { $supersededBy = $p; break }
-                if ($p.Id -and (($p.Id -split '/')[-1] -ieq $n)) { $declaredBy = $p }
+                # Only a scoop package can declare a scoop manifest -- the link
+                # IS its Id ('MarkMichaelis/<manifest>') -- so an Id-base match
+                # on a winget/choco/etc. package is coincidental and must not be
+                # conflict-checked as if it owned this manifest. Same guard the
+                # completion-registration lookup below applies, for the same
+                # reason. (A RECLASSIFIED package no longer matches here at all;
+                # that is what the PreviousId lookup above is for.)
+                #
+                # First declaration wins, the way path (a) resolves a
+                # Package.Name match -- without the guard the LAST bundle
+                # scanned would win and an Id-base collision would make the
+                # refusal nondeterministic. The scan continues regardless,
+                # because a superseded match outranks a declaring one.
+                if (-not $declaredBy -and $p.Id -and $p.Installer -ieq 'scoop' -and
+                    (($p.Id -split '/')[-1] -ieq $n)) { $declaredBy = $p }
             }
             if ($supersededBy) { break }
         }
