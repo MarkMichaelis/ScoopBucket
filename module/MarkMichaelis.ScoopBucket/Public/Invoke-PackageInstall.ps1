@@ -334,7 +334,15 @@ function Invoke-PackageInstall {
         # Tear down the transient status bar / progress line before emitting results
         # so the two don't fight over the host's rendering. In a finally so an aborted
         # or throwing run never leaves the terminal with a stuck VT scroll region.
-        Write-UpdateStatus -Activity 'Install-Package' -Completed
+        #
+        # Swallowed on purpose (#451): this is cosmetic. When the run has already
+        # gone wrong badly enough that even Write-UpdateStatus cannot be resolved
+        # -- a bundle installer script re-imported this module with -Force and
+        # disposed the session state mid-sweep -- a throw from HERE would skip the
+        # [PackageResult] emission below and lose every outcome the sweep collected.
+        try { Write-UpdateStatus -Activity 'Install-Package' -Completed } catch {
+            Write-Verbose "Invoke-PackageInstall: progress teardown failed (ignored): $($_.Exception.Message)"
+        }
     }
 
     # Persist a per-run failure log when any ConfigScript failed (#352).

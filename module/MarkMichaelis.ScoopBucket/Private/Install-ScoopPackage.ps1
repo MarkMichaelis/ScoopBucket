@@ -52,7 +52,9 @@ function Install-ScoopPackage {
     }
 
     # AlreadyInstalled probe: `scoop list <app>` lists the named app
-    # only when installed; resolved by stripping any bucket prefix.
+    # only when installed; resolved by stripping any bucket prefix. Stays
+    # in-process -- `scoop list` is read-only and cannot run a manifest
+    # script, so it cannot trigger the #451 session-state teardown.
     if (-not $WhatIf) {
         try {
             $listOut = & scoop list $appName 2>$null | Out-String
@@ -74,7 +76,10 @@ function Install-ScoopPackage {
     }
 
     Write-Host "  scoop $($installArgs -join ' ')"
-    & scoop @installArgs
+    # Out of process: a manifest's installer.script re-imports this module with
+    # -Force, which would tear down the session state an in-process scoop is
+    # running inside. See Invoke-ScoopCommand and #451.
+    Invoke-ScoopCommand @installArgs
     $exit = $LASTEXITCODE
     if ($exit -eq 0) {
         return @{ State = 'Installed'; Reason = $null }

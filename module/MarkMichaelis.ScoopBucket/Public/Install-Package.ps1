@@ -179,22 +179,42 @@ function Install-Package {
     # back as live PackageResult objects rendered once by the format view.
     foreach ($entry in $byBundle.Values) {
         $pkgObjects = @(Get-BundlePackageObjects -BundlePath $entry.BundlePath)
-        $results.AddRange([object[]]@(
-            Invoke-PackageInstall -Packages $pkgObjects -Bundle $entry.Bundle `
-                -Name @($entry.Names) -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
-                -NoUpgrade:$NoUpgrade `
-                -ErrorAction Continue -ErrorVariable +pkgErrors))
+        # -ErrorAction/-ErrorVariable only tame the driver's NON-terminating
+        # PackageInstallFailed records. A *terminating* error raised inside the
+        # driver (#451: a torn-down module session state made the driver's own
+        # Write-UpdateStatus teardown throw) propagates regardless and used to
+        # abort the whole sweep, discarding every result collected so far. Keep
+        # each bundle's blast radius to that bundle. See also #272.
+        try {
+            $results.AddRange([object[]]@(
+                Invoke-PackageInstall -Packages $pkgObjects -Bundle $entry.Bundle `
+                    -Name @($entry.Names) -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
+                    -NoUpgrade:$NoUpgrade `
+                    -ErrorAction Continue -ErrorVariable +pkgErrors))
+        } catch {
+            $failure = New-BundleDispatchFailure -Bundle $entry.Bundle -Message $_.Exception.Message
+            $pkgErrors.Add($failure.Error)
+            $PSCmdlet.WriteError($failure.Error)
+            $results.Add($failure)
+        }
     }
 
     # --- Dispatch (b): full-bundle install (no -Name filter) ---------------
     foreach ($b in $fullBundles) {
         Write-UpdateStatus -Activity 'Install-Package' "Install-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
         $pkgObjects = @(Get-BundlePackageObjects -BundlePath $b.BundlePath)
-        $results.AddRange([object[]]@(
-            Invoke-PackageInstall -Packages $pkgObjects -Bundle $b.Bundle `
-                -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
-                -NoUpgrade:$NoUpgrade `
-                -ErrorAction Continue -ErrorVariable +pkgErrors))
+        try {
+            $results.AddRange([object[]]@(
+                Invoke-PackageInstall -Packages $pkgObjects -Bundle $b.Bundle `
+                    -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
+                    -NoUpgrade:$NoUpgrade `
+                    -ErrorAction Continue -ErrorVariable +pkgErrors))
+        } catch {
+            $failure = New-BundleDispatchFailure -Bundle $b.Bundle -Message $_.Exception.Message
+            $pkgErrors.Add($failure.Error)
+            $PSCmdlet.WriteError($failure.Error)
+            $results.Add($failure)
+        }
     }
 
     # --- Dispatch (c): scoop install fallback for bare manifests -----------
@@ -230,7 +250,22 @@ function Install-Package {
         # MarkMichaelis bucket has been added — see
         # `Install-Package AddMarkMichaelisScoopBucket`); scoop will
         # resolve and run the manifest's installer.script.
-        & scoop install $n
+        #
+        # Out of process (#451): that installer.script re-imports this module
+        # with -Force, which would dispose the session state an in-process
+        # scoop is running inside. See Invoke-ScoopCommand.
+        try {
+            Invoke-ScoopCommand install $n
+        } catch {
+            # A manifest that cannot even be dispatched must not abort the rest
+            # of the sweep.
+            $failure = New-BundleDispatchFailure -Bundle '(manifest)' -Name $n `
+                -Installer 'scoop' -Id $n -Message "scoop install threw: $($_.Exception.Message)"
+            $pkgErrors.Add($failure.Error)
+            $PSCmdlet.WriteError($failure.Error)
+            $results.Add($failure)
+            continue
+        }
         # Capture scoop's exit status BEFORE any other command can clobber
         # $LASTEXITCODE. A failed install must not register completers for a
         # CLI that was never actually installed. Treat a null exit code (no
