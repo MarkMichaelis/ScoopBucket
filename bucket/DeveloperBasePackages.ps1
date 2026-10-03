@@ -260,9 +260,9 @@ Register-ArgumentCompleter -Native -CommandName fastboot -ScriptBlock {
         Installer   = 'scoop'
         Id          = 'MarkMichaelis/Aspire'
         CliCommands = @('aspire')
-        DependsOn   = @('dotnet','Visual Studio')
+        DependsOn   = @('dotnet')
         Completion  = 'auto'
-        Notes       = 'Bundle manifest invokes `dotnet tool install --global Aspire.Cli` + project templates. DependsOn ensures dotnet+VS are in place first. aspire has no completion subcommand and no PSCompletions entry; hand-curated top-level command list (mirrors Aspire bundle).'
+        Notes       = 'Bundle manifest invokes `dotnet tool install --global Aspire.Cli` + project templates. DependsOn is the install-set closure, not an ordering hint (#450): the .NET SDK is a genuine prerequisite and stays, while ''Visual Studio'' was only a preferred install order and dragged a multi-GB IDE in to obtain a small CLI, so it is gone. aspire has no completion subcommand and no PSCompletions entry; hand-curated top-level command list (mirrors Aspire bundle).'
         ExpectedCompletions = @{ aspire = @('new','run','add') }
         NativeCommandScript = {
             @"
