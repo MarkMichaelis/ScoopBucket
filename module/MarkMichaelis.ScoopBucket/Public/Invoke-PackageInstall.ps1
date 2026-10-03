@@ -190,12 +190,17 @@ function Invoke-PackageInstall {
         # bucket declared and install, or refuse and name the command.
         $migratedFrom = $null
         $conflict = $null
-        try {
-            $conflictArgs = @{ Package = $pkg }
-            if ($engineRoots) { $conflictArgs['EngineRoot'] = $engineRoots }
-            $conflict = Get-PackageEngineConflict @conflictArgs
-        } catch {
-            Write-Warning "  $($pkg.Name): cross-engine install detection failed ($($_.Exception.Message)); proceeding with the declared engine."
+        # No engine map => no gate. Skipped rather than retried per package:
+        # without -EngineRoot the probe re-runs Get-EngineRootMap internally and
+        # re-throws for every package, turning one environment problem into 40
+        # identical warnings. The single warning at the top of the run is the
+        # notice that detection is off.
+        if ($engineRoots) {
+            try {
+                $conflict = Get-PackageEngineConflict -Package $pkg -EngineRoot $engineRoots
+            } catch {
+                Write-Warning "  $($pkg.Name): cross-engine install detection failed ($($_.Exception.Message)); proceeding with the declared engine."
+            }
         }
 
         if ($conflict -and $conflict.Declared) {

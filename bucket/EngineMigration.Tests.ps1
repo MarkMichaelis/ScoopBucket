@@ -140,7 +140,7 @@ Describe 'Get-PackageEngineConflict' -Tag 'Light', 'Module' {
             }
             $conflict = Get-PackageEngineConflict -Package $pkg -EngineRoot $Roots `
                 -CommandResolver { param($cli) 'C:\ProgramData\scoop\shims\rclone.exe' } `
-                -UserProfile 'C:\Users\u'
+                -ScoopScopeRoot @{ Global = @('C:\ProgramData\scoop'); User = @('C:\Users\u\scoop') } -UserProfile 'C:\Users\u'
 
             # Global install (outside the user profile) => -g, which plain
             # `scoop uninstall` would refuse to touch.
@@ -159,7 +159,7 @@ Describe 'Get-PackageEngineConflict' -Tag 'Light', 'Module' {
             }
             $conflict = Get-PackageEngineConflict -Package $pkg -EngineRoot $Roots `
                 -CommandResolver { param($cli) 'C:\Users\u\scoop\shims\rclone.exe' } `
-                -UserProfile 'C:\Users\u'
+                -ScoopScopeRoot @{ Global = @('C:\ProgramData\scoop'); User = @('C:\Users\u\scoop') } -UserProfile 'C:\Users\u'
 
             $conflict.UninstallCommand | Should -Be 'scoop uninstall rclone'
         }
@@ -178,9 +178,38 @@ Describe 'Get-PackageEngineConflict' -Tag 'Light', 'Module' {
             }
             $conflict = Get-PackageEngineConflict -Package $pkg -EngineRoot $Roots `
                 -CommandResolver { param($cli) 'C:\ProgramData\scoop\apps\adb\current\fastboot.exe' } `
-                -UserProfile 'C:\Users\u'
+                -ScoopScopeRoot @{ Global = @('C:\ProgramData\scoop'); User = @('C:\Users\u\scoop') } -UserProfile 'C:\Users\u'
 
             $conflict.UninstallCommand | Should -Be 'scoop uninstall -g adb'
+        }
+    }
+
+    It 'attributes <Case> correctly' -ForEach @(
+        @{ Case = 'a nested root to the most specific engine'
+           Roots = @{ choco = @('C:\ProgramData'); scoop = @('C:\ProgramData\scoop') }
+           Path  = 'C:\ProgramData\scoop\shims\x.exe'; Expected = 'scoop' }
+        @{ Case = 'a sibling directory with a shared prefix to nobody'
+           Roots = @{ scoop = @('C:\ProgramData\scoop') }
+           Path  = 'C:\ProgramData\scoopy\x.exe'; Expected = $null }
+        @{ Case = 'a forward-slash path against a backslash root'
+           Roots = @{ scoop = @('C:\ProgramData\scoop') }
+           Path  = 'C:/ProgramData/scoop/shims/x.exe'; Expected = 'scoop' }
+        @{ Case = 'a root declared with a trailing separator'
+           Roots = @{ scoop = @('C:\ProgramData\scoop\') }
+           Path  = 'C:\ProgramData\scoop\shims\x.exe'; Expected = 'scoop' }
+        @{ Case = 'a path that differs only in case'
+           Roots = @{ scoop = @('C:\ProgramData\scoop') }
+           Path  = 'c:\programdata\SCOOP\shims\x.exe'; Expected = 'scoop' }
+        @{ Case = 'the root directory itself to nobody'
+           Roots = @{ scoop = @('C:\ProgramData\scoop') }
+           Path  = 'C:\ProgramData\scoop'; Expected = $null }
+    ) {
+        $params = @{ Roots = $Roots; Path = $Path; Expected = $Expected }
+        InModuleScope MarkMichaelis.ScoopBucket -Parameters $params {
+            param($Roots, $Path, $Expected)
+            $owner = Resolve-PathOwningEngine -Path $Path -EngineRoot $Roots
+            if ($null -eq $Expected) { $owner | Should -BeNullOrEmpty }
+            else { $owner | Should -Be $Expected }
         }
     }
 
@@ -199,7 +228,7 @@ Describe 'Get-PackageEngineConflict' -Tag 'Light', 'Module' {
             $conflict = Get-PackageEngineConflict -Package $pkg -EngineRoot $Roots `
                 -CommandResolver { param($cli) 'C:\ProgramData\scoop\shims\7z.exe' } `
                 -ShimTargetResolver { param($path) 'C:\ProgramData\scoop\apps\7zip\current\7z.exe' } `
-                -UserProfile 'C:\Users\u'
+                -ScoopScopeRoot @{ Global = @('C:\ProgramData\scoop'); User = @('C:\Users\u\scoop') } -UserProfile 'C:\Users\u'
 
             $conflict.UninstallCommand | Should -Be 'scoop uninstall -g 7zip'
         }
@@ -217,7 +246,7 @@ Describe 'Get-PackageEngineConflict' -Tag 'Light', 'Module' {
             $conflict = Get-PackageEngineConflict -Package $pkg -EngineRoot $Roots `
                 -CommandResolver { param($cli) 'C:\ProgramData\scoop\shims\rclone.exe' } `
                 -ShimTargetResolver { param($path) $null } `
-                -UserProfile 'C:\Users\u'
+                -ScoopScopeRoot @{ Global = @('C:\ProgramData\scoop'); User = @('C:\Users\u\scoop') } -UserProfile 'C:\Users\u'
 
             $conflict.UninstallCommand | Should -Be 'scoop uninstall -g rclone'
         }
@@ -257,7 +286,7 @@ Describe 'Get-PackageEngineConflict' -Tag 'Light', 'Module' {
             }
             $conflict = Get-PackageEngineConflict -Package $pkg -EngineRoot $Roots `
                 -CommandResolver { param($cli) 'C:\ProgramData\scoop\shims\rg.exe' } `
-                -UserProfile 'C:\Users\u'
+                -ScoopScopeRoot @{ Global = @('C:\ProgramData\scoop'); User = @('C:\Users\u\scoop') } -UserProfile 'C:\Users\u'
 
             $conflict.Declared         | Should -BeTrue
             $conflict.UninstallCommand | Should -Be 'scoop uninstall -g ripgrep'
@@ -279,10 +308,54 @@ Describe 'Get-PackageEngineConflict' -Tag 'Light', 'Module' {
             }
             $conflict = Get-PackageEngineConflict -Package $pkg -EngineRoot $Roots `
                 -CommandResolver { param($cli) 'C:\ProgramData\scoop\shims\exiftool.exe' } `
-                -UserProfile 'C:\Users\u'
+                -ScoopScopeRoot @{ Global = @('C:\ProgramData\scoop'); User = @('C:\Users\u\scoop') } -UserProfile 'C:\Users\u'
 
             $conflict.Engine   | Should -Be 'scoop'
             $conflict.Declared | Should -BeFalse
+        }
+    }
+
+    It 'decides scoop -g from the configured roots, not the user profile: <Case>' -ForEach @(
+        # SCOOP_GLOBAL redirected INSIDE the user profile. The user-profile
+        # heuristic would drop -g and the printed command would exit non-zero
+        # having removed nothing.
+        @{ Case     = 'global root inside the user profile still gets -g'
+           Scopes   = @{ Global = @('C:\Users\u\globalscoop'); User = @('C:\Users\u\scoop') }
+           Path     = 'C:\Users\u\globalscoop\shims\rclone.exe'
+           Expected = 'scoop uninstall -g rclone' }
+        # SCOOP (user scope) redirected OUTSIDE the user profile. The heuristic
+        # would add a spurious -g.
+        @{ Case     = 'user root outside the user profile does not get -g'
+           Scopes   = @{ Global = @('C:\ProgramData\scoop'); User = @('D:\scoop') }
+           Path     = 'D:\scoop\shims\rclone.exe'
+           Expected = 'scoop uninstall rclone' }
+        @{ Case     = 'global wins when both roots are the same directory'
+           Scopes   = @{ Global = @('C:\ProgramData\scoop'); User = @('C:\ProgramData\scoop') }
+           Path     = 'C:\ProgramData\scoop\shims\rclone.exe'
+           Expected = 'scoop uninstall -g rclone' }
+        @{ Case     = 'an unmatched layout falls back to the user-profile heuristic'
+           Scopes   = @{ Global = @(); User = @() }
+           Path     = 'C:\Users\u\elsewhere\shims\rclone.exe'
+           Expected = 'scoop uninstall rclone' }
+    ) {
+        $params = @{ Scopes = $Scopes; Path = $Path; Expected = $Expected }
+        InModuleScope MarkMichaelis.ScoopBucket -Parameters $params {
+            param($Scopes, $Path, $Expected)
+            Resolve-EngineUninstallCommand -Engine 'scoop' -Path $Path -Cli 'rclone' `
+                -ShimTargetResolver { param($p) $null } `
+                -ScoopScopeRoot $Scopes -UserProfile 'C:\Users\u' |
+                Should -Be $Expected
+        }
+    }
+
+    It 'uses the declared PreviousId for a choco predecessor, not the binary name' {
+        # choco package ids routinely differ from the exe they ship, so the
+        # hand-run fallback command must use the declared id like every other
+        # engine's branch does.
+        InModuleScope MarkMichaelis.ScoopBucket {
+            Resolve-EngineUninstallCommand -Engine 'choco' -Path 'C:\ProgramData\chocolatey\bin\et.exe' `
+                -Cli 'et' -Id 'exiftool' |
+                Should -Be 'choco uninstall -y exiftool'
         }
     }
 
@@ -302,7 +375,7 @@ Describe 'Get-PackageEngineConflict' -Tag 'Light', 'Module' {
                 ExpectedCompletions = @{ tool = @('go') }
             }
             $conflict = Get-PackageEngineConflict -Package $pkg -EngineRoot $Roots `
-                -CommandResolver { param($cli) $Path } -UserProfile 'C:\Users\u'
+                -CommandResolver { param($cli) $Path } -ScoopScopeRoot @{ Global = @('C:\ProgramData\scoop'); User = @('C:\Users\u\scoop') } -UserProfile 'C:\Users\u'
 
             $conflict.Engine           | Should -Be $Engine
             $conflict.UninstallCommand | Should -Be $Expected
@@ -474,6 +547,102 @@ Describe 'Declared predecessor migrates instead of refusing' -Tag 'Light', 'Modu
     }
 }
 
+Describe 'The bare-manifest dispatch path is gated too' -Tag 'Light', 'Module' {
+    # Install-Package's path (c) runs `scoop install <manifest>` directly and
+    # never reaches Invoke-PackageInstall, so it needs its own gate: reaching a
+    # package by its MANIFEST name rather than its Package.Name would otherwise
+    # walk straight past the driver's gate.
+
+    BeforeAll {
+        $script:bucketDir = Join-Path ([System.IO.Path]::GetTempPath()) "em464-$([guid]::NewGuid().ToString('n'))"
+        New-Item -ItemType Directory -Path $script:bucketDir -Force | Out-Null
+
+        # A bucket-owned manifest, plus a bundle whose [Package] links to it by
+        # Id -- the exact shape of 'Claude Code CLI' -> ai/ClaudeCode.json.
+        '{ "version": "1.00.000", "installer": { "script": ["$null"] } }' |
+            Set-Content -LiteralPath (Join-Path $script:bucketDir 'WidgetCli.json') -Encoding utf8
+        '{ "version": "1.00.000", "installer": { "script": ["$null"] } }' |
+            Set-Content -LiteralPath (Join-Path $script:bucketDir 'OldWidget.json') -Encoding utf8
+    }
+
+    AfterAll {
+        if ($script:bucketDir -and (Test-Path $script:bucketDir)) {
+            Remove-Item -LiteralPath $script:bucketDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'refuses a manifest whose declaring package is shadowed by another engine' {
+        InModuleScope MarkMichaelis.ScoopBucket -Parameters @{ BucketDir = $script:bucketDir } {
+            param($BucketDir)
+            Mock Get-EngineRootMap     { @{ scoop = @('C:\ProgramData\scoop'); winget = @('C:\Program Files\WinGet') } }
+            Mock Get-CommandSourcePath { 'C:\Program Files\WinGet\Links\widget.exe' }
+            Mock Invoke-ScoopCommand   { $global:LASTEXITCODE = 0 }
+            Mock Get-BundlePackages {
+                @([pscustomobject]@{
+                        Bundle     = 'T'
+                        BundlePath = (Join-Path $BucketDir 'T.ps1')
+                        Packages   = @([pscustomobject]@{
+                                Name = 'Widget CLI'; Installer = 'scoop'; Id = 'MarkMichaelis/WidgetCli'
+                                CliCommands = @('widget'); Completion = 'native'
+                                PreviousInstaller = ''; PreviousId = ''
+                            })
+                    })
+            }
+
+            $r = Install-Package -Name 'WidgetCli' -BucketPath $BucketDir -SkipCompletion -ErrorAction SilentlyContinue
+
+            Should -Invoke Invoke-ScoopCommand -Times 0 -Exactly
+            $r.Status | Should -Be 'Failed'
+            $r.Reason | Should -Match 'Widget CLI'
+            $r.Reason | Should -Match ([regex]::Escape('C:\Program Files\WinGet\Links\widget.exe'))
+        }
+    }
+
+    It 'refuses a manifest that a declaration marks as the superseded install' {
+        InModuleScope MarkMichaelis.ScoopBucket -Parameters @{ BucketDir = $script:bucketDir } {
+            param($BucketDir)
+            # Nothing on PATH at all, so only the PreviousId link can catch
+            # this -- and it must, because installing the manifest is what
+            # re-creates the copy the migration removed.
+            Mock Get-EngineRootMap     { @{ scoop = @('C:\ProgramData\scoop'); winget = @('C:\Program Files\WinGet') } }
+            Mock Get-CommandSourcePath { $null }
+            Mock Invoke-ScoopCommand   { $global:LASTEXITCODE = 0 }
+            Mock Get-BundlePackages {
+                @([pscustomobject]@{
+                        Bundle     = 'T'
+                        BundlePath = (Join-Path $BucketDir 'T.ps1')
+                        Packages   = @([pscustomobject]@{
+                                Name = 'Widget'; Installer = 'winget'; Id = 'Vendor.Widget'
+                                CliCommands = @('widget'); Completion = 'native'
+                                PreviousInstaller = 'scoop'; PreviousId = 'MarkMichaelis/OldWidget'
+                            })
+                    })
+            }
+
+            $r = Install-Package -Name 'OldWidget' -BucketPath $BucketDir -SkipCompletion -ErrorAction SilentlyContinue
+
+            Should -Invoke Invoke-ScoopCommand -Times 0 -Exactly
+            $r.Status | Should -Be 'Failed'
+            $r.Reason | Should -Match 'superseded'
+            $r.Reason | Should -Match "Install-Package -Name 'Widget'"
+        }
+    }
+
+    It 'still installs a manifest no declaration links to' {
+        InModuleScope MarkMichaelis.ScoopBucket -Parameters @{ BucketDir = $script:bucketDir } {
+            param($BucketDir)
+            Mock Get-EngineRootMap     { @{ scoop = @('C:\ProgramData\scoop') } }
+            Mock Get-CommandSourcePath { 'C:\ProgramData\scoop\shims\widget.exe' }
+            Mock Invoke-ScoopCommand   { $global:LASTEXITCODE = 0 }
+            Mock Get-BundlePackages    { @() }
+
+            $null = Install-Package -Name 'WidgetCli' -BucketPath $BucketDir -SkipCompletion -ErrorAction SilentlyContinue
+
+            Should -Invoke Invoke-ScoopCommand -Times 1 -Exactly
+        }
+    }
+}
+
 Describe 'Update refuses to upgrade the copy that is not running' -Tag 'Light', 'Module' {
 
     BeforeAll {
@@ -568,6 +737,22 @@ Describe 'Uninstall removes the declared predecessor too' -Tag 'Light', 'Module'
         }
     }
 
+    It 'does not let a successful predecessor removal mask a failed primary' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            Mock Uninstall-WingetPackage { @{ State = 'Failed'; Reason = 'winget uninstall exited with 1' } }
+            Mock Uninstall-ScoopPackage  { @{ State = 'Uninstalled'; Reason = $null } }
+
+            $pkg = [Package]@{
+                Name = 'rclone'; Installer = 'winget'; Id = 'Rclone.Rclone'
+                PreviousInstaller = 'scoop'; PreviousId = 'main/rclone'
+            }
+            $r = Invoke-PackageUninstall -Packages @($pkg) -Bundle 'T' -SkipCompletion -ErrorAction SilentlyContinue
+
+            $r.Status | Should -Be 'Failed'
+            $r.Reason | Should -Match 'winget uninstall exited with 1'
+        }
+    }
+
     It 'still reports Uninstalled when only the predecessor was present' {
         InModuleScope MarkMichaelis.ScoopBucket {
             Mock Uninstall-WingetPackage { @{ State = 'NotInstalled'; Reason = 'winget list returned 1.' } }
@@ -635,6 +820,12 @@ Describe 'PreviousInstaller declaration validity' -Tag 'Light', 'Module' {
         $pkg = [Package]@{ Name = 'X'; Installer = 'winget'; Id = 'V.X'
                            PreviousInstaller = 'winget'; PreviousId = 'V.XOld' }
         $pkg.GetValidationError() | Should -Match 'differ'
+    }
+
+    It 'rejects a predecessor on a custom installer, which cannot act on it' {
+        $pkg = [Package]@{ Name = 'X'; CustomInstallScript = { }
+                           PreviousInstaller = 'scoop'; PreviousId = 'main/x' }
+        $pkg.GetValidationError() | Should -Match "not supported when Installer='custom'"
     }
 
     It 'accepts a well-formed cross-engine predecessor' {

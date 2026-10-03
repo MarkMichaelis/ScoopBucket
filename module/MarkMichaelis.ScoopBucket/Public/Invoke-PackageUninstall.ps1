@@ -168,9 +168,16 @@ function Invoke-PackageUninstall {
             # on the machine; the declared engine's uninstall cannot see it, so
             # without this the old install is orphaned -- shims and all -- and
             # keeps answering on PATH after the package was "removed" (#464).
+            #
+            # Skipped when the declared engine's own removal FAILED: the Failed
+            # row below carries the real reason, and promoting $state on a
+            # successful predecessor removal would report the package as
+            # Uninstalled while the primary copy is still installed. The retry
+            # (once the user fixes the primary failure) removes the predecessor
+            # too, so nothing is lost by deferring.
             $prevInstaller = ''
             if ($pkg.PSObject.Properties['PreviousInstaller']) { $prevInstaller = [string]$pkg.PreviousInstaller }
-            if ($prevInstaller -and $pkg.Installer -ne 'custom') {
+            if ($prevInstaller -and $pkg.Installer -ne 'custom' -and $state -ne 'Failed') {
                 Write-UpdateStatus -Activity 'Uninstall-Package' "  [predecessor] $($pkg.Name): also removing the $prevInstaller install"
                 try {
                     $prevResult = Invoke-PredecessorUninstall -Package $pkg -WhatIf:$DryRun
@@ -186,9 +193,15 @@ function Invoke-PackageUninstall {
                 }
                 if ($prevResult.State -eq 'Uninstalled') {
                     # The predecessor WAS present, so something really was
-                    # removed even when the declared engine had nothing.
+                    # removed even when the declared engine had nothing. Under
+                    # a preview nothing was removed, so say so -- the module's
+                    # (DryRun)/(WhatIf) sentinel convention.
                     $state  = 'Uninstalled'
-                    $reason = "Also removed the $prevInstaller predecessor ($($pkg.PreviousId))."
+                    $reason = if ($DryRun) {
+                        "Would also remove the $prevInstaller predecessor ($($pkg.PreviousId)). (DryRun)"
+                    } else {
+                        "Also removed the $prevInstaller predecessor ($($pkg.PreviousId))."
+                    }
                 }
             }
         } catch {

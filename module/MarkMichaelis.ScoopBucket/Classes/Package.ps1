@@ -257,6 +257,17 @@ class Package {
             return "Package '$($this.Name)': PreviousInstaller and Installer must differ (both are '$($this.Installer)'); PreviousInstaller records a cross-engine reclassification, not an id change."
         }
 
+        # Detection compares where a CLI resolves against the DECLARED engine's
+        # directories, and 'custom' owns none -- a custom install can put its
+        # binaries anywhere. So a predecessor declared here would never be acted
+        # on, which is worse than rejecting it: a half-working field reads as a
+        # migration that silently never happens. Reclassifying to 'custom' means
+        # removing the old install in CustomInstallScript (which must be
+        # idempotent anyway) or CustomUninstallScript.
+        if ($this.PreviousInstaller -and ($this.Installer -eq 'custom' -or $this.CustomInstallScript)) {
+            return "Package '$($this.Name)': PreviousInstaller is not supported when Installer='custom' (a custom install owns no engine directories to compare against). Remove the previous install from CustomInstallScript / CustomUninstallScript instead."
+        }
+
         if ($this.Source -eq 'msstore' -and $this.Installer -ne 'winget') {
             return "Package '$($this.Name)': Source='msstore' is only valid for Installer='winget'."
         }

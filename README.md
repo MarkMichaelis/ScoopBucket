@@ -418,7 +418,10 @@ previews both commands), and `Uninstall-Package` removes the predecessor
 too so the old copy is never orphaned. The result is exactly one install,
 so the `PATH` outcome no longer depends on directory ordering. The fields
 are a pair — one without the other is a declaration error — and
-`PreviousInstaller` must differ from `Installer`.
+`PreviousInstaller` must differ from `Installer`. It is also rejected for
+`Installer='custom'`, which owns no engine directories to compare
+against; a reclassification to `custom` removes the old install from its
+own (idempotent) `CustomInstallScript` / `CustomUninstallScript`.
 
 Leave the pair in place permanently. Detection keys off what currently
 answers on `PATH`, so once the predecessor is gone the migration is a
@@ -441,7 +444,13 @@ automatically.
 
 Nothing is auto-removed in that case on purpose: without the declaration
 the other engine's package id can only be guessed from a file path, and
-guessing on an uninstall is not acceptable. Only paths owned by a *known*
+guessing on an uninstall is not acceptable. For the same reason the
+command is only *exactly* right for scoop, where the owning app is
+recoverable from the app directory or the shim's `.shim` sidecar. For the
+other engines an undeclared conflict falls back to the CLI's own file
+name, which is often but not always the package id — the resolved path is
+printed alongside it so you can confirm before running. Declaring
+`PreviousId` removes the guesswork entirely. Only paths owned by a *known*
 engine count — a vendor installer that adds its own `PATH` entry (say
 `C:\Program Files\Git\cmd`) is not a conflict — and packages that declare
 no `CliCommands` are not checked at all, since nothing of theirs lands on

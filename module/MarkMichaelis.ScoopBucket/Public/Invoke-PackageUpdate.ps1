@@ -213,13 +213,16 @@ function Invoke-PackageUpdate {
         # here -- removing the shadowing copy would leave the machine with no
         # install at all until something installs the new one, so the fix is
         # Install-Package, which migrates and installs in one step.
-        try {
-            $conflictArgs = @{ Package = $pkg }
-            if ($engineRoots) { $conflictArgs['EngineRoot'] = $engineRoots }
-            $engineConflict = Get-PackageEngineConflict @conflictArgs
-        } catch {
-            $engineConflict = $null
-            Write-Warning "  $($pkg.Name): cross-engine install detection failed ($($_.Exception.Message)); proceeding with the declared engine."
+        # See Invoke-PackageInstall for why a missing engine map skips the gate
+        # instead of re-probing (and re-warning) per package.
+        $engineConflict = $null
+        if ($engineRoots) {
+            try {
+                $engineConflict = Get-PackageEngineConflict -Package $pkg -EngineRoot $engineRoots
+            } catch {
+                $engineConflict = $null
+                Write-Warning "  $($pkg.Name): cross-engine install detection failed ($($_.Exception.Message)); proceeding with the declared engine."
+            }
         }
         if ($engineConflict) {
             $hint = if ($engineConflict.Declared) {
