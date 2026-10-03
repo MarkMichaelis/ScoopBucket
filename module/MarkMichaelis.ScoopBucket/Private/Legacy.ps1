@@ -444,9 +444,14 @@ function Install-LocalManifest {
     try {
         $env:SCOOPBUCKET_LOCAL_REPO = $repoRoot
         scoop.ps1 hold scoop | Out-Null
-        $null = scoop.ps1 uninstall $appName 2>&1
+        # uninstall / install run the manifest's uninstaller / installer script,
+        # which re-imports this module with -Force. Out of process so that
+        # cannot dispose the session state scoop is running inside (#451). The
+        # surrounding hold / bucket calls stay in-process: they touch no
+        # manifest script.
+        $null = Invoke-ScoopCommand uninstall $appName 2>&1
         $manifest | ConvertTo-Json -Depth 20 | Out-File -FilePath $tempManifest -Encoding UTF8
-        scoop.ps1 install $tempManifest
+        Invoke-ScoopCommand install $tempManifest
         $scoopInstallExit = $LASTEXITCODE
         if ($scoopInstallExit -eq 0 -and $BucketName) {
             Update-LocalManifestInstallMetadata -AppName $appName -BucketName $BucketName -ErrorAction SilentlyContinue

@@ -45,7 +45,10 @@ function Update-ScoopPackage {
     # in PS7 lands on the Information stream, not stdout — without `6>&1`
     # we'd miss the "(latest version)" / "is already installed" markers
     # we rely on to distinguish Updated from AlreadyLatest.
-    $out = & scoop @updateArgs *>&1
+    # Out of process: `scoop update <app>` re-runs the manifest's
+    # installer.script, which re-imports this module with -Force. See
+    # Invoke-ScoopCommand and #451.
+    $out = Invoke-ScoopCommand @updateArgs *>&1
     $exit = $LASTEXITCODE
     $joined = ($out | ForEach-Object { $_.ToString() }) -join "`n"
     # Mirror scoop's own output to the verbose stream only (hidden by default,

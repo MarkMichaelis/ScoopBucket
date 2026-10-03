@@ -38,7 +38,9 @@ function Uninstall-ScoopPackage {
     }
 
     Write-Host "  scoop $($uninstallArgs -join ' ')"
-    & scoop @uninstallArgs
+    # Out of process: a manifest's uninstaller.script re-imports this module
+    # with -Force. See Invoke-ScoopCommand and #451.
+    Invoke-ScoopCommand @uninstallArgs
     $exit = $LASTEXITCODE
     if ($exit -eq 0) {
         return @{ State = 'Uninstalled'; Reason = $null }

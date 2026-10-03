@@ -353,7 +353,14 @@ function Invoke-PackageUpdate {
         # Tear down the transient status bar / progress line before emitting results
         # so the two don't fight over the host's rendering. In a finally so an aborted
         # or throwing run never leaves the terminal with a stuck VT scroll region.
-        Write-UpdateStatus -Completed
+        #
+        # Swallowed on purpose (#451): this is cosmetic. A throw from HERE would
+        # skip the [PackageResult] emission below and lose every outcome the
+        # sweep collected -- which is how a single package failure took a whole
+        # run down.
+        try { Write-UpdateStatus -Completed } catch {
+            Write-Verbose "Invoke-PackageUpdate: progress teardown failed (ignored): $($_.Exception.Message)"
+        }
     }
 
     # When any package's ConfigScript failed, persist its full captured output to a

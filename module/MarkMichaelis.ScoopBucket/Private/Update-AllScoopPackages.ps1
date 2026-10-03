@@ -23,7 +23,10 @@ function Update-AllScoopPackages {
     # Merge all streams; scoop writes its per-app status via Write-Host
     # which lands on the Information stream in PS7 (same rationale as
     # Update-ScoopPackage).
-    $out = & scoop @updateArgs *>&1
+    # Out of process: `scoop update *` re-runs every outdated app's
+    # installer.script, which re-imports this module with -Force. See
+    # Invoke-ScoopCommand and #451.
+    $out = Invoke-ScoopCommand @updateArgs *>&1
     $exit = $LASTEXITCODE
     $joined = ($out | ForEach-Object { $_.ToString() }) -join "`n"
     if ($joined) { Write-Verbose $joined }
