@@ -283,13 +283,13 @@ Register-ArgumentCompleter -Native -CommandName ffmpeg -ScriptBlock {
     }
     [Package]@{
         Name        = 'rclone'
-        Installer   = 'scoop'
-        Id          = 'main/rclone'
+        Installer   = 'winget'
+        Id          = 'Rclone.Rclone'
         CliCommands = @('rclone')
         Completion  = 'native'
         NativeCompletionKind = 'native'
         NativeCommandScript = { rclone completion powershell }
-        Notes       = 'Cloud-storage CLI: sync/copy/mount/serve against ~70 providers. scoop main/rclone shims rclone.exe. Cobra-generated PowerShell completer via `rclone completion powershell`, the same native-generator shape as ripgrep rather than a hand-curated list (#459).'
+        Notes       = 'Cloud-storage CLI: sync/copy/mount/serve against ~70 providers. winget per the README engine preference (winget first for CLIs; scoop only when this bucket owns the package or winget lacks it). Rclone.Rclone is a portable zip of the same official GitHub release scoop consumes, shimmed into the WinGet Links directory. Unlike ripgrep (#73) there is no version reason to prefer scoop. Cobra-generated PowerShell completer via `rclone completion powershell`; completion is a property of the binary, not the engine (#459, #462).'
         ExpectedCompletions = @{ rclone = @('config','copy','sync','mount','check') }
     }
     [Package]@{

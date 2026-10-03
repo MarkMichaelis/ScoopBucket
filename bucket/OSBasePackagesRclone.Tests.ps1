@@ -19,7 +19,7 @@
     verified against a real 1.75.1 install:
         PS> rclone completion powershell
         # powershell completion for rclone   -*- shell-script -*-
-    which is the same shape as ripgrep's `rg --generate complete-powershell`.
+    Completion is a property of the binary, not the engine.
 #>
 
 BeforeAll {
@@ -42,12 +42,12 @@ Describe 'OSBasePackages: rclone' -Tag 'Light','Bundle' {
         $script:rclone.Bundle | Should -Be 'OSBasePackages'
     }
 
-    It 'installs from scoop main as main/rclone' {
-        $script:rclone.Installer | Should -Be 'scoop'
-        $script:rclone.Id        | Should -Be 'main/rclone'
+    It 'installs from winget as Rclone.Rclone' {
+        $script:rclone.Installer | Should -Be 'winget'
+        $script:rclone.Id        | Should -Be 'Rclone.Rclone'
     }
 
-    It 'declares rclone as the only CliCommand (matches the single shim scoop creates)' {
+    It 'declares rclone as the only CliCommand (matches the single shim winget Links creates)' {
         @($script:rclone.CliCommands) | Should -Be @('rclone')
     }
 
