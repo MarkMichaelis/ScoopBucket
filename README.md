@@ -124,6 +124,24 @@ The `[Package]` class enforces enums on `Installer` / `Source` / `Scope` /
 `module/MarkMichaelis.ScoopBucket/Classes/Package.ps1` for the full schema (also
 `Package.Validate()` for cross-field invariants).
 
+**`DependsOn` is an install set, not an install order.** Two semantics
+catch authors out (#450):
+
+* `Resolve-PackageOrder` **BFS-expands `DependsOn` transitively** whenever
+  `-Name` is passed, and `Install-Package` always passes `-Name`. So
+  `Install-Package -Name A` where `A.DependsOn = @('B')` installs `B` too,
+  plus `B`'s own `DependsOn`, transitively. Listing a heavyweight package
+  to express "nice to have it first" silently forces it on anyone who asks
+  for the small one — Aspire once listed `'Visual Studio'` and
+  `Install-Package -Name Aspire` resolved a multi-GB IDE to obtain a small
+  CLI. There is deliberately **no** "install after X but do not drag X in"
+  concept: if the package works without X, do not list X.
+* `DependsOn` is **same-bundle only** (as is `Companions`).
+  `Resolve-PackageOrder` runs per bundle and throws
+  `Package 'X' DependsOn 'dotnet' which is not defined in this bundle.`
+  A bundle needing a package another bundle owns declares its own entry for
+  it (the way `AIAgents` redeclares `Node.js`) rather than reaching across.
+
 The driver pipeline (validate → topo sort by `DependsOn` → engine
 dispatch → `PostInstallScript` → `ConfigScript` → completion register →
 completion verify via `[CommandCompletion]::CompleteInput`) closes the
@@ -187,7 +205,7 @@ Top-level helpers for cross-bundle queries:
 Get-Package                       # list every declared package, across bundles
 Get-Package -Installer scoop      # filter by engine
 Get-Package -Name 'rip*','Bit*'   # wildcard
-Install-Package -Name 'BitwardenCli'   # auto-pulls Bitwarden via DependsOn
+Install-Package -Name 'BitwardenCli'   # auto-pulls Bitwarden via DependsOn (closure, see above)
 Install-Package -Name beyon<Tab>       # Tab-completes to 'Beyond Compare'
 Install-Package -Name 'ripgrep' -DryRun   # preview, no real install
 Update-Package  -Name 'ripgrep' -DryRun   # preview, no real update

@@ -91,6 +91,29 @@ class Package {
     # dependency manifests).
     [string[]] $WingetExtraArgs = @()
 
+    # Back-link to the prerequisites this package genuinely CANNOT work
+    # without. Two semantics surprise people (#450) -- read both before
+    # adding an entry:
+    #
+    #   1. It is an INSTALL-SET MEMBERSHIP declaration, not an ordering
+    #      hint. Resolve-PackageOrder BFS-expands DependsOn transitively
+    #      whenever -Name is passed, and Install-Package ALWAYS passes
+    #      -Name. So `Install-Package -Name A` where A.DependsOn = @('B')
+    #      installs B too -- and B's own DependsOn, and so on. Declaring a
+    #      heavyweight package here to express "nice to have it first"
+    #      silently forces it onto anyone who asks for the small one. Aspire
+    #      once declared 'Visual Studio' this way and `Install-Package -Name
+    #      Aspire` pulled a multi-GB IDE in to obtain a small CLI tool.
+    #      There is deliberately NO "install after X but do not drag X in"
+    #      concept: if the package works without X, do not list X.
+    #
+    #   2. It is SAME-BUNDLE ONLY. Resolve-PackageOrder runs per bundle and
+    #      throws on a cross-bundle reference:
+    #        "Package 'X' DependsOn 'dotnet' which is not defined in this
+    #         bundle."
+    #      A bundle that needs a package another bundle owns must declare
+    #      its own entry for it (the way AIAgents redeclares 'Node.js'),
+    #      not reach across bundles. Same constraint as Companions below.
     [string[]] $DependsOn = @()
 
     # Forward-link to "always install together" companion packages in the
