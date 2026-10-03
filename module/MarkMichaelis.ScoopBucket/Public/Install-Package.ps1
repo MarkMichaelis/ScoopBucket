@@ -151,9 +151,14 @@ function Install-Package {
         # otherwise classified, including imperative `.ps1` bundles
         # (Chocolatey, Gemini, ClaudeExcel, PowerShell, ...) whose
         # `Get-BundlePackages` Packages array is empty.
+        #
+        # Searched RECURSIVELY (Resolve-BucketManifestPath), matching both
+        # scoop itself and bundle discovery: in the grouped bucket layout the
+        # config-only manifests all live in a category subfolder
+        # (developer/GitConfigure.json, os/EnableRemoteDesktop.json, ...), so a
+        # root-only probe made every one of them unreachable by name. See #452.
         if ($effectiveBucket) {
-            $manifestPath = Join-Path $effectiveBucket ("$needed.json")
-            if (Test-Path $manifestPath) {
+            if (Resolve-BucketManifestPath -Name $needed -BucketPath $effectiveBucket) {
                 $manifestNames.Add($needed)
                 continue
             }

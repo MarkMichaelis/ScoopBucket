@@ -96,3 +96,59 @@ Describe 'Module loader skips co-located *.Tests.ps1' -Tag 'Light', 'Module' {
         }
     }
 }
+
+Describe 'Bare manifest resolution across bucket subfolders' -Tag 'Light', 'Module' {
+
+    BeforeAll {
+        # A config-only manifest: it lives in a category subfolder, has no
+        # sibling .ps1 and therefore no [Package[]] declaration at all. Every
+        # real config-only manifest has exactly this shape after the reorg --
+        # GitConfigure (developer/), EnableRemoteDesktop (os/),
+        # McAfeeUninstall (os/), ... -- and dispatch case (c) in
+        # Install-/Uninstall-/Update-Package is the only path that can reach
+        # them. That case probed `<bucket>\<name>.json` only, so every one of
+        # them became unreachable by name once it moved into a subfolder (#452).
+        $script:folderedBucket = Join-Path $TestDrive 'FolderedBucket'
+        $script:categoryDir = Join-Path $script:folderedBucket 'developer'
+        New-Item -ItemType Directory -Path $script:categoryDir -Force | Out-Null
+        $script:manifestName = 'WidgetConfigure'
+        $manifestJson = @{
+            version   = '1.00.000'
+            url       = @('https://example.invalid/widget-configure')
+            installer = @{ script = @('Write-Host "configure"') }
+        } | ConvertTo-Json -Depth 4
+        Set-Content -LiteralPath (Join-Path $script:categoryDir "$($script:manifestName).json") `
+            -Value $manifestJson -Encoding utf8
+    }
+
+    It 'Install-Package resolves a bare manifest that lives in a subfolder' {
+        # -DryRun keeps the ShouldProcess gate closed, so nothing is installed;
+        # the behavior under test is purely name -> manifest resolution.
+        { Install-Package -Name $script:manifestName -BucketPath $script:folderedBucket `
+                -DryRun -SkipCompletion -ErrorAction Stop } |
+            Should -Not -Throw
+    }
+
+    It 'Uninstall-Package resolves a bare manifest that lives in a subfolder' {
+        $result = @(Uninstall-Package -Name $script:manifestName `
+                -BucketPath $script:folderedBucket -DryRun -SkipCompletion)
+
+        $result.Count     | Should -Be 1
+        $result[0].Name   | Should -Be $script:manifestName
+        $result[0].Status | Should -Be 'Skipped'
+    }
+
+    It 'Update-Package resolves a bare manifest that lives in a subfolder' {
+        { Update-Package -Name $script:manifestName -BucketPath $script:folderedBucket `
+                -DryRun -SkipCompletion -SkipBucketRefresh -WarningAction SilentlyContinue `
+                -ErrorAction Stop } |
+            Should -Not -Throw
+    }
+
+    It 'still rejects a name that neither a bundle nor any manifest declares' {
+        # Guard against "fixing" resolution by making it match anything.
+        { Install-Package -Name 'NoSuchWidgetAnywhere' -BucketPath $script:folderedBucket `
+                -DryRun -SkipCompletion -ErrorAction Stop } |
+            Should -Throw -ExpectedMessage '*no bundle declares a package named*'
+    }
+}

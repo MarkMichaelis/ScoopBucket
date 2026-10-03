@@ -235,9 +235,11 @@ function Update-Package {
         }
 
         # (c) Bare manifest fallback — no declarative metadata, surface as Skipped.
+        # Searched recursively so a config-only manifest in a category
+        # subfolder (developer/, os/, ...) resolves the same way scoop and
+        # bundle discovery resolve it. See #452.
         if ($effectiveBucket) {
-            $manifestPath = Join-Path $effectiveBucket ("$needed.json")
-            if (Test-Path $manifestPath) {
+            if (Resolve-BucketManifestPath -Name $needed -BucketPath $effectiveBucket) {
                 $manifestNames.Add($needed)
                 continue
             }

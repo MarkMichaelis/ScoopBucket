@@ -128,9 +128,11 @@ function Uninstall-Package {
             continue
         }
 
+        # (c) Bare manifest fallback. Searched recursively so a config-only
+        # manifest in a category subfolder (developer/, os/, ...) resolves the
+        # same way scoop and bundle discovery resolve it. See #452.
         if ($effectiveBucket) {
-            $manifestPath = Join-Path $effectiveBucket ("$needed.json")
-            if (Test-Path $manifestPath) {
+            if (Resolve-BucketManifestPath -Name $needed -BucketPath $effectiveBucket) {
                 $manifestNames.Add($needed)
                 continue
             }
