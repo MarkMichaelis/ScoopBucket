@@ -154,9 +154,22 @@ function Uninstall-Package {
             $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
         }
         Write-UpdateStatus -Activity 'Uninstall-Package' "Uninstall-Package: dispatching $($entry.Names -join ', ') via $($entry.Bundle)..."
-        Invoke-PackageUninstall -Packages $pkgObjects -Bundle $entry.Bundle `
-            -Name @($entry.Names) -DryRun:$DryRun -KeepCompletion:$KeepCompletion -SkipCompletion:$SkipCompletion `
-            -ErrorAction Continue
+        # -ErrorAction Continue only tames the driver's NON-terminating
+        # PackageUninstallFailed records. A terminating error from the driver's
+        # own setup or teardown propagates regardless and would abort the rest of
+        # the sweep -- the #451 second defect, which reached the install driver
+        # first. Keep each bundle's blast radius to that bundle.
+        try {
+            Invoke-PackageUninstall -Packages $pkgObjects -Bundle $entry.Bundle `
+                -Name @($entry.Names) -DryRun:$DryRun -KeepCompletion:$KeepCompletion -SkipCompletion:$SkipCompletion `
+                -ErrorAction Continue
+        } catch [System.Management.Automation.PipelineStoppedException] {
+            throw
+        } catch {
+            $failure = New-BundleDispatchFailure -Bundle $entry.Bundle -Operation 'Uninstall' -Message $_.Exception.Message
+            $PSCmdlet.WriteError($failure.Error)
+            $failure
+        }
     }
 
     foreach ($b in $fullBundles) {
@@ -165,9 +178,17 @@ function Uninstall-Package {
             $pkgObjects = @($b.Packages | ForEach-Object { ConvertTo-PackageFromMetadata $_ })
         }
         Write-UpdateStatus -Activity 'Uninstall-Package' "Uninstall-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
-        Invoke-PackageUninstall -Packages $pkgObjects -Bundle $b.Bundle `
-            -DryRun:$DryRun -KeepCompletion:$KeepCompletion -SkipCompletion:$SkipCompletion `
-            -ErrorAction Continue
+        try {
+            Invoke-PackageUninstall -Packages $pkgObjects -Bundle $b.Bundle `
+                -DryRun:$DryRun -KeepCompletion:$KeepCompletion -SkipCompletion:$SkipCompletion `
+                -ErrorAction Continue
+        } catch [System.Management.Automation.PipelineStoppedException] {
+            throw
+        } catch {
+            $failure = New-BundleDispatchFailure -Bundle $b.Bundle -Operation 'Uninstall' -Message $_.Exception.Message
+            $PSCmdlet.WriteError($failure.Error)
+            $failure
+        }
     }
 
     foreach ($n in $manifestNames) {

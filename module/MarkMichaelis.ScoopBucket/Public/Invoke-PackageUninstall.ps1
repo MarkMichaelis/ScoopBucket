@@ -193,7 +193,13 @@ function Invoke-PackageUninstall {
         & $addState $pkg $state $reason $null
     }
 
-    Write-UpdateStatus -Activity 'Uninstall-Package' -Completed
+    # Best-effort teardown of the transient status bar / progress line (#451).
+    # This is cosmetic, and a throw from here would skip the [PackageResult]
+    # emission below and lose every outcome the sweep collected -- the same
+    # cascade that took down a whole Install-Package run.
+    try { Write-UpdateStatus -Activity 'Uninstall-Package' -Completed } catch {
+        Write-Verbose "Invoke-PackageUninstall: progress teardown failed (ignored): $($_.Exception.Message)"
+    }
 
     # Emit one PackageResult per package on the success stream; the
     # format.ps1xml view renders Status as a colored glyph for interactive
