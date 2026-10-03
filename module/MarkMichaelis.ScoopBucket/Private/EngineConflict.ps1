@@ -82,10 +82,18 @@ function Get-EngineRootMap {
     # live under SCOOP_GLOBAL (C:\ProgramData\scoop by default) and user
     # installs under ~\scoop, and a machine can have both.
     $scoopRoots = [System.Collections.Generic.List[string]]::new()
+    # Resolve-ScoopRoot predates this file and does its own UNGUARDED
+    # Join-Path against %ProgramData% / %USERPROFILE%, so it can throw the very
+    # empty-base error the $under guard exists to avoid. Contain it here rather
+    # than let one probe take down the whole map.
+    $resolvedScoopRoot = $null
+    try { $resolvedScoopRoot = Resolve-ScoopRoot } catch {
+        Write-Verbose "Get-EngineRootMap: Resolve-ScoopRoot failed (ignored): $($_.Exception.Message)"
+    }
     $scoopCandidates = @(
         $env:SCOOP
         $env:SCOOP_GLOBAL
-        (Resolve-ScoopRoot)
+        $resolvedScoopRoot
         (& $under $env:ProgramData 'scoop')
         (& $under $env:USERPROFILE 'scoop')
     )
@@ -143,6 +151,51 @@ function Get-CommandSourcePath {
     return $null
 }
 
+function Get-ScoopScopeRoot {
+    <#
+    .SYNOPSIS
+        Scoop's global and user roots, kept apart: @{ Global = @(...); User = @(...) }.
+
+    .DESCRIPTION
+        Get-EngineRootMap deliberately flattens every scoop root into one array,
+        because attribution only asks "is this path scoop's?". Choosing between
+        `scoop uninstall -g <app>` and `scoop uninstall <app>` asks a different
+        question, and getting it wrong produces a command that exits non-zero
+        having removed nothing. %USERPROFILE% is not a sound proxy for the
+        answer: SCOOP_GLOBAL can be redirected inside the user profile and SCOOP
+        outside it, and both are supported scoop layouts.
+
+        Global is checked first by callers, because that is the arrangement that
+        actually holds a machine-wide install when the two roots coincide (which
+        they do when SCOOP is pointed at the ProgramData root).
+    #>
+    [OutputType([hashtable])]
+    [CmdletBinding()]
+    param()
+
+    $under = {
+        param([string]$Base, [string]$Leaf)
+        if (-not $Base) { return $null }
+        Join-Path $Base $Leaf
+    }
+
+    $norm = {
+        param($Candidates)
+        $seen = [System.Collections.Generic.List[string]]::new()
+        foreach ($c in @($Candidates)) {
+            if (-not $c) { continue }
+            $n = ([string]$c).Replace('/', '\').TrimEnd('\')
+            if ($n -and -not ($seen | Where-Object { $_ -ieq $n })) { $seen.Add($n) }
+        }
+        return $seen.ToArray()
+    }
+
+    return @{
+        Global = & $norm @($env:SCOOP_GLOBAL, (& $under $env:ProgramData 'scoop'))
+        User   = & $norm @($env:SCOOP, (& $under $env:USERPROFILE 'scoop'))
+    }
+}
+
 function Get-ScoopShimTarget {
     <#
     .SYNOPSIS
@@ -196,18 +249,21 @@ function Resolve-PathOwningEngine {
 
     if (-not $Path) { return $null }
 
+    # Compare on a single separator so a root and a path that disagree about
+    # '/' vs '\' (a $env:SCOOP set with forward slashes, say) still match.
+    $normPath = $Path.Replace('/', '\')
+
     $best = $null
     $bestLength = -1
     foreach ($engine in $EngineRoot.Keys) {
         foreach ($root in @($EngineRoot[$engine])) {
             if (-not $root) { continue }
-            $norm = ([string]$root).TrimEnd('\', '/')
+            $norm = ([string]$root).Replace('/', '\').TrimEnd('\')
             if (-not $norm) { continue }
             # Require a separator after the root so C:\...\scoop never matches
             # a sibling directory whose name merely starts with 'scoop'.
-            $isUnder = $Path.StartsWith("$norm\", [System.StringComparison]::OrdinalIgnoreCase) -or
-                       $Path.StartsWith("$norm/", [System.StringComparison]::OrdinalIgnoreCase)
-            if ($isUnder -and $norm.Length -gt $bestLength) {
+            if ($normPath.StartsWith("$norm\", [System.StringComparison]::OrdinalIgnoreCase) -and
+                $norm.Length -gt $bestLength) {
                 $bestLength = $norm.Length
                 $best = [string]$engine
             }
@@ -233,10 +289,15 @@ function Resolve-EngineUninstallCommand {
         forwards to (or $null). Injected so the inference is testable without
         writing shim sidecars; defaults to Get-ScoopShimTarget.
 
+    .PARAMETER ScoopScopeRoot
+        @{ Global = @(...); User = @(...) } as Get-ScoopScopeRoot returns, used
+        to decide scoop's -g. Injected so the decision is testable against
+        layouts other than this machine's.
+
     .PARAMETER UserProfile
-        Used only to decide scoop's -g: scoop keeps global and user installs in
-        separate roots, and `scoop uninstall <app>` against a -g install exits
-        non-zero without removing anything.
+        Last-resort fallback for the -g decision when neither configured scoop
+        root matched the path. `scoop uninstall <app>` against a -g install
+        exits non-zero without removing anything, so this is not cosmetic.
     #>
     [OutputType([string])]
     [CmdletBinding()]
@@ -246,12 +307,14 @@ function Resolve-EngineUninstallCommand {
         [Parameter(Mandatory)][string]$Cli,
         [string]$Id,
         [scriptblock]$ShimTargetResolver,
+        [hashtable]$ScoopScopeRoot,
         [string]$UserProfile
     )
 
     # Id may carry an engine prefix ('main/rclone'); every engine's uninstall
     # takes the bare trailing segment.
     $target = if ($Id) { ($Id -split '/')[-1] } else { [System.IO.Path]::GetFileNameWithoutExtension($Path) }
+    $normPath = $Path.Replace('/', '\')
 
     switch ($Engine) {
         'scoop' {
@@ -270,22 +333,39 @@ function Resolve-EngineUninstallCommand {
                 }
                 if ($m.Success) { $target = $m.Groups['app'].Value }
             }
-            $global = $true
+            # Decide -g from scoop's ACTUAL configured roots. Global first: when
+            # SCOOP and SCOOP_GLOBAL coincide, -g is the arrangement that holds
+            # a machine-wide install, and -g is also what a bundle install
+            # creates (Install-ScoopPackage passes it for any non-user scope).
+            $scopes = if ($ScoopScopeRoot) { $ScoopScopeRoot } else { Get-ScoopScopeRoot }
+            $isUnder = {
+                param($Roots)
+                foreach ($r in @($Roots)) {
+                    if (-not $r) { continue }
+                    $n = ([string]$r).Replace('/', '\').TrimEnd('\')
+                    if ($n -and $normPath.StartsWith("$n\", [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+                }
+                return $false
+            }
+            if (& $isUnder $scopes['Global']) { return "scoop uninstall -g $target" }
+            if (& $isUnder $scopes['User'])   { return "scoop uninstall $target" }
+
+            # Neither configured root matched (an unusual layout, or roots we
+            # could not read). Fall back to the user-profile heuristic rather
+            # than guess blind.
             if ($UserProfile) {
-                $norm = $UserProfile.TrimEnd('\', '/')
-                if ($Path.StartsWith("$norm\", [System.StringComparison]::OrdinalIgnoreCase) -or
-                    $Path.StartsWith("$norm/", [System.StringComparison]::OrdinalIgnoreCase)) {
-                    $global = $false
+                $up = $UserProfile.Replace('/', '\').TrimEnd('\')
+                if ($normPath.StartsWith("$up\", [System.StringComparison]::OrdinalIgnoreCase)) {
+                    return "scoop uninstall $target"
                 }
             }
-            if ($global) { return "scoop uninstall -g $target" }
-            return "scoop uninstall $target"
+            return "scoop uninstall -g $target"
         }
         'winget' {
             if ($Id) { return "winget uninstall --exact --id $Id" }
             return "winget uninstall --exact $target"
         }
-        'choco'      { return "choco uninstall -y $target" }
+        'choco'      { return "choco uninstall -y $(if ($Id) { $Id } else { $target })" }
         'npmGlobal'  { return "npm uninstall --global $(if ($Id) { $Id } else { $target })" }
         'dotnetTool' { return "dotnet tool uninstall -g $(if ($Id) { $Id } else { $target })" }
         default      { return "<remove the $Engine install of '$Cli' at $Path>" }
@@ -346,6 +426,7 @@ function Get-PackageEngineConflict {
         [hashtable]$EngineRoot,
         [scriptblock]$CommandResolver,
         [scriptblock]$ShimTargetResolver,
+        [hashtable]$ScoopScopeRoot,
         [string]$UserProfile = $env:USERPROFILE
     )
 
@@ -388,6 +469,7 @@ function Get-PackageEngineConflict {
             UserProfile = $UserProfile
         }
         if ($ShimTargetResolver) { $commandArgs['ShimTargetResolver'] = $ShimTargetResolver }
+        if ($ScoopScopeRoot)     { $commandArgs['ScoopScopeRoot']     = $ScoopScopeRoot }
 
         return [pscustomobject]@{
             Cli               = $cli

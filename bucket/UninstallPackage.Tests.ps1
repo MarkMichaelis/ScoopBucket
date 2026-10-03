@@ -79,7 +79,7 @@ Describe 'Uninstall engine dispatchers' -Tag 'Light','Module' {
             $script:Engine = & (Get-Module MarkMichaelis.ScoopBucket) { Get-Command Uninstall-ScoopPackage }
         }
 
-        It 'strips the bucket prefix and calls scoop uninstall with the bare app name' {
+        It 'strips the bucket prefix and calls scoop uninstall -g with the bare app name' {
             $script:captured = $null
             # The read-only presence probe still goes through the in-process
             # `scoop` wrapper; the mutating `scoop uninstall` goes out of
@@ -98,7 +98,12 @@ Describe 'Uninstall engine dispatchers' -Tag 'Light','Module' {
             $r = & $script:Engine -Package $pkg
             $r.State           | Should -Be 'Uninstalled'
             $script:captured[0] | Should -Be 'uninstall'
-            $script:captured[1] | Should -Be 'ripgrep'
+            # Scope mirrors Install-ScoopPackage: 'global' is the [Package]
+            # default, and `scoop uninstall <app>` without -g cannot remove a
+            # global install at all -- it exits non-zero having done nothing
+            # (#464). The bucket prefix is still stripped.
+            $script:captured[1] | Should -Be '-g'
+            $script:captured[2] | Should -Be 'ripgrep'
         }
 
         It 'returns NotInstalled when scoop list has no row' {

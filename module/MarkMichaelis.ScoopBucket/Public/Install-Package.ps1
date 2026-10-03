@@ -239,7 +239,73 @@ function Install-Package {
     # with no declaring [Package] are genuinely metadata-less and dispatch as a
     # plain `scoop install` with no completion (#291).
     $manifestPackagesToImport = New-Object System.Collections.Generic.List[object]
+    # Engine ownership map for the cross-engine gate below (#464), resolved once.
+    $manifestEngineRoots = $null
+    if ($manifestNames.Count -gt 0) {
+        try {
+            $manifestEngineRoots = Get-EngineRootMap
+        } catch {
+            Write-Warning "Install-Package: could not map engine directories ($($_.Exception.Message)); cross-engine detection is unavailable for manifest dispatch this run."
+        }
+    }
+
     foreach ($n in $manifestNames) {
+        # --- Cross-engine gate for the manifest path (#464) ----------------
+        # This path dispatches `scoop install <manifest>` directly and never
+        # reaches Invoke-PackageInstall, so without its own gate it is a hole
+        # straight through the one in the driver: reaching a package by its
+        # MANIFEST name instead of its Package.Name (e.g. 'ClaudeCode' rather
+        # than 'Claude Code CLI') would install a scoop copy with no detection
+        # at all. Both lookups below are by Id, which is the only link a bare
+        # manifest has back to a declaration.
+        $supersededBy = $null
+        $declaredBy   = $null
+        foreach ($b in $bundles) {
+            foreach ($p in $b.Packages) {
+                $prevId = if ($p.PSObject.Properties['PreviousId']) { [string]$p.PreviousId } else { '' }
+                if ($prevId -and (($prevId -split '/')[-1] -ieq $n)) { $supersededBy = $p; break }
+                if ($p.Id -and (($p.Id -split '/')[-1] -ieq $n)) { $declaredBy = $p }
+            }
+            if ($supersededBy) { break }
+        }
+
+        if ($supersededBy) {
+            # The declaration says this manifest IS the previous engine's
+            # install. Running it would re-create exactly the copy a migration
+            # exists to remove, so refuse regardless of current PATH state.
+            $failure = New-BundleDispatchFailure -Bundle '(manifest)' -Name $n `
+                -Installer 'scoop' -Id $n -Message ("manifest '$n' is the superseded $($supersededBy.PreviousInstaller) install of '$($supersededBy.Name)', which is now declared as $($supersededBy.Installer) ($($supersededBy.Id)). Installing it would re-create the copy the migration removes. Install it by package name instead: Install-Package -Name '$($supersededBy.Name)'")
+            $pkgErrors.Add($failure.Error)
+            $PSCmdlet.WriteError($failure.Error)
+            $results.Add($failure)
+            continue
+        }
+
+        if ($declaredBy -and $manifestEngineRoots) {
+            $conflict = $null
+            try {
+                $conflict = Get-PackageEngineConflict -Package $declaredBy -EngineRoot $manifestEngineRoots
+            } catch {
+                Write-Warning "  ${n}: cross-engine install detection failed ($($_.Exception.Message)); proceeding with scoop install."
+            }
+            if ($conflict) {
+                # Refuse rather than migrate: the declared-migration flow lives
+                # on the Package.Name path, and the message names it, so there
+                # is exactly one place that performs an automatic uninstall.
+                $hint = if ($conflict.Declared) {
+                    "Install it by package name so the declared migration runs: Install-Package -Name '$($declaredBy.Name)'"
+                } else {
+                    "Remove the $($conflict.Engine) copy first: $($conflict.UninstallCommand)"
+                }
+                $failure = New-BundleDispatchFailure -Bundle '(manifest)' -Name $n `
+                    -Installer 'scoop' -Id $n -Message ("'$($conflict.Cli)' on PATH resolves to $($conflict.Path), owned by $($conflict.Engine), not the declared $($conflict.DeclaredInstaller) install of '$($declaredBy.Name)'. Installing manifest '$n' would leave two copies and PATH order, not this declaration, would decide which one runs. $hint")
+                $pkgErrors.Add($failure.Error)
+                $PSCmdlet.WriteError($failure.Error)
+                $results.Add($failure)
+                continue
+            }
+        }
+
         Write-UpdateStatus -Activity 'Install-Package' "Install-Package: dispatching manifest '$n' via scoop install (no declarative [Package] match)..."
         # Preview mode is uniform across all dispatch paths via the single
         # ShouldProcess mechanism. Paths (a)/(b) forward the preview flag to
