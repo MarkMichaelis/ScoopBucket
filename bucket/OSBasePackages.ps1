@@ -282,6 +282,17 @@ Register-ArgumentCompleter -Native -CommandName ffmpeg -ScriptBlock {
         ExpectedCompletions = @{ rg = @('--help','--version','--color') }
     }
     [Package]@{
+        Name        = 'rclone'
+        Installer   = 'scoop'
+        Id          = 'main/rclone'
+        CliCommands = @('rclone')
+        Completion  = 'native'
+        NativeCompletionKind = 'native'
+        NativeCommandScript = { rclone completion powershell }
+        Notes       = 'Cloud-storage CLI: sync/copy/mount/serve against ~70 providers. scoop main/rclone shims rclone.exe. Cobra-generated PowerShell completer via `rclone completion powershell`, the same native-generator shape as ripgrep rather than a hand-curated list (#459).'
+        ExpectedCompletions = @{ rclone = @('config','copy','sync','mount','check') }
+    }
+    [Package]@{
         Name        = 'Sysinternals Suite'
         Installer   = 'scoop'
         Id          = 'extras/sysinternals'
