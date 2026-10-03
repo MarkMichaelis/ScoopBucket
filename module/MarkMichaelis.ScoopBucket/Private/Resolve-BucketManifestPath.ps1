@@ -37,11 +37,17 @@ function Resolve-BucketManifestPath {
         `-LiteralPath` stops `Test-Path` from expanding a wildcard but does
         nothing about `..`, so `Join-Path <bucket> '..\Elsewhere.json'` would
         otherwise resolve a manifest OUTSIDE the bucket and the caller would
-        report it as "found in the bucket".
+        report it as "found in the bucket". `:` is refused for the same
+        reason even though `[IO.Path]::GetFileName` alone would let it
+        through — on Windows it is the NTFS alternate-data-stream separator,
+        so `'Widget:stream'` would otherwise probe an ADS on a file literally
+        named `Widget`, still inside the bucket but not the plain-file match
+        the name claims to be.
 
     .PARAMETER Name
         Manifest base name, without the `.json` extension. Must be a single
-        file name — anything with a directory component yields $null.
+        file name — anything with a directory component, or a `:`, yields
+        $null.
 
     .PARAMETER BucketPath
         The bucket directory to search. A missing or empty path yields $null.
@@ -64,6 +70,13 @@ function Resolve-BucketManifestPath {
     # 'C:\somewhere\Else' must not resolve, or a caller would announce a
     # manifest outside the bucket as one it found in the bucket.
     if ($Name -ne [System.IO.Path]::GetFileName($Name)) { return $null }
+
+    # ':' is rejected separately -- GetFileName alone does not treat it as a
+    # separator, but on Windows it is the NTFS alternate-data-stream marker.
+    # 'Widget:stream' would otherwise probe an ADS on a file named 'Widget',
+    # still bucket-internal (no escape) but not the plain-file match the
+    # name claims to be.
+    if ($Name.Contains(':')) { return $null }
 
     $rootCandidate = Join-Path $BucketPath "$Name.json"
     if (Test-Path -LiteralPath $rootCandidate -PathType Leaf) {

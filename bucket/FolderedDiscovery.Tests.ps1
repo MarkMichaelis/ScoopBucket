@@ -185,6 +185,13 @@ Describe 'Resolve-BucketManifestPath' -Tag 'Light', 'Module' {
         script:New-Manifest (Join-Path $script:bucket 'client\WildB.json')
         # A manifest OUTSIDE the bucket, one level up.
         script:New-Manifest (Join-Path $TestDrive 'Outside.json')
+        # A plain file plus a real NTFS alternate data stream named
+        # 'stream.json' on it, so 'StreamHost:stream' is a genuine probe,
+        # not a no-op: without the ':' guard this is exactly the path
+        # Resolve-BucketManifestPath would Test-Path and find.
+        $script:streamHost = Join-Path $script:bucket 'StreamHost'
+        Set-Content -LiteralPath $script:streamHost -Value 'dummy' -Encoding utf8
+        Set-Content -LiteralPath "$($script:streamHost):stream.json" -Value '{}' -Encoding utf8
     }
 
     It 'prefers the bucket root over a same-named manifest in a subfolder' {
@@ -227,6 +234,16 @@ Describe 'Resolve-BucketManifestPath' -Tag 'Light', 'Module' {
         # leaf-name guard this returned a manifest outside the bucket, which
         # the caller then reported as "found in the bucket".
         script:Invoke-ResolveBucketManifestPath -Name $Escape -BucketPath $script:bucket |
+            Should -BeNullOrEmpty
+    }
+
+    It 'refuses a name containing a colon so it cannot probe an NTFS alternate data stream' {
+        # [IO.Path]::GetFileName alone does not treat ':' as a separator.
+        # 'StreamHost:stream' resolves to 'StreamHost:stream.json' once the
+        # mandatory suffix is appended -- a REAL, populated ADS (BeforeAll),
+        # so Test-Path would genuinely succeed without the ':' guard. This is
+        # not a vacuous assertion: removing the guard flips it to the ADS path.
+        script:Invoke-ResolveBucketManifestPath -Name 'StreamHost:stream' -BucketPath $script:bucket |
             Should -BeNullOrEmpty
     }
 
