@@ -337,6 +337,20 @@ Describe 'Get-PackageEngineConflict' -Tag 'Light', 'Module' {
            Scopes   = @{ Global = @(); User = @() }
            Path     = 'C:\Users\u\elsewhere\shims\rclone.exe'
            Expected = 'scoop uninstall rclone' }
+        # Nesting: the user root sits INSIDE the global root. A global-first
+        # check would claim every user install as global.
+        @{ Case     = 'the more specific root wins when the user root nests inside the global one'
+           Scopes   = @{ Global = @('C:\scoop'); User = @('C:\scoop\user') }
+           Path     = 'C:\scoop\user\shims\rclone.exe'
+           Expected = 'scoop uninstall rclone' }
+        @{ Case     = 'the global root still wins outside the nested user root'
+           Scopes   = @{ Global = @('C:\scoop'); User = @('C:\scoop\user') }
+           Path     = 'C:\scoop\shims\rclone.exe'
+           Expected = 'scoop uninstall -g rclone' }
+        @{ Case     = 'the more specific root wins when the global root nests inside the user one'
+           Scopes   = @{ Global = @('C:\scoop\global'); User = @('C:\scoop') }
+           Path     = 'C:\scoop\global\shims\rclone.exe'
+           Expected = 'scoop uninstall -g rclone' }
     ) {
         $params = @{ Scopes = $Scopes; Path = $Path; Expected = $Expected }
         InModuleScope MarkMichaelis.ScoopBucket -Parameters $params {
@@ -628,6 +642,34 @@ Describe 'The bare-manifest dispatch path is gated too' -Tag 'Light', 'Module' {
         }
     }
 
+    It 'ignores an Id-base collision on a package of another engine' {
+        # Only a scoop package can declare a scoop manifest, so a winget
+        # package that merely shares the Id base name must not be
+        # conflict-checked as this manifest's owner -- that would refuse a
+        # legitimate install on a coincidence.
+        InModuleScope MarkMichaelis.ScoopBucket -Parameters @{ BucketDir = $script:bucketDir } {
+            param($BucketDir)
+            Mock Get-EngineRootMap     { @{ scoop = @('C:\ProgramData\scoop'); winget = @('C:\Program Files\WinGet') } }
+            Mock Get-CommandSourcePath { 'C:\ProgramData\scoop\shims\widget.exe' }
+            Mock Invoke-ScoopCommand   { $global:LASTEXITCODE = 0 }
+            Mock Get-BundlePackages {
+                @([pscustomobject]@{
+                        Bundle     = 'T'
+                        BundlePath = (Join-Path $BucketDir 'T.ps1')
+                        Packages   = @([pscustomobject]@{
+                                Name = 'Unrelated Widget'; Installer = 'winget'; Id = 'WidgetCli'
+                                CliCommands = @('widget'); Completion = 'native'
+                                PreviousInstaller = ''; PreviousId = ''
+                            })
+                    })
+            }
+
+            $null = Install-Package -Name 'WidgetCli' -BucketPath $BucketDir -SkipCompletion -ErrorAction SilentlyContinue
+
+            Should -Invoke Invoke-ScoopCommand -Times 1 -Exactly
+        }
+    }
+
     It 'still installs a manifest no declaration links to' {
         InModuleScope MarkMichaelis.ScoopBucket -Parameters @{ BucketDir = $script:bucketDir } {
             param($BucketDir)
@@ -750,6 +792,23 @@ Describe 'Uninstall removes the declared predecessor too' -Tag 'Light', 'Module'
 
             $r.Status | Should -Be 'Failed'
             $r.Reason | Should -Match 'winget uninstall exited with 1'
+        }
+    }
+
+    It 'says it WOULD remove the predecessor under -DryRun, not that it did' {
+        InModuleScope MarkMichaelis.ScoopBucket {
+            Mock Uninstall-WingetPackage { @{ State = 'Uninstalled'; Reason = '(WhatIf)' } }
+            Mock Uninstall-ScoopPackage  { @{ State = 'Uninstalled'; Reason = '(WhatIf)' } }
+
+            $pkg = [Package]@{
+                Name = 'rclone'; Installer = 'winget'; Id = 'Rclone.Rclone'
+                PreviousInstaller = 'scoop'; PreviousId = 'main/rclone'
+            }
+            $r = Invoke-PackageUninstall -Packages @($pkg) -Bundle 'T' -SkipCompletion -DryRun
+
+            Should -Invoke Uninstall-ScoopPackage -Times 1 -Exactly -ParameterFilter { $WhatIf }
+            $r.Reason | Should -Match 'Would also remove'
+            $r.Reason | Should -Match 'DryRun'
         }
     }
 
