@@ -11,7 +11,7 @@
     "The task runs only while you are logged on (no stored password); an update installed while logged off is picked up by the next Windows Update event after logon.",
     "The runner is copied to %ProgramData%\\MarkMichaelis.ScoopBucket\\UpdateBucketOnWindowsUpdate so an unelevated process cannot rewrite what runs elevated. It still imports MarkMichaelis.ScoopBucket from the scoop bucket clone, which is as writable as your scoop install."
   ],
-  "version": "1.03.000",
+  "version": "1.04.000",
   "url": [
     "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/os/UpdateBucketOnWindowsUpdate.ps1",
     "https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/os/Invoke-BucketUpdateAfterWindowsUpdate.ps1"
