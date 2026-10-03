@@ -26,7 +26,10 @@
          ids whose bucket is not cloned on this machine go unverified, and
          the test reports which those were rather than passing silently.
          CI clones main, extras and MarkMichaelis for the Light job, so all
-         three are covered there.
+         three are covered there. On a machine with no scoop installation at
+         all this layer SKIPS rather than fails: Light is the local pre-push
+         gate, and a contributor who has never bootstrapped scoop must not
+         see red for something unrelated to their change.
 
     Deliberately NOT implemented by shelling out to `scoop cat` per id: that
     is one process launch per package and would need scoop on PATH, pushing
@@ -40,6 +43,9 @@ BeforeAll {
     # Every real scoop-installed package declared anywhere in the bucket.
     $script:scoopPkgs = @(
         Get-Package -BucketPath $PSScriptRoot | Where-Object { $_.Installer -eq 'scoop' }
+    )
+    $script:ownedPkgs = @(
+        $script:scoopPkgs | Where-Object { $_.Id -like 'MarkMichaelis/*' }
     )
 
     # --- Layer 1 index: this repo's own manifests (foldered since #300). ---
@@ -86,9 +92,12 @@ Describe 'Declared scoop Ids resolve to a real manifest (issue #466)' -Tag 'Ligh
     }
 
     It 'resolves every bucket-owned scoop Id against this repository' {
-        $offenders = foreach ($pkg in $script:scoopPkgs) {
-            $bucket, $name = $pkg.Id -split '/', 2
-            if ($bucket -ne 'MarkMichaelis') { continue }
+        # Guard against a vacuous pass: this is the one fully hermetic layer,
+        # so it must not quietly reduce to checking nothing.
+        $script:ownedPkgs.Count | Should -BeGreaterThan 0
+
+        $offenders = foreach ($pkg in $script:ownedPkgs) {
+            $null, $name = $pkg.Id -split '/', 2
             if ($script:ownManifests -notcontains $name) {
                 "$($pkg.Bundle)/$($pkg.Name): Id '$($pkg.Id)' has no bucket\**\$name.json in this repo"
             }
@@ -98,11 +107,20 @@ Describe 'Declared scoop Ids resolve to a real manifest (issue #466)' -Tag 'Ligh
     }
 
     It 'resolves every scoop Id against its locally cloned bucket' {
+        if ($script:bucketIndex.Keys.Count -eq 0) {
+            Set-ItResult -Skipped -Because 'no scoop installation was found on this machine, so there is no bucket to resolve against. CI always clones at least main.'
+            return
+        }
         $unverified = @()
         $offenders = foreach ($pkg in $script:scoopPkgs) {
             $bucket, $name = $pkg.Id -split '/', 2
-            if (-not $script:bucketIndex.ContainsKey($bucket)) {
-                $unverified += "$($pkg.Id) (bucket '$bucket' not cloned locally)"
+            # An EMPTY index means the clone exists but its manifest directory
+            # is empty or unreadable (interrupted clone, ACL, odd layout).
+            # That is an unverifiable environment, not a missing manifest --
+            # reporting it as an offender would turn a broken checkout into a
+            # phantom regression.
+            if (-not $script:bucketIndex.ContainsKey($bucket) -or $script:bucketIndex[$bucket].Count -eq 0) {
+                $unverified += "$($pkg.Id) (bucket '$bucket' not cloned locally, or its manifest directory is empty)"
                 continue
             }
             if ($script:bucketIndex[$bucket] -notcontains $name) {
@@ -116,10 +134,19 @@ Describe 'Declared scoop Ids resolve to a real manifest (issue #466)' -Tag 'Ligh
             -Because 'scoop install <bucket>/<name> fails outright when the manifest is absent (#466: main/dotnet)'
     }
 
-    It 'has at least one cloned bucket to check against' {
-        # Without this, the previous test would pass vacuously on a machine
-        # with no scoop installation at all.
-        $script:bucketIndex.Keys.Count | Should -BeGreaterThan 0 `
-            -Because 'both CI jobs and a developer machine clone at least the main bucket'
+    It 'has the main bucket cloned, so the previous test was not vacuous' {
+        # The previous test skips itself when no bucket is cloned; this one
+        # records whether the broad layer actually ran. It SKIPS rather than
+        # fails on a machine without scoop, because the Light tag is this
+        # repo's local pre-push gate and a contributor who has never
+        # bootstrapped scoop must not see a red test unrelated to their
+        # change. CI's Bootstrap Scoop step guarantees main is present, so
+        # this never skips there.
+        if ($script:bucketIndex.Keys.Count -eq 0) {
+            Set-ItResult -Skipped -Because 'no scoop installation found locally; run scoop bootstrap to get full Id-resolution coverage.'
+            return
+        }
+        @($script:bucketIndex.Keys) | Should -Contain 'main' `
+            -Because "scoop's own installer clones main, so its presence is the floor for Id resolution"
     }
 }

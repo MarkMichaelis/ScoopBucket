@@ -58,7 +58,8 @@ Describe 'DeveloperBasePackages: .NET SDK install target (issue #466)' -Tag 'Lig
         # The dotnetTool engine and the Aspire / Avalonia PostInstallScripts
         # all require `dotnet` resolvable from a fresh shell; a user-scope
         # install would not put it on the machine PATH.
-        $script:dotnet[0].Scope | Should -Not -Be 'user'
+        $script:dotnet[0].Scope | Should -BeIn @('global', 'machine') `
+            -Because "'global' is the [Package] default and both values map to winget's --scope machine"
     }
 
     It 'records the major-version pin policy in Notes' {
