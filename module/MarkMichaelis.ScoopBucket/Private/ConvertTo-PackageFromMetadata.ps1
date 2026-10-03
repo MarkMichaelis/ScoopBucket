@@ -18,6 +18,11 @@ function ConvertTo-PackageFromMetadata {
         Name        = $Metadata.Name
         Installer   = $Metadata.Installer
         Id          = $Metadata.Id
+        # PreviousInstaller / PreviousId must round-trip or the metadata-only
+        # fallback silently loses the declared predecessor, and Uninstall-Package
+        # orphans the previous engine's copy again (#464).
+        PreviousInstaller = if ($Metadata.PSObject.Properties['PreviousInstaller']) { [string]$Metadata.PreviousInstaller } else { '' }
+        PreviousId  = if ($Metadata.PSObject.Properties['PreviousId']) { [string]$Metadata.PreviousId } else { '' }
         Source      = if ($Metadata.PSObject.Properties['Source']) { [string]$Metadata.Source } else { '' }
         Scope       = if ($Metadata.PSObject.Properties['Scope']) { [string]$Metadata.Scope } else { 'global' }
         CliCommands = @($Metadata.CliCommands)

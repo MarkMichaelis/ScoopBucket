@@ -25,6 +25,35 @@ class Package {
 
     [string]   $Id = ''
 
+    # The engine this package USED to be installed from, declared when its
+    # `Installer` is reclassified (e.g. scoop -> winget per the README's
+    # engine-preference rule). Mirrors the way HoldUpgrade / CISkip carry
+    # intent on the declaration rather than hiding it in code.
+    #
+    # Why it is needed: no engine can see another engine's inventory, so after
+    # a reclassification `winget list --id <new>` reports "not installed" on a
+    # machine that already has the scoop copy, and the install path would add a
+    # SECOND copy. Both shims then exist and PATH order -- which no package
+    # declaration controls -- decides which binary runs, so the machine can
+    # report itself current while executing the stale one (#464).
+    #
+    # Declaring the predecessor turns that into an explicit, previewable
+    # migration: Invoke-PackageInstall removes the declared predecessor
+    # (PreviousInstaller + PreviousId, at this package's Scope) BEFORE
+    # installing under the new engine, and Invoke-PackageUninstall removes it
+    # too so the old copy is never orphaned.
+    #
+    # Undeclared cross-engine installs are still DETECTED -- the install is
+    # refused with the exact uninstall command rather than silently duplicating
+    # -- but they are never auto-removed, because without the declaration the
+    # previous engine's id would be a guess.
+    [ValidateSet('', 'winget', 'scoop', 'choco', 'npmGlobal', 'dotnetTool')]
+    [string]   $PreviousInstaller = ''
+
+    # The id the package had under PreviousInstaller (e.g. 'main/rclone' for
+    # scoop). Required alongside PreviousInstaller and vice versa.
+    [string]   $PreviousId = ''
+
     [ValidateSet('', 'msstore')]
     [string]   $Source = ''
 
@@ -208,6 +237,24 @@ class Package {
         # If present it must only accompany Installer='custom'.
         if ($this.CustomUninstallScript -and $this.Installer -ne 'custom') {
             return "Package '$($this.Name)': CustomUninstallScript is only valid when Installer='custom' (got '$($this.Installer)')."
+        }
+
+        # PreviousInstaller / PreviousId are a pair: the engine alone cannot be
+        # dispatched (every uninstall driver needs an id) and the id alone does
+        # not say which engine owns it.
+        if ($this.PreviousInstaller -and -not $this.PreviousId) {
+            return "Package '$($this.Name)': PreviousId is required when PreviousInstaller='$($this.PreviousInstaller)' (the previous engine's uninstall needs it)."
+        }
+
+        if ($this.PreviousId -and -not $this.PreviousInstaller) {
+            return "Package '$($this.Name)': PreviousInstaller is required when PreviousId='$($this.PreviousId)'."
+        }
+
+        # A same-engine id change is not a cross-engine migration; the engine's
+        # own inventory already sees the old install, so routing it through the
+        # migration path would uninstall and reinstall for no reason.
+        if ($this.PreviousInstaller -and $this.PreviousInstaller -ieq $this.Installer) {
+            return "Package '$($this.Name)': PreviousInstaller and Installer must differ (both are '$($this.Installer)'); PreviousInstaller records a cross-engine reclassification, not an id change."
         }
 
         if ($this.Source -eq 'msstore' -and $this.Installer -ne 'winget') {

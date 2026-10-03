@@ -373,6 +373,83 @@ or doesn't work cleanly:
 Microsoft Store-only apps go through `winget install --source msstore
 --accept-package-agreements --accept-source-agreements`.
 
+### Changing a package's installation engine (reclassification)
+
+Applying the preference order above to an existing entry is not a
+one-line edit. **No engine can see another engine's inventory**, so on
+every machine that already installed the package under the old engine:
+
+```
+PS> winget list --id Rclone.Rclone --exact
+No installed package found matching input criteria.      (exit -1978335212)
+```
+
+The new engine concludes the package is absent, installs a **second**
+copy, and both shims then exist. Which binary actually runs is decided by
+the order of the shim directories on `PATH` — something no package
+declaration controls:
+
+```
+C:\ProgramData\scoop\shims            <-- first, so the STALE copy wins
+C:\Program Files\WinGet\Links
+```
+
+`Update-Package` then upgrades the copy that is *not* being executed, so
+the machine reports itself current while running an old binary (#464).
+
+**So declare the predecessor.** When you change `Installer`, record what
+it was:
+
+```powershell
+[Package]@{
+    Name              = 'rclone'
+    Installer         = 'winget'
+    Id                = 'Rclone.Rclone'
+    PreviousInstaller = 'scoop'        # engine it used to come from
+    PreviousId        = 'main/rclone'  # its id under that engine
+    CliCommands       = @('rclone')
+    # ...
+}
+```
+
+With both fields present, `Install-Package` **removes the predecessor
+first and then installs** under the new engine (`-DryRun` / `-WhatIf`
+previews both commands), and `Uninstall-Package` removes the predecessor
+too so the old copy is never orphaned. The result is exactly one install,
+so the `PATH` outcome no longer depends on directory ordering. The fields
+are a pair — one without the other is a declaration error — and
+`PreviousInstaller` must differ from `Installer`.
+
+Leave the pair in place permanently. Detection keys off what currently
+answers on `PATH`, so once the predecessor is gone the migration is a
+no-op and re-runs are unaffected.
+
+**Undeclared cross-engine installs are still caught**, just not fixed
+automatically: whenever a CLI a package promises resolves to a path owned
+by a *different* engine, `Install-Package` refuses the install and
+`Update-Package` refuses the upgrade, both naming the evidence and the
+exact command to run:
+
+```
+rclone: 'rclone' on PATH resolves to C:\ProgramData\scoop\shims\rclone.exe,
+owned by scoop, not the declared winget install. Installing would leave two
+copies and PATH order, not this declaration, would decide which one runs.
+Remove the scoop copy first: scoop uninstall -g rclone -- or declare
+PreviousInstaller/PreviousId on the package so the migration runs
+automatically.
+```
+
+Nothing is auto-removed in that case on purpose: without the declaration
+the other engine's package id can only be guessed from a file path, and
+guessing on an uninstall is not acceptable. Only paths owned by a *known*
+engine count — a vendor installer that adds its own `PATH` entry (say
+`C:\Program Files\Git\cmd`) is not a conflict — and packages that declare
+no `CliCommands` are not checked at all, since nothing of theirs lands on
+`PATH`.
+
+Migrating user data or application configuration is explicitly **out of
+scope**: these are tool installs, not stateful applications.
+
 ### Silent installs
 
 Every package must install non-interactively. Always pass `-y`,

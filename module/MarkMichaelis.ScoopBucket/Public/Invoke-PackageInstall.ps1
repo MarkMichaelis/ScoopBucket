@@ -124,6 +124,18 @@ function Invoke-PackageInstall {
     $runStart = Get-Date
     $isCi = [bool]$env:CI
 
+    # Engine ownership map for the cross-engine gate below (#464). Resolved
+    # once: Get-EngineRootMap touches the filesystem (Resolve-ScoopRoot) and
+    # the answer cannot change mid-sweep. A failure here is reported rather
+    # than swallowed -- without the map the gate cannot run, and a skipped
+    # gate is exactly the silent-duplicate behaviour the gate exists to stop.
+    $engineRoots = $null
+    try {
+        $engineRoots = Get-EngineRootMap
+    } catch {
+        Write-Warning "Invoke-PackageInstall: could not map engine directories ($($_.Exception.Message)); cross-engine install detection is unavailable this run."
+    }
+
     $addState = {
         param($p, $st, $rs, $err)
         $states.Add([pscustomobject]@{ Pkg = $p; State = $st; Reason = $rs; Err = $err })
@@ -169,6 +181,52 @@ function Invoke-PackageInstall {
         }
 
         Write-UpdateStatus -Activity 'Install-Package' "[install] $pkg"
+
+        # --- Cross-engine gate (#464) --------------------------------------
+        # Installing on top of a copy that ANOTHER engine owns leaves two
+        # installs whose PATH order -- not the declaration -- decides which
+        # binary runs. Determinism here means ending with exactly one copy, so
+        # there are only two acceptable outcomes: remove the predecessor the
+        # bucket declared and install, or refuse and name the command.
+        $migratedFrom = $null
+        $conflict = $null
+        try {
+            $conflictArgs = @{ Package = $pkg }
+            if ($engineRoots) { $conflictArgs['EngineRoot'] = $engineRoots }
+            $conflict = Get-PackageEngineConflict @conflictArgs
+        } catch {
+            Write-Warning "  $($pkg.Name): cross-engine install detection failed ($($_.Exception.Message)); proceeding with the declared engine."
+        }
+
+        if ($conflict -and $conflict.Declared) {
+            # The bucket predicted this migration (PreviousInstaller/PreviousId),
+            # so the removal command is declared rather than inferred and can
+            # run unattended.
+            Write-UpdateStatus -Activity 'Install-Package' "  [migrate] $($pkg.Name): removing the $($conflict.Engine) install ($($conflict.PreviousId)) before installing from $($conflict.DeclaredInstaller)"
+            try {
+                $removal = Invoke-PredecessorUninstall -Package $pkg -WhatIf:$isWhatIf
+            } catch {
+                $removal = @{ State = 'Failed'; Reason = "predecessor uninstall threw: $($_.Exception.Message)" }
+            }
+            if ($removal.State -eq 'Failed') {
+                # Installing anyway is the one thing we must not do: it would
+                # produce the duplicate this gate exists to prevent.
+                $reason = "Cross-engine migration from $($conflict.Engine) failed, so nothing was installed: $($removal.Reason). Remove it by hand and re-run: $($conflict.UninstallCommand)"
+                & $failPackage $pkg $reason
+                continue
+            }
+            if (-not $isWhatIf) { Update-PathFromRegistry }
+            $migratedFrom = $conflict.Engine
+        } elseif ($conflict) {
+            # Undeclared. The owning engine's id is not knowable from a path,
+            # so auto-removal would be a guess on a destructive operation.
+            # Report loudly with the best command we can build and install
+            # nothing -- a Failed row is unmissable where a Skipped row would
+            # be folded into the "Hidden: ..." summary line.
+            $reason = "'$($conflict.Cli)' on PATH resolves to $($conflict.Path), owned by $($conflict.Engine), not the declared $($conflict.DeclaredInstaller) install. Installing would leave two copies and PATH order, not this declaration, would decide which one runs. Remove the $($conflict.Engine) copy first: $($conflict.UninstallCommand) -- or declare PreviousInstaller/PreviousId on the package so the migration runs automatically."
+            & $failPackage $pkg $reason
+            continue
+        }
 
         try {
             if ($pkg.CustomInstallScript) {
@@ -231,6 +289,12 @@ function Invoke-PackageInstall {
 
             $state  = $result.State
             $reason = $result.Reason
+
+            # Record the migration on the row so a reclassification is visible
+            # in the summary rather than looking like an ordinary install.
+            if ($migratedFrom) {
+                $reason = if ($reason) { "Migrated from ${migratedFrom}: $reason" } else { "Migrated from $migratedFrom." }
+            }
         } catch {
             $reason = "Install threw: $($_.Exception.Message)"
             & $failPackage $pkg $reason

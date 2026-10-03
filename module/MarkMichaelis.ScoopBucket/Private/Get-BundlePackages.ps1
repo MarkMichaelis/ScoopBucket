@@ -100,6 +100,8 @@ function global:Invoke-PackageInstall {
             Name        = `$p.Name
             Installer   = `$p.Installer
             Id          = `$p.Id
+            PreviousInstaller = `$p.PreviousInstaller
+            PreviousId  = `$p.PreviousId
             Source      = `$p.Source
             Scope       = `$p.Scope
             CliCommands = @(`$p.CliCommands)
