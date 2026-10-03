@@ -1110,7 +1110,9 @@ function Add-VerificationSkipped {
 #     register in scoop but never populate apps\<leaf>\current.
 #   * `main/dotnet` -- the runner image ships dotnet natively; scoop's
 #     -g install succeeds with no-op semantics and the resulting `scoop
-#     list dotnet` returns the empty-list header.
+#     list dotnet` returns the empty-list header. (No longer applicable:
+#     #466 found main/dotnet resolves to no manifest at all and retargeted
+#     the entry at winget Microsoft.DotNet.SDK.<major>.)
 # None of the variants ever caught a real install regression: the
 # command's exit code already does that. Drop the second probe.
 

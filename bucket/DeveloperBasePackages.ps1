@@ -16,12 +16,12 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 $Packages = [Package[]]@(
     [Package]@{
         Name        = 'dotnet'
-        Installer   = 'scoop'
-        Id          = 'main/dotnet'
+        Installer   = 'winget'
+        Id          = 'Microsoft.DotNet.SDK.10'
         CliCommands = @('dotnet')
         Completion  = 'auto'
         NativeCompletionKind = 'native'
-        Notes       = 'Sources tab completion from the official `dotnet complete` API (https://learn.microsoft.com/en-us/dotnet/core/tools/enable-tab-autocomplete) instead of the third-party PSCompletions catalog so completions track whatever subcommands the installed SDK ships. Hand-curated ExpectedCompletions covers the canonical top-level verbs the test harness validates.'
+        Notes       = 'The .NET SDK -- the DependsOn target for Aspire, the Avalonia bundle and every dotnetTool package (Install-DotnetToolPackage fails with "dotnet not on PATH. Install the .NET SDK first" without it). Installed via winget per README rule 1: machine scope puts dotnet.exe in C:\Program Files\dotnet, which is the first location the Aspire / Avalonia PostInstallScripts probe, and leaves previously installed SDK majors side by side so global.json pins keep resolving. VERSION POLICY: winget publishes no floating latest-SDK id -- only per-major ids (Microsoft.DotNet.SDK.8 / .9 / .10, plus .Preview) -- so the major version is part of the id and must be bumped by hand. The pin tracks the current LTS major (.NET 10); bump it when a newer LTS SDK ships a winget id, and not for STS releases. Same shape as the Python entry in this bundle (Python.Python.3.14). Rejected alternatives (#466): main/dotnet-sdk extracts a SINGLE SDK into a scoop app dir and sets DOTNET_ROOT / MSBuildSDKsPath, shadowing an existing C:\Program Files\dotnet install and its older majors; MarkMichaelis/dotnet is a placeholder-url wrapper whose installer script is `choco upgrade dotnet-sdk`, i.e. rule 3 (Chocolatey, an undeclared prerequisite) wearing a rule 2 costume. Tab completion comes from the official `dotnet complete` API (https://learn.microsoft.com/en-us/dotnet/core/tools/enable-tab-autocomplete) instead of the third-party PSCompletions catalog so completions track whatever subcommands the installed SDK ships. Hand-curated ExpectedCompletions covers the canonical top-level verbs the test harness validates.'
         ExpectedCompletions = @{ dotnet = @('add','build','clean','pack','publish','restore','run','test') }
         NativeCommandScript = {
             @"

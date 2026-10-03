@@ -113,6 +113,19 @@ jobs:
             scoop bucket add MarkMichaelis https://github.com/MarkMichaelis/ScoopBucket
           }
 
+      - name: Add extras bucket
+        shell: pwsh
+        run: |
+          # ScoopIdResolution.Tests.ps1 (#466) resolves every declared
+          # Installer='scoop' Id against the bucket it names. scoop's
+          # installer clones only `main`, so without `extras` the five
+          # extras/* ids would go unverified in the Light gate -- exactly
+          # the blind spot that let main/dotnet ship.
+          $ErrorActionPreference = 'Stop'
+          if (-not (scoop bucket list | Select-String extras)) {
+            scoop bucket add extras
+          }
+
       - name: Run Pester Light tests
         shell: pwsh
         run: |
