@@ -43,7 +43,7 @@ Describe 'CLI availability — pinned contract' -Tag 'Heavy','CliAvailability' {
     Context 'PATH-refresh-fixed CLIs (PR #63)' {
         It 'resolves <Cli>' -ForEach @(
             @{ Cli = 'bw';       Package = 'Bitwarden.CLI' }
-            @{ Cli = 'rg';       Package = 'ripgrep (scoop main)' }
+            @{ Cli = 'rg';       Package = 'BurntSushi.ripgrep.MSVC (winget, #465)' }
             @{ Cli = 'calibre';  Package = 'calibre.calibre' }
             @{ Cli = 'sox';      Package = 'ChrisBagwell.SoX' }
             @{ Cli = 'copilot';  Package = 'GitHub.Copilot' }

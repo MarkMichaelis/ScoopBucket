@@ -7,13 +7,28 @@
     in DeveloperBasePackages (issue #293).
 
 .DESCRIPTION
-    Locks in the contract that the bucket ships Android platform-tools via
-    scoop (main/adb) with curated PowerShell argument completers for both
-    `adb` and `fastboot`. Mirrors the pattern already in place for `python`,
-    `devenv`, `code`, `copilot`, and `aspire` in the same bundle.
+    Locks in the contract that the bucket ships Android platform-tools with
+    curated PowerShell argument completers for both `adb` and `fastboot`.
+    Mirrors the pattern already in place for `python`, `devenv`, `code`,
+    `copilot`, and `aspire` in the same bundle.
 
-    These tests fail if the entry is removed or reverted to a non-scoop /
-    no-completion shape -- providing the regression guard.
+    The engine is winget as of #465. The entry was originally `scoop`
+    (`main/adb`) with no recorded justification -- the same defect #462/#463
+    corrected for rclone. winget's Google.PlatformTools is the identical
+    artifact at the identical version:
+
+        PS> winget show --id Google.PlatformTools --exact --scope machine
+        Version: 37.0.1
+        Installer Type: portable (zip)
+        Installer Url: https://dl.google.com/android/repository/platform-tools_r37.0.1-win.zip
+
+    and its manifest declares a PortableCommandAlias for BOTH binaries
+    (`platform-tools/adb.exe` -> adb, `platform-tools/fastboot.exe` -> fastboot)
+    plus `ArchiveBinariesDependOnPath: true`, so both CliCommands survive the
+    move.
+
+    These tests fail if the entry is removed, retargeted to another engine, or
+    reverted to a no-completion shape -- providing the regression guard.
 #>
 
 BeforeAll {
@@ -30,9 +45,21 @@ Describe 'DeveloperBasePackages: Android platform-tools (issue #293)' -Tag 'Ligh
         $script:adb[0].Bundle | Should -Be 'DeveloperBasePackages'
     }
 
-    It 'installs via scoop from main/adb' {
-        $script:adb[0].Installer | Should -Be 'scoop'
-        $script:adb[0].Id | Should -Be 'main/adb'
+    It 'installs via winget from Google.PlatformTools (#465)' {
+        # README rule 1: winget first for CLIs. winget carries platform-tools at
+        # the same version and from the same zip scoop's main/adb consumes, and
+        # aliases both adb and fastboot, so no fall-through condition applies.
+        $script:adb[0].Installer | Should -Be 'winget'
+        $script:adb[0].Id | Should -Be 'Google.PlatformTools'
+    }
+
+    It 'installs machine-scope (no Scope override -- winget resolves --scope machine)' {
+        "$($script:adb[0].Scope)" | Should -Not -Be 'user'
+    }
+
+    It 'records the engine rationale in Notes' {
+        $script:adb[0].Notes | Should -Not -BeNullOrEmpty
+        $script:adb[0].Notes | Should -Match 'winget'
     }
 
     It 'declares CliCommands adb and fastboot' {

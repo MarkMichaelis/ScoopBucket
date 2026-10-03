@@ -10,7 +10,9 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 #endregion MarkMichaelis.ScoopBucket bundle module import
 
 # Refs:
-#   #14/#46  BeyondCompare: winget MSIX is user-scope only -> scoop extras
+#   #14/#46  BeyondCompare: originally scoop because winget's MSIX was user-scope
+#            only; now kept on scoop for the bcomp/bcompare shims (see #465)
+#   #465     engine-preference audit: adb moved to winget; dotnet Id is broken (#466)
 #   #73      copilot completion via PSCompletions (no native PS completion command)
 
 $Packages = [Package[]]@(
@@ -21,7 +23,7 @@ $Packages = [Package[]]@(
         CliCommands = @('dotnet')
         Completion  = 'auto'
         NativeCompletionKind = 'native'
-        Notes       = 'Sources tab completion from the official `dotnet complete` API (https://learn.microsoft.com/en-us/dotnet/core/tools/enable-tab-autocomplete) instead of the third-party PSCompletions catalog so completions track whatever subcommands the installed SDK ships. Hand-curated ExpectedCompletions covers the canonical top-level verbs the test harness validates.'
+        Notes       = 'ENGINE UNRESOLVED -- `Id` is wrong and does not install: `scoop cat main/dotnet` reports "Couldn''t find manifest"; scoop main ships `dotnet-sdk`, and this bucket itself owns a MarkMichaelis/dotnet manifest. winget publishes only version-pinned SDK ids (Microsoft.DotNet.SDK.10 and friends) with no floating latest-SDK id, so "winget first" means adopting and maintaining a major-version pin. Three non-equivalent candidates; tracked in #466 and deliberately not guessed by the #465 audit. Sources tab completion from the official `dotnet complete` API (https://learn.microsoft.com/en-us/dotnet/core/tools/enable-tab-autocomplete) instead of the third-party PSCompletions catalog so completions track whatever subcommands the installed SDK ships. Hand-curated ExpectedCompletions covers the canonical top-level verbs the test harness validates.'
         ExpectedCompletions = @{ dotnet = @('add','build','clean','pack','publish','restore','run','test') }
         NativeCommandScript = {
             @"
@@ -65,7 +67,7 @@ Register-ArgumentCompleter -Native -CommandName devenv -ScriptBlock {
         Id          = 'extras/beyondcompare'
         CliCommands = @('bcomp','bcompare')
         Completion  = 'auto'
-        Notes       = 'Keep scoop default bcomp shim (BComp.exe, GUI launcher). Add a separate bcomp.com shim for BComp.com (console-waiting variant) so git/scripted callers can request blocking semantics on demand. Refs #14/#46. Neither bcomp nor bcompare has a completion subcommand or PSCompletions entry; hand-curated shared flag list.'
+        Notes       = 'Stays on scoop, but NOT for the reason originally recorded: #14/#46 said winget''s Beyond Compare was a user-scope-only MSIX, and that is stale -- ScooterSoftware.BeyondCompare.5 is now an inno installer at 5.2.6.32774, the same version AND the same artifact (BCompare-5.2.6.32774.exe) extras/beyondcompare ships, and --scope machine resolves. The engine-specific reason that replaces it: the PostInstallScript below calls `scoop prefix beyondcompare` and `scoop shim add bcomp.com`, and CliAvailabilityPinned.Tests.ps1 pins `bcompare` on PATH and `bcomp` -> BComp.com. winget''s inno installer declares no portable aliases, so moving the engine would drop both CLIs off PATH and break the BComp.com remap and the git difftool wiring in developer/GitConfigBeyondCompare.ps1. Audited in #465. Keep scoop default bcomp shim (BComp.exe, GUI launcher). Add a separate bcomp.com shim for BComp.com (console-waiting variant) so git/scripted callers can request blocking semantics on demand. Neither bcomp nor bcompare has a completion subcommand or PSCompletions entry; hand-curated shared flag list.'
         ExpectedCompletions = @{
             bcomp    = @('/?','/closescript','/silent')
             bcompare = @('/?','/closescript','/silent')
@@ -218,11 +220,11 @@ Register-ArgumentCompleter -Native -CommandName python -ScriptBlock {
 
     [Package]@{
         Name        = 'Android Platform Tools'
-        Installer   = 'scoop'
-        Id          = 'main/adb'
+        Installer   = 'winget'
+        Id          = 'Google.PlatformTools'
         CliCommands = @('adb','fastboot')
         Completion  = 'auto'
-        Notes       = 'Android SDK platform-tools (adb/fastboot). scoop main/adb shims adb.exe and fastboot.exe automatically. Neither adb nor fastboot ships a `completions powershell` subcommand or a PSCompletions entry, so the completer is hand-curated (curated, not native -- #289/#293). Subcommand lists drawn from `adb --help` and `fastboot --help`.'
+        Notes       = 'Android SDK platform-tools (adb/fastboot). winget per the README engine preference (winget first for CLIs); this entry was scoop main/adb with no recorded justification, the same defect #462/#463 corrected for rclone (audited in #465). Google.PlatformTools is the identical artifact at the identical version (platform-tools_r37.0.1-win.zip), InstallerType zip / NestedInstallerType portable with a PortableCommandAlias for BOTH binaries (platform-tools/adb.exe -> adb, platform-tools/fastboot.exe -> fastboot) plus ArchiveBinariesDependOnPath, and --scope machine resolves. Neither adb nor fastboot ships a `completions powershell` subcommand, so the completer is hand-curated (curated, not native -- #289/#293). (data/PSCompletionsCatalog.json does list adb -- though not fastboot -- but that fallback stopped being a dependency in #241, so it is not an option either way.) Subcommand lists drawn from `adb --help` and `fastboot --help`.'
         ExpectedCompletions = @{
             adb      = @('devices','install','shell','logcat')
             fastboot = @('devices','flash','reboot')

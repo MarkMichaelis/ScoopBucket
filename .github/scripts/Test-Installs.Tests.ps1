@@ -931,4 +931,60 @@ Describe 'CISkipPackages recurring-failure skip list' {
     It 'does not skip-list the removed Todoist CLI (Sachaos.Todoist delisted from winget, #326)' {
         $script:SkipList.ContainsKey('Sachaos.Todoist') | Should -BeFalse
     }
+
+    # ---------------------------------------------------------------------
+    # Machine-scope MSIX entries added by the #465 engine audit.
+    #
+    # #465 moved Notion from scoop and Microsoft Teams from choco onto
+    # winget. Both resolve a machine-context MSIX, which is the Claude
+    # Desktop shape from #85: provisioning needs runFullTrust on an
+    # interactive desktop with sideloading, so a headless Server runner
+    # fails with APPINSTALLER_CLI_ERROR_INSTALL_SYSTEM_NOT_SUPPORTED
+    # (-1978334957). Unlike Claude Desktop neither can escape via
+    # Scope='user': Teams is MSIX-only at every scope, and Notion's MSIX
+    # appears ONLY at machine scope (its unscoped default is a per-user
+    # nullsoft installer), so forcing user scope would silently change the
+    # installed artifact rather than dodge CI.
+    # ---------------------------------------------------------------------
+
+    It 'skip-lists <Id> so validate-installs does not attempt a real machine-scope MSIX install' -ForEach @(
+        @{ Name = 'Notion';          Id = 'Notion.Notion' }
+        @{ Name = 'Microsoft Teams'; Id = 'Microsoft.Teams' }
+    ) {
+        $script:SkipList.ContainsKey($Id) | Should -BeTrue
+        $script:SkipList[$Id] | Should -Not -BeNullOrEmpty
+    }
+
+    It 'keys each MSIX entry the way the install gate actually computes skipKey' {
+        # The two assertions above only prove the config agrees with a
+        # literal in this test. The real failure mode is a MISMATCH between
+        # the skip-list key and the identifier Test-Installs.ps1 derives at
+        # install time:
+        #     $skipKey = if ($pkg.InstallerType -eq 'choco') { $pkg.Name }
+        #                else { $pkg.PackageId }
+        # Retargeting either package's Id (e.g. to Microsoft.Teams.Classic,
+        # which the bundle Notes expressly forbid) would leave the key dead
+        # while a literal-only test stayed green -- and CI would then do a
+        # real machine-scope MSIX install. So derive the key from the live
+        # declaration using the gate's own rule instead of hardcoding it.
+        $psd1 = Join-Path $PSScriptRoot '..\..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+        if (Test-Path $psd1) { Import-Module $psd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
+        $bucket = Join-Path $PSScriptRoot '..\..\bucket'
+        $all = @(Get-Package -BucketPath $bucket)
+
+        foreach ($name in 'Notion', 'Microsoft Teams') {
+            $pkg = @($all | Where-Object Name -EQ $name)
+            $pkg.Count | Should -Be 1 -Because "'$name' must still be declared exactly once"
+
+            # Machine scope is what selects the MSIX; user scope would change
+            # the artifact, so the skip entry is only correct while scope is
+            # not 'user'.
+            "$($pkg[0].Scope)" | Should -Not -Be 'user'
+
+            $skipKey = if ($pkg[0].Installer -eq 'choco') { $pkg[0].Name } else { $pkg[0].Id }
+            $script:SkipList.ContainsKey($skipKey) | Should -BeTrue `
+                -Because "the gate looks '$name' up as '$skipKey'; the skip list must carry that exact key"
+        }
+    }
 }
+

@@ -117,12 +117,12 @@ $NoCliPackages = @(
     'WindowsPostInstallWizard.UniversalSilentSwitchFinder',
     '9NT1R1C2HH7J','9NRQBLR605RG','XPDDXX9QW8N9D7','9NKSQGP7F2NH','XPDNSF6TXN2R6Z',
     'gitextensions','gitkraken','git-credential-manager-for-windows',
-    'Microsoft-Teams','Office365ProPlus','foxitreader','Foxit.FoxitReader',
+    'Microsoft.Teams','Office365ProPlus','foxitreader','Foxit.FoxitReader',
     'geosetter','TotalCommander','MarkMichaelis/ChatGPT',
     'MarkMichaelis/Claude','MarkMichaelis/Gemini','MarkMichaelis/MicrosoftCopilot',
     'MarkMichaelis/ClaudeExcel','MarkMichaelis/AIAgents',
     # Scoop GUI desktop apps (separate from corresponding CLI packages above)
-    'extras/claude','extras/notion','extras/spotify',
+    'extras/claude','extras/spotify',
     # Bundle of tools (procexp/procmon/psexec/...); availability handled by
     # adding the install dir to Machine PATH in OSBasePackages.ps1, not by
     # probing for a single binary called "sysinternals".

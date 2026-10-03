@@ -253,7 +253,7 @@ Register-ArgumentCompleter -Native -CommandName code -ScriptBlock {
         Id          = 'main/ffmpeg'
         CliCommands = @('ffmpeg')
         Completion  = 'auto'
-        Notes       = 'ffmpeg has no PowerShell completion command and is not in PSCompletions catalog (#73). Surface area is too large to enumerate dynamically (encoders/decoders/filters in the thousands), so v1 ships a hand-curated list of the most-used flags. Future enhancement: parse `ffmpeg -encoders` / `-formats` for value completion.'
+        Notes       = 'Stays on scoop: winget Gyan.FFmpeg carries the same version (9.0.2) but its manifest is InstallerType zip with a nested RelativeFilePath of ffmpeg-<version>-full_build\bin\ffmpeg.exe, and that path drifts every release as Gyan rebuilds the zip -- the exact failure #29 recorded before this entry was moved to scoop. scoop main/ffmpeg also shims ffplay and ffprobe, which winget''s portable aliases would not reproduce here. Re-confirmed against the live 9.0.2 manifest in #465. ffmpeg has no PowerShell completion command and is not in PSCompletions catalog (#73). Surface area is too large to enumerate dynamically (encoders/decoders/filters in the thousands), so v1 ships a hand-curated list of the most-used flags. Future enhancement: parse `ffmpeg -encoders` / `-formats` for value completion.'
         ExpectedCompletions = @{ ffmpeg = @('-i','-c:v','-c:a','-y','-vf') }
         NativeCommandScript = {
             @"
@@ -272,13 +272,13 @@ Register-ArgumentCompleter -Native -CommandName ffmpeg -ScriptBlock {
     }
     [Package]@{
         Name        = 'ripgrep'
-        Installer   = 'scoop'
-        Id          = 'main/ripgrep'
+        Installer   = 'winget'
+        Id          = 'BurntSushi.ripgrep.MSVC'
         CliCommands = @('rg')
         Completion  = 'native'
         NativeCompletionKind = 'native'
         NativeCommandScript = { rg --generate complete-powershell }
-        Notes       = 'scoop main/ripgrep gives v14+, required for --generate complete-powershell. See #73.'
+        Notes       = 'winget per the README engine preference (winget first for CLIs). This entry used to be scoop main/ripgrep on the grounds that "scoop gives v14+, required for --generate complete-powershell" (#73) -- winget''s ripgrep was then too old. That exception has expired: winget BurntSushi.ripgrep.MSVC is at 15.2.0, the same version main/ripgrep ships, from the identical artifact (ripgrep-15.2.0-x86_64-pc-windows-msvc.zip), InstallerType zip / NestedInstallerType portable with PortableCommandAlias rg, and --scope machine resolves. Completion is unaffected: `rg --generate complete-powershell` is a property of the binary, not the engine. This was the entry rclone was wrongly modelled on (#462/#463); audited in #465.'
         ExpectedCompletions = @{ rg = @('--help','--version','--color') }
     }
     [Package]@{
@@ -334,7 +334,7 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
             procdump   = @('/?','/accepteula','/nobanner')
             tcpview    = @('/?','/accepteula','/nobanner')
         }
-        Notes       = 'extras/sysinternals declares every tool in its manifest "bin" list, so scoop creates a shim per tool (procexp, autoruns, accesschk, ...) automatically. No PATH update required. CliCommands enumerates the curated subset that gets tab-completion via a shared per-CLI flag completer (universal Sysinternals flags: /?, /accepteula, /nobanner). See #44.'
+        Notes       = 'Stays on scoop: winget Microsoft.Sysinternals.Suite carries the same build (2026-09-10 == 20260910) and resolves at --scope machine, but Microsoft re-uploads SysinternalsSuite.zip in place, so winget''s pinned SHA256 goes stale between manifest updates and an elevated install hard-fails with "Installer hash does not match; this cannot be overridden when running as admin" (#44). winget also ships only per-tool portable aliases, not the whole suite. Re-confirmed in #465. extras/sysinternals declares every tool in its manifest "bin" list, so scoop creates a shim per tool (procexp, autoruns, accesschk, ...) automatically. No PATH update required. CliCommands enumerates the curated subset that gets tab-completion via a shared per-CLI flag completer (universal Sysinternals flags: /?, /accepteula, /nobanner). See #44.'
     }
 )
 
