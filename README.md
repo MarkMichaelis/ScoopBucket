@@ -128,7 +128,9 @@ The `[Package]` class enforces enums on `Installer` / `Source` / `Scope` /
 catch authors out (#450):
 
 * `Resolve-PackageOrder` **BFS-expands `DependsOn` transitively** whenever
-  `-Name` is passed, and `Install-Package` always passes `-Name`. So
+  `-Name` is passed, and `Install-Package` passes `-Name` for every package
+  asked for by package name — only its whole-bundle dispatch omits it, and
+  that path installs everything regardless. So
   `Install-Package -Name A` where `A.DependsOn = @('B')` installs `B` too,
   plus `B`'s own `DependsOn`, transitively. Listing a heavyweight package
   to express "nice to have it first" silently forces it on anyone who asks
