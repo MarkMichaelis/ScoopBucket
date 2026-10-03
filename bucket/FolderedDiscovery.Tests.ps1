@@ -152,3 +152,88 @@ Describe 'Bare manifest resolution across bucket subfolders' -Tag 'Light', 'Modu
             Should -Throw -ExpectedMessage '*no bundle declares a package named*'
     }
 }
+
+Describe 'Resolve-BucketManifestPath' -Tag 'Light', 'Module' {
+
+    BeforeAll {
+        function script:Invoke-ResolveBucketManifestPath {
+            param([string]$Name, [string]$BucketPath)
+            & (Get-Module MarkMichaelis.ScoopBucket) {
+                param($n, $p) Resolve-BucketManifestPath -Name $n -BucketPath $p
+            } $Name $BucketPath
+        }
+
+        function script:New-Manifest {
+            param([Parameter(Mandatory)][string]$Path)
+            New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
+            Set-Content -LiteralPath $Path -Encoding utf8 -Value '{ "version": "1.00.000" }'
+        }
+
+        $script:bucket = Join-Path $TestDrive 'ResolveBucket'
+        New-Item -ItemType Directory -Path $script:bucket -Force | Out-Null
+
+        # Same base name at the root and in a subfolder.
+        script:New-Manifest (Join-Path $script:bucket 'Both.json')
+        script:New-Manifest (Join-Path $script:bucket 'os\Both.json')
+        # Same base name in two different subfolders.
+        script:New-Manifest (Join-Path $script:bucket 'ai\Twice.json')
+        script:New-Manifest (Join-Path $script:bucket 'os\Twice.json')
+        # Nested two levels deep.
+        script:New-Manifest (Join-Path $script:bucket 'os\extras\Deep.json')
+        # Neighbours that a wildcard name would sweep up.
+        script:New-Manifest (Join-Path $script:bucket 'client\WildA.json')
+        script:New-Manifest (Join-Path $script:bucket 'client\WildB.json')
+        # A manifest OUTSIDE the bucket, one level up.
+        script:New-Manifest (Join-Path $TestDrive 'Outside.json')
+    }
+
+    It 'prefers the bucket root over a same-named manifest in a subfolder' {
+        # Keeps a root-level manifest's resolution byte-identical to the
+        # pre-#452 behavior, which only ever looked at the root.
+        script:Invoke-ResolveBucketManifestPath -Name 'Both' -BucketPath $script:bucket |
+            Should -Be (Join-Path $script:bucket 'Both.json')
+    }
+
+    It 'resolves the same base name in two subfolders deterministically' {
+        $first = script:Invoke-ResolveBucketManifestPath -Name 'Twice' -BucketPath $script:bucket
+        $first | Should -Be (Join-Path $script:bucket 'ai\Twice.json')
+        # Same answer every call -- enumeration order must not leak through.
+        1..3 | ForEach-Object {
+            script:Invoke-ResolveBucketManifestPath -Name 'Twice' -BucketPath $script:bucket |
+                Should -Be $first
+        }
+    }
+
+    It 'finds a manifest nested more than one level deep' {
+        script:Invoke-ResolveBucketManifestPath -Name 'Deep' -BucketPath $script:bucket |
+            Should -Be (Join-Path $script:bucket 'os\extras\Deep.json')
+    }
+
+    It 'does not let a wildcard in the name widen the search' -ForEach @(
+        @{ Pattern = 'Wild*' }
+        @{ Pattern = 'Wild?' }
+        @{ Pattern = 'Wild[AB]' }
+    ) {
+        script:Invoke-ResolveBucketManifestPath -Name $Pattern -BucketPath $script:bucket |
+            Should -BeNullOrEmpty
+    }
+
+    It 'refuses a name with a directory component so the search cannot escape the bucket' -ForEach @(
+        @{ Escape = '..\Outside' }
+        @{ Escape = '../Outside' }
+        @{ Escape = 'os\..\..\Outside' }
+    ) {
+        # `-LiteralPath` stops wildcard expansion but not `..`; without the
+        # leaf-name guard this returned a manifest outside the bucket, which
+        # the caller then reported as "found in the bucket".
+        script:Invoke-ResolveBucketManifestPath -Name $Escape -BucketPath $script:bucket |
+            Should -BeNullOrEmpty
+    }
+
+    It 'returns nothing for a missing bucket, or one that is a file rather than a directory' {
+        script:Invoke-ResolveBucketManifestPath -Name 'Both' -BucketPath (Join-Path $TestDrive 'NoSuchBucket') |
+            Should -BeNullOrEmpty
+        script:Invoke-ResolveBucketManifestPath -Name 'Both' -BucketPath (Join-Path $TestDrive 'Outside.json') |
+            Should -BeNullOrEmpty
+    }
+}
