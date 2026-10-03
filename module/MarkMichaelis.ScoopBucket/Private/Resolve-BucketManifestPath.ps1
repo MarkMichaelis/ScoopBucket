@@ -33,10 +33,15 @@ function Resolve-BucketManifestPath {
 
         Matching is on the file's base name (case-insensitively), not via a
         `-Filter` pattern, so a name carrying wildcard characters cannot widen
-        the search.
+        the search. A name carrying a directory component is refused outright:
+        `-LiteralPath` stops `Test-Path` from expanding a wildcard but does
+        nothing about `..`, so `Join-Path <bucket> '..\Elsewhere.json'` would
+        otherwise resolve a manifest OUTSIDE the bucket and the caller would
+        report it as "found in the bucket".
 
     .PARAMETER Name
-        Manifest base name, without the `.json` extension.
+        Manifest base name, without the `.json` extension. Must be a single
+        file name — anything with a directory component yields $null.
 
     .PARAMETER BucketPath
         The bucket directory to search. A missing or empty path yields $null.
@@ -53,6 +58,12 @@ function Resolve-BucketManifestPath {
 
     if (-not $Name -or -not $BucketPath) { return $null }
     if (-not (Test-Path -LiteralPath $BucketPath -PathType Container)) { return $null }
+
+    # A manifest name is a file name, never a path. Refusing a directory
+    # component keeps the search inside the bucket: '..\Elsewhere' or
+    # 'C:\somewhere\Else' must not resolve, or a caller would announce a
+    # manifest outside the bucket as one it found in the bucket.
+    if ($Name -ne [System.IO.Path]::GetFileName($Name)) { return $null }
 
     $rootCandidate = Join-Path $BucketPath "$Name.json"
     if (Test-Path -LiteralPath $rootCandidate -PathType Leaf) {
