@@ -48,6 +48,10 @@ $ProgressPreference = 'SilentlyContinue'  # Speed up web requests
 #   - winget "No applicable installer found" — only user-scope MSIX/APPX available
 #   - Chocolatey package delisted / no longer in the community repo
 #   - Requires GUI session, license activation, or interactive prompts
+#   - winget resolves a machine-context MSIX — winget finds AND hash-verifies an
+#     applicable installer, but provisioning needs runFullTrust on an interactive
+#     desktop with sideloading, so headless runners return
+#     APPINSTALLER_CLI_ERROR_INSTALL_SYSTEM_NOT_SUPPORTED (-1978334957). See #85, #465.
 
 $script:CISkipPackages = @{
     # winget: user-scope-only MSIX apps (no machine-scope MSI/EXE installer)
@@ -58,6 +62,11 @@ $script:CISkipPackages = @{
     'Office365ProPlus'              = 'Requires GUI session and license activation (exit 17004)'
     # scoop: browser-watch installers requiring interactive Download click
     'MarkMichaelis/Gemini'          = 'Browser-watch installer requires interactive Download click; see #25, #26'
+    # winget: machine-scope MSIX, same provisioning shape as Claude Desktop (#85) --
+    # runFullTrust requires an interactive desktop with sideloading enabled;
+    # fails headless Server runners with APPINSTALLER_CLI_ERROR_INSTALL_SYSTEM_NOT_SUPPORTED
+    'Notion.Notion'                 = 'Machine-scope winget install resolves an MSIX (unscoped default is nullsoft/per-user); same #85 shape as Claude Desktop on a headless runner (#465). Do NOT "fix" this with Scope=user -- that silently changes the installed artifact to the per-user nullsoft build; see the Notion Notes in bucket/ClientBasePackages.ps1'
+    'Microsoft.Teams'               = 'MSIX-only client (no EXE fallback available via Scope=user); same #85 shape as Claude Desktop on a headless runner (#465)'
 }
 
 # ============================================================================

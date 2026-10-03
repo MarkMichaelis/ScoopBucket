@@ -96,7 +96,7 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 
 $Packages = [Package[]]@(
     [Package]@{
-        Name = 'ripgrep'; Installer = 'scoop'; Id = 'main/ripgrep'
+        Name = 'ripgrep'; Installer = 'winget'; Id = 'BurntSushi.ripgrep.MSVC'
         CliCommands = @('rg'); Completion = 'native'
         NativeCommandScript = { rg --generate complete-powershell }
     }
