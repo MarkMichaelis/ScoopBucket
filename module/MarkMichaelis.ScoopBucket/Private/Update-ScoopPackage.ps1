@@ -40,11 +40,12 @@ function Update-ScoopPackage {
 
     Write-UpdateStatus "Updating $($Package.Name) (scoop $appName)..."
     Write-Verbose "  scoop $($updateArgs -join ' ')"
-    # Capture all streams (stdout 1, stderr 2, information 6). Scoop's
-    # internal scoop.ps1 writes its per-app status via Write-Host which
-    # in PS7 lands on the Information stream, not stdout — without `6>&1`
-    # we'd miss the "(latest version)" / "is already installed" markers
-    # we rely on to distinguish Updated from AlreadyLatest.
+    # Capture every stream. Scoop writes its per-app status via Write-Host;
+    # that reaches us as the child process stdout now the call is out of
+    # process (it was the Information stream while scoop ran in-process), and
+    # merging the lot keeps the "(latest version)" / "is already installed"
+    # markers we rely on to tell Updated from AlreadyLatest whichever stream
+    # they arrive on.
     # Out of process: `scoop update <app>` re-runs the manifest's
     # installer.script, which re-imports this module with -Force. See
     # Invoke-ScoopCommand and #451.

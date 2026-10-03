@@ -230,7 +230,13 @@ function scoop {
                     $localArgs[$index] = "$script:UserBucket/$arg1"
                 }
             }
-            scoop.ps1 @localArgs
+            # Out of process (#451). This wrapper is exported and SHADOWS the
+            # real scoop command for every session that imports the module, so
+            # an interactive `scoop install <bundle>` lands here too -- and an
+            # in-process install would let the manifest's
+            # `Import-Module ... -Force` dispose the session state scoop is
+            # running inside. See Invoke-ScoopCommand.
+            Invoke-ScoopCommand @localArgs
         }
         'search' {
             if ($options -contains '-PSCustomObject') {
@@ -252,7 +258,14 @@ function scoop {
             }
         }
         Default {
-            scoop.ps1 @args
+            # install / uninstall / update / import execute manifest scripts and
+            # must run out of process (#451); everything else is read-only with
+            # respect to app contents and stays in-process, where it is cheap.
+            if (Test-ScoopCommandRunsManifestScript $cmd) {
+                Invoke-ScoopCommand @args
+            } else {
+                scoop.ps1 @args
+            }
         }
     }
 }

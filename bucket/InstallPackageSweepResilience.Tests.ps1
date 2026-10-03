@@ -112,3 +112,34 @@ Describe 'Install-Package sweep resilience' -Tag 'Light', 'Module' {
             Should -BeGreaterThan 0 -Because '#451 left $pkgErrors empty because the error was terminating, never written'
     }
 }
+
+Describe 'Update-Package sweep resilience' -Tag 'Light', 'Module' {
+    # Same contract, same reason: Update-Package's dispatch loops are shaped
+    # exactly like Install-Package's, so a terminating error from the driver
+    # could abort the whole sweep there too (#451 / #272).
+    BeforeEach {
+        Mock -ModuleName MarkMichaelis.ScoopBucket -CommandName Invoke-PackageUpdate -MockWith {
+            if ($Bundle -eq 'BoomBundle') {
+                throw "The term 'Write-UpdateStatus' is not recognized as a name of a cmdlet, function, script file, or executable program."
+            }
+            [PackageResult]@{
+                Operation = 'Update'; Status = 'Updated'
+                Name = @($Name)[0]; Installer = 'winget'; Bundle = $Bundle
+            }
+        }
+        Mock -ModuleName MarkMichaelis.ScoopBucket -CommandName Update-ScoopBucket -MockWith { @{ State = 'Skipped'; Reason = 'test' } }
+    }
+
+    It 'still dispatches the remaining bundles after one throws, and reports the failure' {
+        $result = @(Update-Package -Name 'boom', 'calm' -WhatIf -SkipCompletion `
+                -BucketPath $script:tmpBucket -IncludeUnchanged -ErrorAction SilentlyContinue)
+
+        @($result | Where-Object { $_.Status -eq 'Updated' -and $_.Name -eq 'calm' }).Count |
+            Should -Be 1 -Because 'a failure in one bundle must not cancel the others'
+        $failed = @($result | Where-Object Status -eq 'Failed')
+        $failed.Count | Should -Be 1
+        $failed[0].Name | Should -Be 'BoomBundle'
+        $failed[0].Operation | Should -Be 'Update'
+        $failed[0].Reason | Should -Match 'Write-UpdateStatus'
+    }
+}

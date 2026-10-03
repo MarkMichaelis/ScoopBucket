@@ -191,6 +191,9 @@ function Install-Package {
                     -Name @($entry.Names) -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
                     -NoUpgrade:$NoUpgrade `
                     -ErrorAction Continue -ErrorVariable +pkgErrors))
+        } catch [System.Management.Automation.PipelineStoppedException] {
+            # An interrupt must stop the sweep, not be filed as a bundle failure.
+            throw
         } catch {
             $failure = New-BundleDispatchFailure -Bundle $entry.Bundle -Message $_.Exception.Message
             $pkgErrors.Add($failure.Error)
@@ -209,6 +212,8 @@ function Install-Package {
                     -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
                     -NoUpgrade:$NoUpgrade `
                     -ErrorAction Continue -ErrorVariable +pkgErrors))
+        } catch [System.Management.Automation.PipelineStoppedException] {
+            throw
         } catch {
             $failure = New-BundleDispatchFailure -Bundle $b.Bundle -Message $_.Exception.Message
             $pkgErrors.Add($failure.Error)
@@ -256,6 +261,8 @@ function Install-Package {
         # scoop is running inside. See Invoke-ScoopCommand.
         try {
             Invoke-ScoopCommand install $n
+        } catch [System.Management.Automation.PipelineStoppedException] {
+            throw
         } catch {
             # A manifest that cannot even be dispatched must not abort the rest
             # of the sweep.

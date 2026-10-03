@@ -96,10 +96,22 @@ $apps = @($args | Where-Object { $_ -notlike '-*' })
 foreach ($app in $apps) { install_app $app }
 '@
 
-        # libexec\scoop-list.ps1 -- header only, so the engine's
-        # AlreadyInstalled probe sees no row and proceeds to install.
+        # libexec\scoop-list.ps1 -- header only by default, so the engine's
+        # AlreadyInstalled probe sees no row and proceeds to install. With
+        # $env:SB451_STUB_LIST_ROW set it reports a row, which is what the
+        # update engine's presence probe needs.
         Set-Content -LiteralPath (Join-Path $libexec 'scoop-list.ps1') -Encoding utf8 -Value @'
 Write-Output 'Installed apps:'
+if ($env:SB451_STUB_LIST_ROW) { Write-Output "$env:SB451_STUB_LIST_ROW 1.0.0 stub" }
+'@
+
+        # libexec\scoop-update.ps1 -- scoop reports per-app status with
+        # Write-Host, so this mirrors that: out of process it has to reach the
+        # engine as the child's stdout for the "(latest version)" marker to
+        # survive and map to AlreadyLatest.
+        Set-Content -LiteralPath (Join-Path $libexec 'scoop-update.ps1') -Encoding utf8 -Value @'
+$app = @($args | Where-Object { $_ -notlike '-*' })[0]
+Write-Host "${app}: 1.0.0 (latest version)"
 '@
 
         Set-Content -LiteralPath (Join-Path $bin 'scoop.ps1') -Encoding utf8 -Value @'
@@ -181,6 +193,84 @@ Describe 'scoop installs driven through the module survive a bundle -Force re-im
     }
 }
 
+Describe 'scoop updates driven through the module keep their output markers' -Tag 'Light', 'Module' {
+    # The update engines capture scoop's chatter with `*>&1` and then regex it
+    # for "(latest version)" / "is already installed" to tell Updated from
+    # AlreadyLatest. Moving the call out of process changed where that text
+    # comes from -- the child's stdout rather than the in-process Information
+    # stream -- so pin that the marker still survives the crossing.
+    BeforeEach {
+        Remove-Module MarkMichaelis.ScoopBucket -Force -ErrorAction Ignore
+        Import-Module $script:psd1 -Force
+        $script:stub = script:New-StubScoopRoot -ModulePsd1 $script:psd1
+        $script:savedScoop = $env:SCOOP
+        $script:savedPath = $env:PATH
+        $env:SCOOP = $script:stub.Root
+        $env:PATH = (Join-Path $script:stub.Root 'shims') + ';' + $env:PATH
+        $env:SB451_STUB_LIST_ROW = 'stubapp'
+    }
+
+    AfterEach {
+        $env:SCOOP = $script:savedScoop
+        $env:PATH = $script:savedPath
+        Remove-Item Env:\SB451_STUB_LIST_ROW -ErrorAction Ignore
+        Remove-Module MarkMichaelis.ScoopBucket -Force -ErrorAction Ignore
+        Remove-Item -LiteralPath $script:stub.Root -Recurse -Force -ErrorAction Ignore
+    }
+
+    It 'maps a child-process "(latest version)" line to AlreadyLatest' {
+        $pkg = [pscustomobject]@{
+            Name      = 'stubapp'
+            Installer = 'scoop'
+            Id        = 'stub/stubapp'
+            Scope     = 'global'
+        }
+        $mod = Get-Module MarkMichaelis.ScoopBucket
+        $result = $mod.Invoke({ param($p) Update-ScoopPackage -Package $p }, $pkg)
+
+        $result.State | Should -Be 'AlreadyLatest' -Because "scoop's Write-Host status has to reach the engine across the process boundary or every update would read as Updated"
+    }
+}
+
+Describe 'Invoke-ScoopCommand plumbing' -Tag 'Light', 'Module' {
+
+    BeforeAll { Import-Module $script:psd1 -Force }
+
+    It 'classifies only the scoop subcommands that execute manifest scripts as mutating' {
+        # install / uninstall / update / import are the four libexec commands
+        # that reach install_app / uninstall_app / Invoke-HookScript in scoop
+        # 0.6.0; everything else must stay in-process so a sweep does not pay a
+        # process launch per read-only probe.
+        $mod = Get-Module MarkMichaelis.ScoopBucket
+        foreach ($cmd in 'install', 'uninstall', 'update', 'import', 'INSTALL') {
+            $mod.Invoke({ param($c) Test-ScoopCommandRunsManifestScript $c }, $cmd) |
+                Should -BeTrue -Because "'$cmd' runs a manifest script"
+        }
+        foreach ($cmd in 'list', 'status', 'info', 'which', 'prefix', 'search', 'bucket', 'hold', 'cleanup', 'cache', 'export') {
+            $mod.Invoke({ param($c) Test-ScoopCommandRunsManifestScript $c }, $cmd) |
+                Should -BeFalse -Because "'$cmd' cannot run a manifest script"
+        }
+    }
+
+    It 'runs a PowerShell executable, never whatever process happens to host the runspace' {
+        # The module can be imported into a runspace embedded in an arbitrary
+        # host; `& <that host> -File scoop.ps1` would be nonsense.
+        $resolved = & (Get-Module MarkMichaelis.ScoopBucket) { Get-PowerShellHostPath }
+        [System.IO.Path]::GetFileNameWithoutExtension($resolved) |
+            Should -BeIn @('pwsh', 'powershell')
+    }
+
+    It 'fails with an actionable message when scoop cannot be located' {
+        $mod = Get-Module MarkMichaelis.ScoopBucket
+        {
+            $mod.Invoke({
+                    Mock Resolve-ScoopEntryScript { $null }
+                    Invoke-ScoopCommand 'list'
+                })
+        } | Should -Throw -ExpectedMessage '*could not locate*'
+    }
+}
+
 Describe 'mutating scoop dispatches run out of process' -Tag 'Light', 'Module' {
     # Drift guard: any scoop subcommand that can execute a manifest's
     # installer / uninstaller script must go through Invoke-ScoopCommand (a
@@ -203,11 +293,18 @@ Describe 'mutating scoop dispatches run out of process' -Tag 'Light', 'Module' {
         $content | Should -Match 'Invoke-ScoopCommand'
     }
 
-    It '<File> has no in-process scoop install/uninstall/update call' -ForEach $script:mutatingEngines {
+    It '<File> makes no in-process scoop call beyond the read-only probes' -ForEach $script:mutatingEngines {
+        # Deliberately NOT a "does it mention install/uninstall/update" regex:
+        # that only fires when the splatted variable happens to be named
+        # $installArgs, so `scoop.ps1 @args` would slip straight through.
+        # Instead, enumerate EVERY surviving in-process scoop invocation and
+        # require its first argument to be a literal read-only subcommand.
         $content = Get-Content -LiteralPath $File -Raw
-        # `& scoop list` / `& scoop status` stay in-process on purpose: they
-        # are read-only and cannot run a manifest script.
-        $content | Should -Not -Match '(?m)(&\s+scoop|scoop\.ps1)\s+@?\$?\w*(install|uninstall|update)'
+        $calls = [regex]::Matches($content, '(?m)(?:&\s+scoop|scoop\.ps1)\s+(?<arg>\S+)') |
+            ForEach-Object { $_.Groups['arg'].Value }
+        foreach ($call in $calls) {
+            $call | Should -BeIn @('list', 'status') -Because "in-process 'scoop $call' can execute a manifest installer script and unload this module mid-run (#451); route it through Invoke-ScoopCommand"
+        }
     }
 }
 
@@ -273,5 +370,49 @@ Describe 'real scoop keeps its install internals reachable from the module path'
         $result = $mod.Invoke({ param($p) Install-ScoopPackage -Package $p }, $pkg)
 
         $result.State | Should -Be 'Installed' -Because "real scoop's install_app must still reach ensure_install_dir_not_in_path after the manifest script re-imports this module (#451)"
+    }
+}
+
+Describe 'the exported scoop wrapper routes mutating subcommands out of process' -Tag 'Light', 'Module' {
+    # `scoop` is in FunctionsToExport, so this wrapper SHADOWS the real scoop
+    # command in every session that imports the module -- an interactive
+    # `scoop install <bundle>` lands here, not in Install-Package. In-process
+    # dispatch there reproduces #451 in full.
+    BeforeAll { Import-Module $script:psd1 -Force }
+
+    BeforeEach {
+        $script:seen = [System.Collections.Generic.List[object]]::new()
+        Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-ScoopCommand {
+            $script:seen.Add(@($ArgumentList))
+            $global:LASTEXITCODE = 0
+        }
+    }
+
+    It 'sends <Subcommand> to the child process' -ForEach @(
+        @{ Subcommand = 'install' }
+        @{ Subcommand = 'uninstall' }
+        @{ Subcommand = 'update' }
+        @{ Subcommand = 'import' }
+    ) {
+        # A deliberately non-existent app: if this ever regresses to in-process
+        # dispatch the call reaches the REAL scoop, and it must then be unable to
+        # touch anything on the machine. (Naming a real app here once cost a
+        # live install + uninstall of ripgrep.)
+        $mod = Get-Module MarkMichaelis.ScoopBucket
+        $mod.Invoke({ param($c) scoop $c 'sb451/no-such-app-451' }, $Subcommand)
+
+        $script:seen.Count | Should -Be 1 -Because "'scoop $Subcommand' executes manifest scripts and must not run inside this module's session state"
+        $script:seen[0][0] | Should -Be $Subcommand
+    }
+
+    It 'keeps read-only subcommands in-process' {
+        $mod = Get-Module MarkMichaelis.ScoopBucket
+        $mod.Invoke({
+                # A local shadow stands in for the real scoop.ps1 on PATH.
+                function scoop.ps1 { 'Installed apps:' }
+                $null = scoop list ripgrep
+            })
+
+        $script:seen.Count | Should -Be 0 -Because 'a child process per read-only probe would cost a sweep seconds for no benefit'
     }
 }
