@@ -143,3 +143,34 @@ Describe 'Update-Package sweep resilience' -Tag 'Light', 'Module' {
         $failed[0].Reason | Should -Match 'Write-UpdateStatus'
     }
 }
+
+Describe 'Uninstall-Package sweep resilience' -Tag 'Light', 'Module' {
+    # The uninstall driver is the third of the trio and had none of the
+    # treatment: its `Write-UpdateStatus -Completed` teardown was bare, and
+    # Uninstall-Package's dispatch loops had no guard, so one terminating error
+    # took the whole sweep down (#451).
+    BeforeEach {
+        Mock -ModuleName MarkMichaelis.ScoopBucket -CommandName Invoke-PackageUninstall -MockWith {
+            if ($Bundle -eq 'BoomBundle') {
+                throw "The term 'Write-UpdateStatus' is not recognized as a name of a cmdlet, function, script file, or executable program."
+            }
+            [PackageResult]@{
+                Operation = 'Uninstall'; Status = 'Uninstalled'
+                Name = @($Name)[0]; Installer = 'winget'; Bundle = $Bundle
+            }
+        }
+    }
+
+    It 'still dispatches the remaining bundles after one throws, and reports the failure' {
+        $result = @(Uninstall-Package -Name 'boom', 'calm' -DryRun -SkipCompletion `
+                -BucketPath $script:tmpBucket -ErrorAction SilentlyContinue)
+
+        @($result | Where-Object { $_.Status -eq 'Uninstalled' -and $_.Name -eq 'calm' }).Count |
+            Should -Be 1 -Because 'a failure in one bundle must not cancel the others'
+        $failed = @($result | Where-Object Status -eq 'Failed')
+        $failed.Count | Should -Be 1
+        $failed[0].Name | Should -Be 'BoomBundle'
+        $failed[0].Operation | Should -Be 'Uninstall'
+        $failed[0].Reason | Should -Match 'Write-UpdateStatus'
+    }
+}

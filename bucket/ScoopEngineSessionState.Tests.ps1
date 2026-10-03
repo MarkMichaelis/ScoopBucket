@@ -279,6 +279,11 @@ Describe 'mutating scoop dispatches run out of process' -Tag 'Light', 'Module' {
     # neighbouring read-only probe.
     BeforeDiscovery {
         $moduleDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'module\MarkMichaelis.ScoopBucket'
+        # Legacy.ps1 is deliberately NOT in this list. Its `scoop` wrapper
+        # decides at RUNTIME via Test-ScoopCommandRunsManifestScript, so its
+        # surviving `scoop.ps1 @args` branch and its `scoop.ps1 bucket rm ...`
+        # calls are safe but would fail the literal allowlist below. The wrapper
+        # gets behavioural coverage instead -- see the routing Describe above.
         $script:mutatingEngines = @(
             @{ File = (Join-Path $moduleDir 'Private\Install-ScoopPackage.ps1') }
             @{ File = (Join-Path $moduleDir 'Private\Uninstall-ScoopPackage.ps1') }
