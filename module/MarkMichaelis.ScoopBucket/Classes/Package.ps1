@@ -97,8 +97,10 @@ class Package {
     #
     #   1. It is an INSTALL-SET MEMBERSHIP declaration, not an ordering
     #      hint. Resolve-PackageOrder BFS-expands DependsOn transitively
-    #      whenever -Name is passed, and Install-Package ALWAYS passes
-    #      -Name. So `Install-Package -Name A` where A.DependsOn = @('B')
+    #      whenever -Name is passed, and Install-Package passes -Name for
+    #      every package asked for by package name (only its whole-bundle
+    #      dispatch omits it, and that path installs everything anyway).
+    #      So `Install-Package -Name A` where A.DependsOn = @('B')
     #      installs B too -- and B's own DependsOn, and so on. Declaring a
     #      heavyweight package here to express "nice to have it first"
     #      silently forces it onto anyone who asks for the small one. Aspire
