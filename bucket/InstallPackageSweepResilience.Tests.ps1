@@ -91,6 +91,18 @@ Describe 'Install-Package sweep resilience' -Tag 'Light', 'Module' {
         $failed[0].Error | Should -Not -BeNullOrEmpty
     }
 
+    It 'warns that the sweep continued past failures so a partial convergence is visible' {
+        # $pkgErrors existed but was never reported, so a run that converged
+        # only partway looked exactly like a clean one (#451).
+        $warnings = @()
+        $null = Install-Package -Name 'boom', 'calm' -DryRun -SkipCompletion `
+            -BucketPath $script:tmpBucket -IncludeUnchanged `
+            -ErrorAction SilentlyContinue -WarningVariable warnings -WarningAction SilentlyContinue
+
+        @($warnings | Where-Object { $_.Message -match 'install\(s\) failed' }).Count |
+            Should -BeGreaterThan 0
+    }
+
     It 'writes the failure to the error stream so -ErrorVariable captures it' {
         $null = Install-Package -Name 'boom', 'calm' -DryRun -SkipCompletion `
             -BucketPath $script:tmpBucket -IncludeUnchanged `

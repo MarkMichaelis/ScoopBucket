@@ -170,9 +170,16 @@ Describe 'Update engine dispatchers' -Tag 'Light','Module' {
 
         It 'strips bucket prefix and calls scoop update <app>' {
             $script:captured = $null
+            # The read-only presence probe still goes through the in-process
+            # `scoop` wrapper; the mutating `scoop update` goes out of process
+            # via Invoke-ScoopCommand (#451), so capture it there.
             Mock -ModuleName MarkMichaelis.ScoopBucket scoop {
                 if ($args[0] -eq 'list') { return "ripgrep 13.0.0" }
-                $script:captured = $args
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-ScoopCommand {
+                $script:captured = $ArgumentList
                 $global:LASTEXITCODE = 0
                 return 'Updating ripgrep ... done.'
             }
@@ -197,6 +204,10 @@ Describe 'Update engine dispatchers' -Tag 'Light','Module' {
         It 'maps "latest version" output to AlreadyLatest' {
             Mock -ModuleName MarkMichaelis.ScoopBucket scoop {
                 if ($args[0] -eq 'list') { return "ripgrep 13.0.0" }
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-ScoopCommand {
                 $global:LASTEXITCODE = 0
                 return "The latest version of 'ripgrep' (13.0.0) is already installed."
             }
@@ -813,7 +824,9 @@ Describe 'Update engines hide installer output by default (#276)' -Tag 'Light','
         InModuleScope MarkMichaelis.ScoopBucket {
             Mock Get-Command { $true } -ParameterFilter { $Name -eq 'scoop' }
             function scoop {
-                if ($args -contains 'list') { 'ripgrep 14.0.0'; $global:LASTEXITCODE = 0; return }
+                'ripgrep 14.0.0'; $global:LASTEXITCODE = 0
+            }
+            function Invoke-ScoopCommand {
                 'ripgrep: 14.0.0 (latest version)'; $global:LASTEXITCODE = 0
             }
             Mock Write-Host { }
@@ -832,7 +845,9 @@ Describe 'Update engines hide installer output by default (#276)' -Tag 'Light','
         InModuleScope MarkMichaelis.ScoopBucket {
             Mock Get-Command { $true } -ParameterFilter { $Name -eq 'scoop' }
             function scoop {
-                if ($args -contains 'list') { 'ripgrep 14.0.0'; $global:LASTEXITCODE = 0; return }
+                'ripgrep 14.0.0'; $global:LASTEXITCODE = 0
+            }
+            function Invoke-ScoopCommand {
                 'Could not download manifest'; $global:LASTEXITCODE = 1
             }
             Mock Write-Host { }
@@ -1268,8 +1283,8 @@ Describe 'Update-All<engine>Packages sweep engines' -Tag 'Light','Module' {
         It 'invokes scoop update * (not bare scoop update which only updates scoop+buckets)' {
             Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return [pscustomobject]@{ Name='scoop' } } -ParameterFilter { $Name -eq 'scoop' }
             $script:captured = $null
-            Mock -ModuleName MarkMichaelis.ScoopBucket scoop {
-                $script:captured = $args
+            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-ScoopCommand {
+                $script:captured = $ArgumentList
                 $global:LASTEXITCODE = 0
                 return ''
             }
@@ -1281,11 +1296,11 @@ Describe 'Update-All<engine>Packages sweep engines' -Tag 'Light','Module' {
 
         It 'with -WhatIf prints the bulk command and does not invoke scoop' {
             Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { return [pscustomobject]@{ Name='scoop' } } -ParameterFilter { $Name -eq 'scoop' }
-            Mock -ModuleName MarkMichaelis.ScoopBucket scoop { throw 'should not run' }
+            Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-ScoopCommand { throw 'should not run' }
             $r = & $script:Engine -WhatIf
             $r.State  | Should -Be 'Updated'
             $r.Reason | Should -Match 'WhatIf'
-            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -Times 0 -Exactly
+            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-ScoopCommand -Times 0 -Exactly
         }
     }
 
