@@ -77,6 +77,16 @@ Describe 'Import-WindowsTerminalSettings' -Tag 'Light', 'Module' {
         $gitBash[0]['guid'] | Should -Be '{mine}'
     }
 
+    It 'replaces a Claude Tabs theme an earlier install wrote, rather than keeping its accent background (#474)' {
+        Set-TestFile $script:wt '{ "themes": [ { "name": "Claude Tabs", "tab": { "background": "accent" } } ] }'
+
+        Invoke-WtImport -Root $script:root | Out-Null
+
+        $claudeTabs = @((Read-TestJson $script:wt)['themes'] | Where-Object { $_['name'] -eq 'Claude Tabs' })
+        $claudeTabs.Count | Should -Be 1
+        $claudeTabs[0]['tab']['background'] | Should -Be '#3C3C3CFF'
+    }
+
     It 'creates the settings file when Windows Terminal has not written one yet' {
         Invoke-WtImport -Root $script:root | Out-Null
 
