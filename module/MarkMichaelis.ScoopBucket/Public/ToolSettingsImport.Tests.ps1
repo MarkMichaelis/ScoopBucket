@@ -59,6 +59,8 @@ Describe 'Import-WindowsTerminalSettings' -Tag 'Light', 'Module' {
         $s['startOnUserLogin'] | Should -BeTrue
         $s['theme'] | Should -Be 'Claude Tabs'
         @($s['themes'] | ForEach-Object { $_['name'] }) | Should -Be @('Other', 'Claude Tabs')
+        # A selected tab with no folder color is dark gray, not the Windows accent color (#474).
+        ($s['themes'] | Where-Object { $_['name'] -eq 'Claude Tabs' })['tab']['background'] | Should -Be '#3C3C3CFF'
         $s['defaultProfile'] | Should -Be '{abc}'
         $s['keybindings'][0]['keys'] | Should -Be 'ctrl+c'
         @($s['profiles']['list'] | ForEach-Object { $_['name'] }) | Should -Be @('PowerShell', 'Git Bash')
