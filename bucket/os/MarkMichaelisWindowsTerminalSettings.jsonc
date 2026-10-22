@@ -12,11 +12,11 @@
   "themes": [
     {
       // Black tab row so faded (unselected) repo-colored tabs recede; the selected tab
-      // shows its color at full strength, uncolored selected tabs use the accent color,
+      // shows its color at full strength, uncolored selected tabs are dark gray (#474),
       // and only the selected tab shows a close button.
       "name": "Claude Tabs",
       "window": { "applicationTheme": "dark" },
-      "tab": { "background": "accent", "unfocusedBackground": "#00000000", "showCloseButton": "activeOnly" },
+      "tab": { "background": "#3C3C3CFF", "unfocusedBackground": "#00000000", "showCloseButton": "activeOnly" },
       "tabRow": { "background": "#000000FF", "unfocusedBackground": "#1C1C1CFF" }
     }
   ],

@@ -59,6 +59,8 @@ Describe 'Import-WindowsTerminalSettings' -Tag 'Light', 'Module' {
         $s['startOnUserLogin'] | Should -BeTrue
         $s['theme'] | Should -Be 'Claude Tabs'
         @($s['themes'] | ForEach-Object { $_['name'] }) | Should -Be @('Other', 'Claude Tabs')
+        # A selected tab with no folder color is dark gray, not the Windows accent color (#474).
+        ($s['themes'] | Where-Object { $_['name'] -eq 'Claude Tabs' })['tab']['background'] | Should -Be '#3C3C3CFF'
         $s['defaultProfile'] | Should -Be '{abc}'
         $s['keybindings'][0]['keys'] | Should -Be 'ctrl+c'
         @($s['profiles']['list'] | ForEach-Object { $_['name'] }) | Should -Be @('PowerShell', 'Git Bash')
@@ -73,6 +75,16 @@ Describe 'Import-WindowsTerminalSettings' -Tag 'Light', 'Module' {
         $gitBash = @((Read-TestJson $script:wt)['profiles']['list'] | Where-Object { $_['name'] -eq 'Git Bash' })
         $gitBash.Count | Should -Be 1
         $gitBash[0]['guid'] | Should -Be '{mine}'
+    }
+
+    It 'replaces a Claude Tabs theme an earlier install wrote, rather than keeping its accent background (#474)' {
+        Set-TestFile $script:wt '{ "themes": [ { "name": "Claude Tabs", "tab": { "background": "accent" } } ] }'
+
+        Invoke-WtImport -Root $script:root | Out-Null
+
+        $claudeTabs = @((Read-TestJson $script:wt)['themes'] | Where-Object { $_['name'] -eq 'Claude Tabs' })
+        $claudeTabs.Count | Should -Be 1
+        $claudeTabs[0]['tab']['background'] | Should -Be '#3C3C3CFF'
     }
 
     It 'creates the settings file when Windows Terminal has not written one yet' {
