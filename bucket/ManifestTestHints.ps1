@@ -34,7 +34,6 @@
     Aspire                     = @{ Verify = 'Cli'; Cli = 'aspire' }
     Codex                      = @{ Verify = 'Cli'; Cli = 'codex' }
     DbxCli                     = @{ Verify = 'Cli'; Cli = 'dbxcli' }
-    dotnet                     = @{ Verify = 'Cli'; Cli = 'dotnet' }
     PowerShellCore             = @{ Verify = 'Cli'; Cli = 'pwsh' }
     ClaudeCode                 = @{ Verify = 'Cli'; Cli = 'claude' }
     GeminiCli                  = @{ Verify = 'Cli'; Cli = 'gemini' }
