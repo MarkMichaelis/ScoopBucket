@@ -34,7 +34,7 @@ BeforeDiscovery {
         }
 
         $scriptLines = @()
-        foreach ($section in @($json.installer, $json.uninstaller, $json.pre_install, $json.post_install)) {
+        foreach ($section in @($json.installer, $json.uninstaller, $json.pre_install, $json.post_install, $json.pre_uninstall, $json.post_uninstall)) {
             if ($null -eq $section) { continue }
             if ($section -is [string]) { $scriptLines += $section; continue }
             if ($null -ne $section.script) { $scriptLines += @($section.script) }
@@ -53,7 +53,19 @@ Describe 'Single .NET SDK install path (issue #374)' -Tag 'Light' {
     It 'manifest <_.Manifest> does not install dotnet-sdk via Chocolatey' -ForEach $script:ManifestCases {
         # A Chocolatey dotnet-sdk install duplicates the canonical winget
         # package and makes a second, independently updated SDK install.
-        $_.ScriptText | Should -Not -Match 'choco[\s\S]*dotnet-sdk' -Because 'the .NET SDK must come only from the DeveloperBasePackages winget entry, not a choco dotnet-sdk manifest'
+        # One command line: `choco install|upgrade ... dotnet<anything>`, so a
+        # chocolatey path on one line and an unrelated dotnet-sdk on another
+        # do not trip it, and dotnet, dotnet-sdk, dotnet-9.0-sdk are all caught.
+        $_.ScriptText | Should -Not -Match 'choco(\.exe)?\s+(install|upgrade)\b[^\r\n]*\bdotnet' -Because 'the .NET SDK must come only from the DeveloperBasePackages winget entry, not a choco dotnet-sdk manifest'
+    }
+
+    It 'no bundle [Package] installs the .NET SDK through Chocolatey' {
+        $scoopBucketPsd1 = Join-Path $PSScriptRoot '..\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+        if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module MarkMichaelis.ScoopBucket -Force }
+        $chocoDotnet = @(Get-Package -BucketPath $PSScriptRoot) |
+            Where-Object { $_.Installer -eq 'choco' -and $_.Id -match '^dotnet' } |
+            ForEach-Object { "$($_.Bundle)/$($_.Name): choco $($_.Id)" }
+        $chocoDotnet | Should -BeNullOrEmpty -Because 'the .NET SDK must come only from the DeveloperBasePackages winget entry'
     }
 
     Context 'canonical winget bundle entry' {
