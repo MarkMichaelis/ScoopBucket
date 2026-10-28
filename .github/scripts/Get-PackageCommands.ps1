@@ -112,7 +112,7 @@ $NoCliPackages = @(
     'Amazon.Kindle','Bitwarden.Bitwarden','Notion.Notion',
     'Pushbullet.Pushbullet','OpenWhisperSystems.Signal','TechSmith.Snagit.2024',
     'Spotify.Spotify','Doist.Todoist','Zoom.Zoom.EXE','Dropbox.Dropbox',
-    'Google.Chrome','voidtools.Everything','WinDirStat.WinDirStat',
+    'Google.Chrome','Brave.Brave','voidtools.Everything','WinDirStat.WinDirStat',
     'Microsoft.Sysinternals.ProcessExplorer','Microsoft.Sysinternals.Suite',
     'WindowsPostInstallWizard.UniversalSilentSwitchFinder',
     '9NT1R1C2HH7J','9NRQBLR605RG','XPDDXX9QW8N9D7','9NKSQGP7F2NH','XPDNSF6TXN2R6Z',
