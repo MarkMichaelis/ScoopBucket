@@ -8,7 +8,7 @@
 .DESCRIPTION
     Brave installs from winget (README rule 1) as Brave.Brave, published by
     Brave Software Inc, which resolves at --scope machine with the standalone
-    setup exe. It sits beside Google Chrome in the OS base packages.
+    setup exe. It is one of the OS base packages, like Google Chrome.
 #>
 
 BeforeAll {
@@ -27,7 +27,7 @@ Describe 'OSBasePackages: Brave' -Tag 'Light','Bundle' {
         @($script:brave | Where-Object { $_ }).Count | Should -Be 1
     }
 
-    It 'is declared in the OSBasePackages bundle, beside Google Chrome' {
+    It 'is declared in the OSBasePackages bundle' {
         $script:brave.Bundle | Should -Be 'OSBasePackages'
     }
 
