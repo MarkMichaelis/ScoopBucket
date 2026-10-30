@@ -437,6 +437,23 @@ Describe 'v4 block is the same on every machine; the module dir stays local (#48
         }
     }
 
+    It 'stays silent on a host with no LOCALAPPDATA (the profile may be read off Windows)' {
+        $tempProfile = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-nolocal-$([guid]::NewGuid().ToString('N')).ps1"
+        try {
+            Set-Content -LiteralPath $tempProfile -Value (script:Get-EmittedProfileBlock) -Encoding utf8
+            $probe = @"
+Remove-Item Env:LOCALAPPDATA -ErrorAction Ignore
+`$env:PSModulePath = 'X'
+. '$tempProfile'
+"PSModulePath=`$env:PSModulePath"
+"@
+            $result = pwsh -NoProfile -NoLogo -Command $probe 2>&1
+            ($result -join "`n").Trim() | Should -Be 'PSModulePath=X'
+        } finally {
+            Remove-Item -LiteralPath $tempProfile -ErrorAction Ignore
+        }
+    }
+
     It 'removes the module-dir file along with the block on -Remove' {
         $tempProfile = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-remove-state-$([guid]::NewGuid().ToString('N')).ps1"
         try {

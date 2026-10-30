@@ -29,7 +29,7 @@
     or by running this script directly.
 
     NOTE (deliberate tradeoff): this is the EAGER "the bare command must resolve
-    to ours" option. It differs from module/Install-Module.ps1's default lazy v3
+    to ours" option. It differs from module/Install-Module.ps1's default lazy v4
     profile block (which prepends PSModulePath and defers the import). It uses a
     distinct sentinel so the two never collide; run only one of them.
 

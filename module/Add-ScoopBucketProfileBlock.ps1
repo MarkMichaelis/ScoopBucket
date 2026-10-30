@@ -79,8 +79,8 @@ $beginV4Marker
 # keypress and returns real package-name suggestions in the same call.
 # Re-run module/Install-Module.ps1 -SkipProfile to opt out. The module dir
 # is per machine and read from LOCALAPPDATA, because this profile roams.
-`$__msbModuleDirFile = Join-Path `$env:LOCALAPPDATA 'MarkMichaelis.ScoopBucket\module-dir.txt'
-if (Test-Path -LiteralPath `$__msbModuleDirFile -PathType Leaf) {
+`$__msbModuleDirFile = if (`$env:LOCALAPPDATA) { Join-Path `$env:LOCALAPPDATA 'MarkMichaelis.ScoopBucket\module-dir.txt' }
+if (`$__msbModuleDirFile -and (Test-Path -LiteralPath `$__msbModuleDirFile -PathType Leaf)) {
     `$__msbModuleDir = "`$(Get-Content -LiteralPath `$__msbModuleDirFile -TotalCount 1)".Trim()
     if (`$__msbModuleDir -and (Test-Path -LiteralPath `$__msbModuleDir -PathType Container) -and
         (`$env:PSModulePath -split [System.IO.Path]::PathSeparator) -notcontains `$__msbModuleDir) {
