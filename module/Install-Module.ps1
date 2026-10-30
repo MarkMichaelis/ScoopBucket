@@ -2,15 +2,16 @@
 param(
     [switch]$Force,
     # By default the installer also adds a sentinel-bracketed lazy-import
-    # stub block (v3) to $PROFILE.CurrentUserAllHosts so the
+    # stub block (v4) to $PROFILE.CurrentUserAllHosts so the
     # `Install-Package -Name <Tab>` argument completer fires on the
     # first keystroke without paying the ~1 s `Import-Module` cost on
-    # every shell start. The v3 block also prepends this repo's module dir
+    # every shell start. The v4 block also prepends this repo's module dir,
+    # recorded per machine under LOCALAPPDATA (the profile roams, #484),
     # to $env:PSModulePath. Pass -SkipProfile to make registration
     # session-only (no profile / no persistence).
     [switch]$SkipProfile,
 
-    # Reverse a previous install: remove the sentinel-bracketed v1/v2/v3
+    # Reverse a previous install: remove the sentinel-bracketed v1-v4
     # block from $PROFILE.CurrentUserAllHosts AND remove any legacy
     # PSModulePath junction (only if it points back to this repo).
     # After -Uninstall, use the module by `cd`-ing here and running
@@ -34,7 +35,7 @@ param(
     point under the user's -- often OneDrive-synced -- module path, #375).
 
     Unless -SkipProfile is passed, writes (or migrates) an idempotent,
-    sentinel-bracketed lazy-import stub (v3) into
+    sentinel-bracketed lazy-import stub (v4) into
     $PROFILE.CurrentUserAllHosts. The block prepends the module dir to
     $env:PSModulePath and registers a single argument completer for
     Install/Get/Uninstall-Package -Name; the actual Import-Module is
@@ -158,7 +159,7 @@ Write-Host "Test with: Import-Module MarkMichaelis.ScoopBucket -Force; Get-Comma
 # this session but is not persisted to the profile.
 if ($SkipProfile) { return }
 
-# Delegate to Add-ScoopBucketProfileBlock.ps1 so the v3 lazy-import stub
+# Delegate to Add-ScoopBucketProfileBlock.ps1 so the v4 lazy-import stub
 # emission (which also persists the PSModulePath entry) is shared with the
 # test suite (which calls the helper directly with -ProfilePath).
 $helper = Join-Path $PSScriptRoot 'Add-ScoopBucketProfileBlock.ps1'
@@ -171,4 +172,4 @@ $helperArgs = @{
 }
 if ($PSBoundParameters.ContainsKey('WhatIf')) { $helperArgs['WhatIf'] = $WhatIfPreference }
 & $helper @helperArgs
-Write-Verbose "Wrote MarkMichaelis.ScoopBucket lazy-import (v3) block to $($PROFILE.CurrentUserAllHosts)."
+Write-Verbose "Wrote MarkMichaelis.ScoopBucket lazy-import (v4) block to $($PROFILE.CurrentUserAllHosts)."
