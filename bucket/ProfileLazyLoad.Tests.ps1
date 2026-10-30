@@ -37,6 +37,15 @@ BeforeAll {
         throw "Module manifest not found at $script:psd1"
     }
 
+    # The helper records this machine's module dir under LOCALAPPDATA (#484).
+    # Redirect it to a sandbox for the whole file -- child pwsh probes inherit
+    # it -- so running the suite never repoints the host's real profile.
+    $script:savedLocalAppData = $env:LOCALAPPDATA
+    $script:localAppData = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-localappdata-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $script:localAppData | Out-Null
+    $env:LOCALAPPDATA = $script:localAppData
+    $script:moduleDirFile = Join-Path $script:localAppData 'MarkMichaelis.ScoopBucket\module-dir.txt'
+
     # Emit the v2 stub block to a fresh temp profile and return its
     # contents as a string. Calls the helper script directly so the
     # tests don't need to run Install-Module.ps1's junction step.
@@ -51,10 +60,15 @@ BeforeAll {
     }
 }
 
-Describe 'Install-Module.ps1 emits lazy v3 stub block (#243, #375)' -Tag 'Light','Module' {
-    It 'profile block is sentinel-marked v3 (not v1 eager Import-Module)' {
+AfterAll {
+    $env:LOCALAPPDATA = $script:savedLocalAppData
+    Remove-Item -LiteralPath $script:localAppData -Recurse -Force -ErrorAction Ignore
+}
+
+Describe 'Install-Module.ps1 emits lazy v4 stub block (#243, #375, #484)' -Tag 'Light','Module' {
+    It 'profile block is sentinel-marked v4 (not v1 eager Import-Module)' {
         $block = script:Get-EmittedProfileBlock
-        $block | Should -Match '# MarkMichaelis.ScoopBucket:Import:BEGIN v3'
+        $block | Should -Match '# MarkMichaelis.ScoopBucket:Import:BEGIN v4'
         $block | Should -Match '# MarkMichaelis.ScoopBucket:Import:END'
     }
 
@@ -165,7 +179,7 @@ if (-not (Get-Module -Name MarkMichaelis.ScoopBucket)) {
             & $script:helperScript -ProfilePath $tempProfile | Out-Null
             $migrated = Get-Content -Raw -LiteralPath $tempProfile
 
-            $migrated | Should -Match '# MarkMichaelis.ScoopBucket:Import:BEGIN v3'
+            $migrated | Should -Match '# MarkMichaelis.ScoopBucket:Import:BEGIN v4'
             # The v1 BEGIN line had no version suffix; after migration
             # there must be exactly ONE BEGIN marker, the v2 one.
             ([regex]::Matches($migrated, '# MarkMichaelis\.ScoopBucket:Import:BEGIN').Count) | Should -Be 1
@@ -358,6 +372,80 @@ Describe 'Install-Module.ps1 install path creates no junction (#375)' -Tag 'Ligh
         } finally {
             $env:SCOOPBUCKET_USER_MODULE_PATH = $savedEnv
             Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction Ignore
+        }
+    }
+}
+
+Describe 'v4 block is the same on every machine; the module dir stays local (#484)' -Tag 'Light','Module' {
+    # The profile roams through OneDrive between machines whose clones live in
+    # different places. A block that names this machine's module dir points
+    # the other machine at a folder it doesn't have, and every re-install
+    # rewrites it, so OneDrive forks profile-<Machine>.ps1 conflict copies.
+
+    It 'names no machine-specific module dir: two clones in different places emit identical blocks' {
+        $otherClone = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-otherclone-$([guid]::NewGuid().ToString('N'))"
+        $profileA = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-a-$([guid]::NewGuid().ToString('N')).ps1"
+        $profileB = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-b-$([guid]::NewGuid().ToString('N')).ps1"
+        try {
+            New-Item -ItemType Directory -Path $otherClone | Out-Null
+            Copy-Item -LiteralPath $script:helperScript -Destination $otherClone
+            & $script:helperScript -ProfilePath $profileA | Out-Null
+            & (Join-Path $otherClone 'Add-ScoopBucketProfileBlock.ps1') -ProfilePath $profileB | Out-Null
+
+            $blockA = Get-Content -Raw -LiteralPath $profileA
+            $blockB = Get-Content -Raw -LiteralPath $profileB
+            $blockA | Should -Be $blockB
+            $blockA | Should -Not -Match ([regex]::Escape((Join-Path $script:repoRoot 'module')))
+        } finally {
+            Remove-Item -LiteralPath $otherClone -Recurse -Force -ErrorAction Ignore
+            Remove-Item -LiteralPath $profileA, $profileB -ErrorAction Ignore
+        }
+    }
+
+    It 'records this machine''s module dir in a non-roaming LOCALAPPDATA file' {
+        $null = script:Get-EmittedProfileBlock
+        Test-Path -LiteralPath $script:moduleDirFile | Should -BeTrue
+        (Get-Content -LiteralPath $script:moduleDirFile -TotalCount 1).Trim() |
+            Should -Be (Resolve-Path -LiteralPath (Join-Path $script:repoRoot 'module')).Path
+    }
+
+    It 'does not rewrite the module-dir file when it is already current (twice-runnable)' {
+        $null = script:Get-EmittedProfileBlock
+        $before = (Get-Item -LiteralPath $script:moduleDirFile).LastWriteTimeUtc
+        Start-Sleep -Milliseconds 50
+        $null = script:Get-EmittedProfileBlock
+        (Get-Item -LiteralPath $script:moduleDirFile).LastWriteTimeUtc | Should -Be $before
+    }
+
+    It 'is a silent no-op on a machine that has not run the installer yet' {
+        $tempProfile = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-nostate-$([guid]::NewGuid().ToString('N')).ps1"
+        $emptyLocal = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-emptylocal-$([guid]::NewGuid().ToString('N'))"
+        try {
+            New-Item -ItemType Directory -Path $emptyLocal | Out-Null
+            Set-Content -LiteralPath $tempProfile -Value (script:Get-EmittedProfileBlock) -Encoding utf8
+            $probe = @"
+`$env:LOCALAPPDATA = '$($emptyLocal.Replace("'","''"))'
+`$env:PSModulePath = 'X'
+. '$tempProfile'
+"PSModulePath=`$env:PSModulePath"
+"@
+            $result = pwsh -NoProfile -NoLogo -Command $probe 2>&1
+            ($result -join "`n").Trim() | Should -Be 'PSModulePath=X'
+        } finally {
+            Remove-Item -LiteralPath $tempProfile -ErrorAction Ignore
+            Remove-Item -LiteralPath $emptyLocal -Recurse -Force -ErrorAction Ignore
+        }
+    }
+
+    It 'removes the module-dir file along with the block on -Remove' {
+        $tempProfile = Join-Path ([IO.Path]::GetTempPath()) "scoopbucket-remove-state-$([guid]::NewGuid().ToString('N')).ps1"
+        try {
+            & $script:helperScript -ProfilePath $tempProfile | Out-Null
+            Test-Path -LiteralPath $script:moduleDirFile | Should -BeTrue
+            & $script:helperScript -ProfilePath $tempProfile -Remove | Out-Null
+            Test-Path -LiteralPath $script:moduleDirFile | Should -BeFalse
+        } finally {
+            Remove-Item -LiteralPath $tempProfile -ErrorAction Ignore
         }
     }
 }

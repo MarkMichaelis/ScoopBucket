@@ -227,14 +227,17 @@ completer that suggests every package declared in any bundle (prefix
 first, then substring), so you don't need to remember exact spelling.
 For the completer to fire on the *very first* Tab in a fresh
 PowerShell session, `module\Install-Module.ps1` writes an
-idempotent **lazy-import stub (v3)** into `$PROFILE.CurrentUserAllHosts`
+idempotent **lazy-import stub (v4)** into `$PROFILE.CurrentUserAllHosts`
 (pass `-SkipProfile` to make it session-only). The block prepends this
 repo's `module` directory to `$env:PSModulePath` (so the module is
 discoverable -- no junction under your, often OneDrive-synced, user
 module path) and registers an argument completer; the module itself
 loads on the first Tab (or on the first cmdlet call, via PSModulePath
 auto-load), adding <10 ms to profile load and saving ~1 s of cold pwsh
-startup. Re-running `Install-Module.ps1` migrates the legacy v1/v2
+startup. The block names no path: this machine's `module` directory is
+recorded in `%LOCALAPPDATA%\MarkMichaelis.ScoopBucket\module-dir.txt`, so a
+profile that roams through OneDrive works on machines whose clones live in
+different places. Re-running `Install-Module.ps1` migrates a legacy v1-v3
 block in-place. To remove a legacy `MarkMichaelis.ScoopBucket` junction an
 older installer left under your user module path, run it with `-Uninstall`.
 
