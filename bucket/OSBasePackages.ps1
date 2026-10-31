@@ -1,3 +1,7 @@
+#requires -Version 7.0
+# Stops outright under Windows PowerShell. Without it the module import fails,
+# the script runs on, and scoop records the bundle as installed (#504).
+
 #region MarkMichaelis.ScoopBucket bundle module import (scoop-portable; see README)
 $scoopBucketModule = 'MarkMichaelis.ScoopBucket'
 $scoopBucketPsd1 = Join-Path $PSScriptRoot "..\module\$scoopBucketModule\$scoopBucketModule.psd1"

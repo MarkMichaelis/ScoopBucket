@@ -52,6 +52,10 @@ BeforeAll {
         'Install-ChocolateyEngine'
         'Invoke-ChocolateyInstaller'
         'Install-BootstrapGit'
+        'Resolve-EnginePath'
+        'Get-RequiredEnginePath'
+        'Resolve-PowerShellPath'
+        'Install-BootstrapPowerShell'
     )
     foreach ($fn in $script:installFunctions) {
         if ($fn.Name -in $wanted) { . ([scriptblock]::Create($fn.Extent.Text)) }
@@ -413,6 +417,60 @@ Describe 'install.ps1 -- Install-BootstrapGit (issue #498)' -Tag 'Light', 'Meta'
 
     It 'no longer installs git through Chocolatey' {
         (Get-Content -LiteralPath $script:installPath -Raw) | Should -Not -Match 'choco.*install git'
+    }
+}
+
+Describe 'install.ps1 -- PowerShell 7 for bundles (issue #504)' -Tag 'Light', 'Meta' {
+
+    BeforeEach {
+        Mock Update-PathFromRegistry { }
+        function script:Invoke-FakeWinget { $script:wingetArgs = $args -join ' ' }
+        Mock Get-RequiredEnginePath { 'Invoke-FakeWinget' }
+    }
+
+    It 'prefers the MSI build when it exists' {
+        $saved = $env:ProgramFiles
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) ("pwsh504_" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $root 'PowerShell\7') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root 'PowerShell\7\pwsh.exe') -Value 'x' -Encoding ascii
+        Mock Resolve-EnginePath { 'D:\store\pwsh.exe' }
+        try {
+            $env:ProgramFiles = $root
+            Resolve-PowerShellPath | Should -Be (Join-Path $root 'PowerShell\7\pwsh.exe')
+        } finally {
+            $env:ProgramFiles = $saved
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'installs nothing when PowerShell 7 already exists' {
+        Mock Resolve-PowerShellPath { 'D:\p7\pwsh.exe' }
+        Install-BootstrapPowerShell | Should -Be 'D:\p7\pwsh.exe'
+        Should -Invoke Get-RequiredEnginePath -Times 0 -Exactly
+    }
+
+    It 'installs the MSI from the winget default source when missing' {
+        $script:probes = 0
+        Mock Resolve-PowerShellPath { $script:probes++; if ($script:probes -gt 1) { 'D:\p7\pwsh.exe' } }
+        Install-BootstrapPowerShell | Should -Be 'D:\p7\pwsh.exe'
+        $script:wingetArgs | Should -Match '--id Microsoft\.PowerShell --exact --source winget --scope machine'
+    }
+
+    It 'stops with a clear error when PowerShell 7 still does not resolve' {
+        Mock Resolve-PowerShellPath { $null }
+        { Install-BootstrapPowerShell } | Should -Throw '*PowerShell 7*'
+    }
+
+    It 'runs the bundle under PowerShell 7 on both the install and update paths' {
+        $body = Get-Content -LiteralPath $script:installPath -Raw
+        $body | Should -Match '& \$pwshPath [^\r\n]*-File \$scoopPath install -g \$app'
+        $body | Should -Match '& \$pwshPath [^\r\n]*-File \$scoopPath update \$app --global --force'
+        $body | Should -Not -Match '& \$scoopPath (install -g|update) \$app'
+    }
+
+    It 'refuses to run OSBasePackages below PowerShell 7' {
+        (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'OSBasePackages.ps1') -TotalCount 1) |
+            Should -Be '#requires -Version 7.0'
     }
 }
 

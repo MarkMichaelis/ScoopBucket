@@ -527,6 +527,44 @@ function Install-BootstrapGit {
   }
 }
 
+function Resolve-PowerShellPath {
+  <#
+  .SYNOPSIS
+      Path to PowerShell 7, or $null. Prefers the MSI build (#281).
+  #>
+  [OutputType([string])]
+  [CmdletBinding()]
+  param()
+  $msi = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+  if (Test-Path -LiteralPath $msi) { return $msi }
+  Resolve-EnginePath -Name 'pwsh'
+}
+
+function Install-BootstrapPowerShell {
+  <#
+  .SYNOPSIS
+      Ensure PowerShell 7 exists and return its path.
+  .DESCRIPTION
+      The module and its bundles need PowerShell 7, while a new machine starts
+      this script under Windows PowerShell 5.1 and scoop runs an installer
+      script in the host that called it. Winget's default source serves the
+      signed MSI; the msstore source would serve the sealed MSIX (#281).
+  #>
+  [OutputType([string])]
+  [CmdletBinding()]
+  param()
+  $path = Resolve-PowerShellPath
+  if ($path) { return $path }
+  $winget = Get-RequiredEnginePath 'winget'
+  & $winget install --id Microsoft.PowerShell --exact --source winget --scope machine --silent --accept-package-agreements --accept-source-agreements | Write-Host
+  Update-PathFromRegistry
+  $path = Resolve-PowerShellPath
+  if (-not $path) {
+    throw "PowerShell 7 is still not available after 'winget install Microsoft.PowerShell'; bundles cannot run without it. See the winget output above."
+  }
+  $path
+}
+
 function Add-ScoopBucket {
   <#
   .SYNOPSIS
@@ -599,6 +637,8 @@ Install-BootstrapGit -ScoopPath $scoopPath
 Add-ScoopBucket -Name 'MarkMichaelis' -Url 'https://github.com/MarkMichaelis/ScoopBucket' -ScoopPath $scoopPath
 Add-ScoopBucket -Name 'extras' -ScoopPath $scoopPath
 
+$pwshPath = Install-BootstrapPowerShell
+
 <#'McAfeeUninstall',#> 'OSBasePackages' | ForEach-Object {
   $app = $_
   # Check if app is already installed globally. `scoop list` has NO `-g`
@@ -608,9 +648,12 @@ Add-ScoopBucket -Name 'extras' -ScoopPath $scoopPath
 
   if ($installed) {
     Write-Host "'$app' is already installed. Checking for updates..." -ForegroundColor Green
-    & $scoopPath update $app --global
+    # --force: a bundle at the current version is otherwise skipped, which would
+    # strand one that scoop recorded as installed after its script failed (#504).
+    & $pwshPath -NoProfile -ExecutionPolicy Bypass -File $scoopPath update $app --global --force
   } else {
     Write-Host "Installing $app..." -ForegroundColor Cyan
-    & $scoopPath install -g $app
+    & $pwshPath -NoProfile -ExecutionPolicy Bypass -File $scoopPath install -g $app
   }
+  if ($LASTEXITCODE) { throw "scoop failed for '$app' (exit code $LASTEXITCODE). See the output above." }
 }
