@@ -53,4 +53,23 @@ Describe 'AIAgents: Claude Code CLI configuration' -Tag 'Light', 'Bundle' {
             Join-Path $PSScriptRoot "ai\$name" | Should -Exist
         }
     }
+
+    It 'ships the output style with its report numbering rules, which every install re-applies (#496)' {
+        $style = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ai\MarkMichaelisClaudeOutcomesNotCode.md') -Raw
+        $style | Should -Match '## Numbering every listed item'
+        $style | Should -Match '\*\*`N` numbers are stable for the whole session\*\*'
+        $style | Should -Match 'Never use `X\.Y`'
+    }
+
+    It 'installs the committed output style byte-for-byte and leaves it alone on a re-run (#496)' {
+        $claudeHome = Join-Path $TestDrive 'claude'
+        $config = Join-Path $PSScriptRoot 'ai\MarkMichaelisClaudeCodeSettings.jsonc'
+
+        Import-ClaudeCodeSettings -ConfigPath $config -ClaudeHome $claudeHome | Out-Null
+        $rerun = Import-ClaudeCodeSettings -ConfigPath $config -ClaudeHome $claudeHome
+
+        (Get-FileHash (Join-Path $claudeHome 'output-styles\outcomes-not-code.md')).Hash |
+            Should -Be (Get-FileHash (Join-Path $PSScriptRoot 'ai\MarkMichaelisClaudeOutcomesNotCode.md')).Hash
+        $rerun.Changed | Should -BeNullOrEmpty
+    }
 }
