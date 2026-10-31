@@ -27,6 +27,116 @@ if ((Get-ExecutionPolicy) -eq 'Restricted') {
 
 #region Helpers
 
+function Test-IsElevated {
+  <#
+  .SYNOPSIS
+      Is this process elevated? Mirrors the module's Test-IsElevated, which
+      is not available during bootstrap.
+  #>
+  [OutputType([bool])]
+  [CmdletBinding()]
+  param()
+  try {
+    $current = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object System.Security.Principal.WindowsPrincipal($current)
+    return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+  } catch {
+    return $false
+  }
+}
+
+function Get-ElevatedRelaunchHost {
+  <#
+  .SYNOPSIS
+      Pick the PowerShell executable to relaunch in.
+  .DESCRIPTION
+      Pure. Stays in the PowerShell the user is running; any other host
+      (an editor embedding PowerShell) cannot take the relaunch arguments.
+  #>
+  [OutputType([string])]
+  [CmdletBinding()]
+  param(
+    [Parameter()][AllowNull()][AllowEmptyString()][string]$HostPath
+  )
+  if ($HostPath -and [System.IO.Path]::GetFileNameWithoutExtension($HostPath) -in 'pwsh', 'powershell') {
+    return $HostPath
+  }
+  'powershell.exe'
+}
+
+function Get-ElevatedRelaunchArgument {
+  <#
+  .SYNOPSIS
+      Build the command line that re-runs this bootstrap.
+  .DESCRIPTION
+      Pure. A run through `iex (irm ...)` has no file to relaunch, so
+      $ScriptPath is empty and the published one-liner runs again instead.
+      -NoExit keeps the elevated window open so its outcome can be read.
+  #>
+  [OutputType([string])]
+  [CmdletBinding()]
+  param(
+    [Parameter()][AllowNull()][AllowEmptyString()][string]$ScriptPath,
+    [Parameter()][ValidateNotNullOrEmpty()][string]$BootstrapUrl = 'https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/install.ps1'
+  )
+  $common = '-NoExit -NoProfile -ExecutionPolicy Bypass'
+  if ($ScriptPath) { return "$common -File `"$ScriptPath`"" }
+  "$common -Command `"iex (irm $BootstrapUrl)`""
+}
+
+function Confirm-ElevatedRelaunch {
+  <#
+  .SYNOPSIS
+      Ask whether to relaunch elevated.
+  .DESCRIPTION
+      A host that cannot prompt throws; that counts as declined, because
+      nothing may raise an admin prompt the user did not agree to.
+  #>
+  [OutputType([bool])]
+  [CmdletBinding()]
+  param()
+  $choices = [System.Management.Automation.Host.ChoiceDescription[]]@('&Yes', '&No')
+  try {
+    $choice = $Host.UI.PromptForChoice(
+      'Administrator rights required',
+      'This installer needs an elevated shell. Relaunch it in a new window? Windows will show an admin prompt.',
+      $choices, 0)
+  } catch {
+    return $false
+  }
+  $choice -eq 0
+}
+
+function Invoke-ElevationGate {
+  <#
+  .SYNOPSIS
+      Returns $true when this run may continue, $false when an elevated
+      relaunch took over.
+  .DESCRIPTION
+      Everything below the gate needs an elevated shell, so it runs before
+      the first change to the machine. Throws when no elevated run will
+      happen. The caller stops with `return`: `exit` would close the shell
+      that ran `iex`.
+  #>
+  [OutputType([bool])]
+  [CmdletBinding()]
+  param(
+    [Parameter()][AllowNull()][AllowEmptyString()][string]$ScriptPath
+  )
+  if (Test-IsElevated) { return $true }
+  $guidance = 'Nothing was changed. Re-run this installer from an elevated shell.'
+  if (-not (Confirm-ElevatedRelaunch)) { throw $guidance }
+  try {
+    Start-Process -FilePath (Get-ElevatedRelaunchHost -HostPath (Get-Process -Id $PID).Path) `
+      -ArgumentList (Get-ElevatedRelaunchArgument -ScriptPath $ScriptPath) `
+      -Verb RunAs -ErrorAction Stop
+  } catch {
+    throw "$guidance The relaunch failed: $($_.Exception.Message)"
+  }
+  Write-Host 'Continuing in the elevated window.' -ForegroundColor Cyan
+  $false
+}
+
 function Test-EngineInstalled {
   <#
   .SYNOPSIS
@@ -402,6 +512,8 @@ function Add-ScoopBucket {
 }
 
 #endregion Helpers
+
+if (-not (Invoke-ElevationGate -ScriptPath $PSCommandPath)) { return }
 
 # Re-read PATH before probing: a shell opened before an engine landed on Machine
 # PATH carries a stale $env:Path, and a false "engine is missing" here is what
