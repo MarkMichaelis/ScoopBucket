@@ -51,6 +51,7 @@ BeforeAll {
         'Add-MachinePathEntry'
         'Install-ChocolateyEngine'
         'Invoke-ChocolateyInstaller'
+        'Install-BootstrapGit'
     )
     foreach ($fn in $script:installFunctions) {
         if ($fn.Name -in $wanted) { . ([scriptblock]::Create($fn.Extent.Text)) }
@@ -378,6 +379,40 @@ Describe 'install.ps1 -- Install-ChocolateyEngine (issue #492)' -Tag 'Light', 'M
         Install-ChocolateyEngine -Root $script:fakeRoot -State 'Missing'
         Test-Path -LiteralPath $script:fakeRoot | Should -BeFalse
         Should -Invoke Invoke-ChocolateyInstaller -Times 1 -Exactly
+    }
+}
+
+Describe 'install.ps1 -- Install-BootstrapGit (issue #498)' -Tag 'Light', 'Meta' {
+
+    BeforeEach {
+        $script:scoopCalls = [System.Collections.Generic.List[string]]::new()
+        $script:fakeScoop = { $script:scoopCalls.Add($args -join ' ') }
+        Mock Update-PathFromRegistry { }
+    }
+
+    It 'leaves a machine that already has git alone' {
+        Mock Test-EngineInstalled { $true }
+        Install-BootstrapGit -ScoopPath 'scoop.ps1'
+        Should -Invoke Update-PathFromRegistry -Times 0 -Exactly
+    }
+
+    It 'installs main/mingit through scoop when git is missing' {
+        $script:probes = 0
+        Mock Test-EngineInstalled { $script:probes++; $script:probes -gt 1 }
+        Set-Item -Path Function:\Invoke-FakeScoop -Value $script:fakeScoop
+        Install-BootstrapGit -ScoopPath 'Invoke-FakeScoop'
+        $script:scoopCalls | Should -Be @('install -g main/mingit')
+        Should -Invoke Update-PathFromRegistry -Times 1 -Exactly
+    }
+
+    It 'stops with a clear error when git still does not resolve' {
+        Mock Test-EngineInstalled { $false }
+        Set-Item -Path Function:\Invoke-FakeScoop -Value $script:fakeScoop
+        { Install-BootstrapGit -ScoopPath 'Invoke-FakeScoop' } | Should -Throw '*main/mingit*'
+    }
+
+    It 'no longer installs git through Chocolatey' {
+        (Get-Content -LiteralPath $script:installPath -Raw) | Should -Not -Match 'choco.*install git'
     }
 }
 

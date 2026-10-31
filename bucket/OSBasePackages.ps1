@@ -80,6 +80,37 @@ Register-ArgumentCompleter -Native -CommandName 7z -ScriptBlock {
 "@
         }
     }
+    [Package]@{
+        Name              = 'Git'
+        Installer         = 'winget'
+        Id                = 'Git.Git'
+        # install.ps1 needs git before any bucket exists, so it installs this
+        # predecessor; declaring it is what hands the machine over to this
+        # package. Winget also recognizes a Program Files install from any
+        # other source (#498).
+        PreviousInstaller = 'scoop'
+        PreviousId        = 'main/mingit'
+        CliCommands       = @('git')
+        Completion        = 'auto'
+        Notes             = 'Git for Windows, machine scope. git has no PowerShell completion command. GitConfigure.ps1 activates posh-git, which is far richer, so the hand-curated subcommand list below stands aside wherever posh-git is available; registering over it would make the profile order decide which completer wins.'
+        ExpectedCompletions = @{ git = @('status','commit','push') }
+        NativeCommandScript = {
+            @"
+if (-not (`$env:PSModulePath -split ';' | Where-Object { `$_ -and (Test-Path -LiteralPath (Join-Path `$_ 'posh-git')) })) {
+    Register-ArgumentCompleter -Native -CommandName git -ScriptBlock {
+        param(`$wordToComplete, `$commandAst, `$cursorPosition)
+        @(
+            'add','bisect','branch','checkout','cherry-pick','clone','commit','config','diff',
+            'fetch','grep','init','log','merge','mv','pull','push','rebase','remote','reset',
+            'restore','revert','rm','show','stash','status','switch','tag','worktree'
+        ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+        }
+    }
+}
+"@
+        }
+    }
     [Package]@{ Name = 'Everything';                    Installer = 'winget'; Id = 'voidtools.Everything'
                 Companions = @('Everything CLI') }
     [Package]@{
