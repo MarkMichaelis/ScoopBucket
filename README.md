@@ -17,9 +17,12 @@ configurations.
 iex (irm https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/install.ps1)
 ```
 
-`install.ps1` needs an elevated shell. From a normal shell it asks first, then
-relaunches itself in a new window through the Windows admin prompt; answering
-no changes nothing.
+`install.ps1` needs an elevated shell, so open one (Run as administrator) before
+running the command above. From a normal shell it stops without changing
+anything. A saved copy of the script can instead ask, then relaunch itself in a
+new window through the Windows admin prompt. The web command never relaunches,
+because Microsoft Defender blocks an elevated command that downloads and runs a
+script.
 
 It installs Chocolatey, installs Scoop, registers this bucket
 plus `extras`, then installs `OSBasePackages`. Other bundles

@@ -91,21 +91,18 @@ function Get-ElevatedRelaunchStartInfo {
 function Get-ElevatedRelaunchArgument {
   <#
   .SYNOPSIS
-      Build the command line that re-runs this bootstrap.
+      Build the command line that re-runs a saved copy of this bootstrap.
   .DESCRIPTION
-      Pure. A run through `iex (irm ...)` has no file to relaunch, so
-      $ScriptPath is empty and the published one-liner runs again instead.
-      -NoExit keeps the elevated window open so its outcome can be read.
+      Pure. -NoExit keeps the elevated window open so its outcome can be
+      read. A file is required: an elevated command that downloads and runs
+      a script is what Defender blocks as ClickFix (issue #502).
   #>
   [OutputType([string])]
   [CmdletBinding()]
   param(
-    [Parameter()][AllowNull()][AllowEmptyString()][string]$ScriptPath,
-    [Parameter()][ValidateNotNullOrEmpty()][string]$BootstrapUrl = 'https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/install.ps1'
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ScriptPath
   )
-  $common = '-NoExit -NoProfile -ExecutionPolicy Bypass'
-  if ($ScriptPath) { return "$common -File `"$ScriptPath`"" }
-  "$common -Command `"iex (irm $BootstrapUrl)`""
+  "-NoExit -NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`""
 }
 
 function Confirm-ElevatedRelaunch {
@@ -139,8 +136,9 @@ function Invoke-ElevationGate {
   .DESCRIPTION
       Everything below the gate needs an elevated shell, so it runs before
       the first change to the machine. Throws when no elevated run will
-      happen. The caller stops with `return`: `exit` would close the shell
-      that ran `iex`.
+      happen, which includes every `iex (irm ...)` run: it has no file to
+      relaunch (issue #502). The caller stops with `return`: `exit` would
+      close the shell that ran `iex`.
   #>
   [OutputType([bool])]
   [CmdletBinding()]
@@ -148,8 +146,8 @@ function Invoke-ElevationGate {
     [Parameter()][AllowNull()][AllowEmptyString()][string]$ScriptPath
   )
   if (Test-IsElevated) { return $true }
-  $guidance = 'Nothing was changed. Re-run this installer from an elevated shell.'
-  if (-not (Confirm-ElevatedRelaunch)) { throw $guidance }
+  $guidance = 'Nothing was changed. Open an elevated shell (Run as administrator) and run this installer again.'
+  if (-not $ScriptPath -or -not (Confirm-ElevatedRelaunch)) { throw $guidance }
   $start = Get-ElevatedRelaunchStartInfo `
     -ShellPath (Get-ElevatedRelaunchHost -HostPath (Get-Process -Id $PID).Path -Edition $PSVersionTable.PSEdition) `
     -ShellArgument (Get-ElevatedRelaunchArgument -ScriptPath $ScriptPath) `

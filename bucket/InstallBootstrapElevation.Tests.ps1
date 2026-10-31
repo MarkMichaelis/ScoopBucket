@@ -92,16 +92,11 @@ Describe 'install.ps1 -- Get-ElevatedRelaunchArgument' -Tag 'Light', 'Meta' {
             Should -Match '-File "C:\\My Files\\install\.ps1"$'
     }
 
-    It 'relaunches the published one-liner when there is no file (iex)' {
-        # Under `iex (irm ...)` $PSCommandPath is empty.
-        $relaunch = Get-ElevatedRelaunchArgument -ScriptPath ''
-        $relaunch | Should -Match '-Command "iex \(irm https://raw\.githubusercontent\.com/MarkMichaelis/ScoopBucket/main/install\.ps1\)"$'
-        (Get-Content -LiteralPath (Join-Path $script:repoRoot 'README.md') -Raw) |
-            Should -Match ([regex]::Escape('iex (irm https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/install.ps1)'))
+    It 'refuses to build a relaunch without a file' {
+        { Get-ElevatedRelaunchArgument -ScriptPath '' } | Should -Throw
     }
 
     It 'keeps the elevated window open so the outcome can be read' {
-        Get-ElevatedRelaunchArgument -ScriptPath '' | Should -Match '-NoExit'
         Get-ElevatedRelaunchArgument -ScriptPath 'C:\x\install.ps1' | Should -Match '-NoExit'
     }
 
@@ -173,7 +168,7 @@ Describe 'install.ps1 -- Invoke-ElevationGate' -Tag 'Light', 'Meta' {
         $saved = $env:WT_SESSION
         try {
             $env:WT_SESSION = 'session'
-            Invoke-ElevationGate -ScriptPath '' | Should -BeFalse
+            Invoke-ElevationGate -ScriptPath 'C:\x\install.ps1' | Should -BeFalse
         } finally {
             $env:WT_SESSION = $saved
         }
@@ -187,7 +182,7 @@ Describe 'install.ps1 -- Invoke-ElevationGate' -Tag 'Light', 'Meta' {
         $saved = $env:WT_SESSION
         try {
             $env:WT_SESSION = $null
-            Invoke-ElevationGate -ScriptPath '' | Should -BeFalse
+            Invoke-ElevationGate -ScriptPath 'C:\x\install.ps1' | Should -BeFalse
         } finally {
             $env:WT_SESSION = $saved
         }
@@ -199,6 +194,16 @@ Describe 'install.ps1 -- Invoke-ElevationGate' -Tag 'Light', 'Meta' {
         Mock Test-IsElevated { $false }
         Mock Confirm-ElevatedRelaunch { $false }
 
+        { Invoke-ElevationGate -ScriptPath 'C:\x\install.ps1' } | Should -Throw '*elevated*'
+        Should -Invoke Start-Process -Times 0 -Exactly
+    }
+
+    It 'stops a web run with guidance, without asking or relaunching (issue #502)' {
+        # Under `iex (irm ...)` $PSCommandPath is empty. Relaunching that run
+        # means an elevated download, which Defender blocks as ClickFix.
+        Mock Test-IsElevated { $false }
+        Mock Confirm-ElevatedRelaunch { throw 'must not prompt' }
+
         { Invoke-ElevationGate -ScriptPath '' } | Should -Throw '*elevated*'
         Should -Invoke Start-Process -Times 0 -Exactly
     }
@@ -208,7 +213,16 @@ Describe 'install.ps1 -- Invoke-ElevationGate' -Tag 'Light', 'Meta' {
         Mock Confirm-ElevatedRelaunch { $true }
         Mock Start-Process { throw 'The operation was canceled by the user.' }
 
-        { Invoke-ElevationGate -ScriptPath '' } | Should -Throw '*elevated*canceled by the user*'
+        { Invoke-ElevationGate -ScriptPath 'C:\x\install.ps1' } | Should -Throw '*elevated*canceled by the user*'
+    }
+
+    It 'never builds a command that downloads and runs a script' {
+        $strings = $script:installAst.FindAll({
+                param($n)
+                $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+                $n -is [System.Management.Automation.Language.ExpandableStringExpressionAst]
+            }, $true) | ForEach-Object { $_.Extent.Text }
+        ($strings -match '\b(iex|irm)\b') | Should -BeNullOrEmpty
     }
 }
 
