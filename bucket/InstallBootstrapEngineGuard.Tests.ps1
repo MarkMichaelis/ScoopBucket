@@ -53,7 +53,6 @@ BeforeAll {
         'Invoke-ChocolateyInstaller'
         'Install-BootstrapGit'
         'Resolve-EnginePath'
-        'Get-RequiredEnginePath'
         'Resolve-PowerShellPath'
         'Install-BootstrapPowerShell'
     )
@@ -425,7 +424,7 @@ Describe 'install.ps1 -- PowerShell 7 for bundles (issue #504)' -Tag 'Light', 'M
     BeforeEach {
         Mock Update-PathFromRegistry { }
         function script:Invoke-FakeWinget { $script:wingetArgs = $args -join ' ' }
-        Mock Get-RequiredEnginePath { 'Invoke-FakeWinget' }
+        Mock Resolve-EnginePath { 'Invoke-FakeWinget' }
     }
 
     It 'prefers the MSI build when it exists' {
@@ -446,7 +445,7 @@ Describe 'install.ps1 -- PowerShell 7 for bundles (issue #504)' -Tag 'Light', 'M
     It 'installs nothing when PowerShell 7 already exists' {
         Mock Resolve-PowerShellPath { 'D:\p7\pwsh.exe' }
         Install-BootstrapPowerShell | Should -Be 'D:\p7\pwsh.exe'
-        Should -Invoke Get-RequiredEnginePath -Times 0 -Exactly
+        Should -Invoke Resolve-EnginePath -Times 0 -Exactly
     }
 
     It 'installs the MSI from the winget default source when missing' {
@@ -454,6 +453,12 @@ Describe 'install.ps1 -- PowerShell 7 for bundles (issue #504)' -Tag 'Light', 'M
         Mock Resolve-PowerShellPath { $script:probes++; if ($script:probes -gt 1) { 'D:\p7\pwsh.exe' } }
         Install-BootstrapPowerShell | Should -Be 'D:\p7\pwsh.exe'
         $script:wingetArgs | Should -Match '--id Microsoft\.PowerShell --exact --source winget --scope machine'
+    }
+
+    It 'names App Installer when winget is what is missing' {
+        Mock Resolve-PowerShellPath { $null }
+        Mock Resolve-EnginePath { $null }
+        { Install-BootstrapPowerShell } | Should -Throw '*App Installer*'
     }
 
     It 'stops with a clear error when PowerShell 7 still does not resolve' {
@@ -468,8 +473,13 @@ Describe 'install.ps1 -- PowerShell 7 for bundles (issue #504)' -Tag 'Light', 'M
         $body | Should -Not -Match '& \$scoopPath (install -g|update) \$app'
     }
 
-    It 'refuses to run OSBasePackages below PowerShell 7' {
-        (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'OSBasePackages.ps1') -TotalCount 1) |
+    It 'refreshes the buckets and skips the cache before re-applying a bundle' {
+        $body = Get-Content -LiteralPath $script:installPath -Raw
+        $body | Should -Match '(?s)-File \$scoopPath update\r?\n.*-File \$scoopPath update \$app --global --force --no-cache'
+    }
+
+    It 'refuses to run <_> below PowerShell 7' -ForEach @('OSBasePackages', 'DeveloperBasePackages', 'ClientBasePackages', 'AIAgents') {
+        (Get-Content -LiteralPath (Join-Path $PSScriptRoot "$_.ps1") -TotalCount 1) |
             Should -Be '#requires -Version 7.0'
     }
 }

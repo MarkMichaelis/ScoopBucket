@@ -555,7 +555,10 @@ function Install-BootstrapPowerShell {
   param()
   $path = Resolve-PowerShellPath
   if ($path) { return $path }
-  $winget = Get-RequiredEnginePath 'winget'
+  $winget = Resolve-EnginePath -Name 'winget'
+  if (-not $winget) {
+    throw 'PowerShell 7 is missing and winget is not available to install it. Install App Installer from the Microsoft Store, or PowerShell 7 itself, and run this again.'
+  }
   & $winget install --id Microsoft.PowerShell --exact --source winget --scope machine --silent --accept-package-agreements --accept-source-agreements | Write-Host
   Update-PathFromRegistry
   $path = Resolve-PowerShellPath
@@ -648,9 +651,13 @@ $pwshPath = Install-BootstrapPowerShell
 
   if ($installed) {
     Write-Host "'$app' is already installed. Checking for updates..." -ForegroundColor Green
+    # Refresh the buckets first: updating a named app does not, so a local clone
+    # would keep serving the old bundle.
+    & $pwshPath -NoProfile -ExecutionPolicy Bypass -File $scoopPath update
     # --force: a bundle at the current version is otherwise skipped, which would
     # strand one that scoop recorded as installed after its script failed (#504).
-    & $pwshPath -NoProfile -ExecutionPolicy Bypass -File $scoopPath update $app --global --force
+    # --no-cache: the same version would otherwise replay the cached script.
+    & $pwshPath -NoProfile -ExecutionPolicy Bypass -File $scoopPath update $app --global --force --no-cache
   } else {
     Write-Host "Installing $app..." -ForegroundColor Cyan
     & $pwshPath -NoProfile -ExecutionPolicy Bypass -File $scoopPath install -g $app

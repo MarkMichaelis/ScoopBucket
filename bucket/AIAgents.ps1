@@ -1,3 +1,6 @@
+#requires -Version 7.0
+# See OSBasePackages.ps1: stops scoop recording a failed install (#504).
+
 [CmdletBinding()]
 param(
     # When set, prune any MCP server names this bucket has retired
