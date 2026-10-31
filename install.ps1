@@ -84,7 +84,8 @@ function Get-ElevatedRelaunchStartInfo {
     [Parameter(Mandatory)][bool]$InTerminal
   )
   if (-not $InTerminal) { return @{ FilePath = $ShellPath; ArgumentList = $ShellArgument } }
-  @{ FilePath = 'wt.exe'; ArgumentList = "new-tab -- `"$ShellPath`" $ShellArgument" }
+  # wt reads a bare ';' as a separator between its own subcommands.
+  @{ FilePath = 'wt.exe'; ArgumentList = "new-tab -- `"$ShellPath`" $($ShellArgument -replace ';', '\;')" }
 }
 
 function Get-ElevatedRelaunchArgument {
