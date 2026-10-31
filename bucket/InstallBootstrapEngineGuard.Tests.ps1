@@ -50,6 +50,7 @@ BeforeAll {
         'Install-ScoopEngine'
         'Add-MachinePathEntry'
         'Install-ChocolateyEngine'
+        'Invoke-ChocolateyInstaller'
     )
     foreach ($fn in $script:installFunctions) {
         if ($fn.Name -in $wanted) { . ([scriptblock]::Create($fn.Extent.Text)) }
@@ -321,8 +322,9 @@ Describe 'install.ps1 -- Install-ChocolateyEngine (issue #492)' -Tag 'Light', 'M
         New-Item -ItemType Directory -Path $script:fakeRoot -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt') -Value 'x' -Encoding ascii
         $script:savedPath = $env:Path
-        # Any path that reaches the upstream installer goes through this.
-        Mock Invoke-Expression { }
+        Mock Invoke-ChocolateyInstaller { }
+        Mock Update-PathFromRegistry { }
+        Mock Add-MachinePathEntry { }
     }
 
     AfterEach {
@@ -345,20 +347,22 @@ Describe 'install.ps1 -- Install-ChocolateyEngine (issue #492)' -Tag 'Light', 'M
     It 'leaves an Installed root completely alone' {
         Install-ChocolateyEngine -Root $script:fakeRoot -State 'Installed'
         Test-Path -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt') | Should -BeTrue
-        Should -Invoke Invoke-Expression -Times 0 -Exactly
+        Should -Invoke Invoke-ChocolateyInstaller -Times 0 -Exactly
     }
 
     It 'repairs PATH for an Unlinked root without moving or reinstalling' {
-        Install-ChocolateyEngine -Root $script:fakeRoot -State 'Unlinked' -WhatIf -WarningAction SilentlyContinue
+        Install-ChocolateyEngine -Root $script:fakeRoot -State 'Unlinked' -WarningAction SilentlyContinue
         $env:Path -split ';' | Should -Contain (Join-Path $script:fakeRoot 'bin')
+        Should -Invoke Add-MachinePathEntry -Times 1 -Exactly -ParameterFilter { $Entry -eq (Join-Path $script:fakeRoot 'bin') }
         Test-Path -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt') | Should -BeTrue
-        Should -Invoke Invoke-Expression -Times 0 -Exactly
+        Should -Invoke Invoke-ChocolateyInstaller -Times 0 -Exactly
     }
 
     It 'skips the install when the orphaned root was not moved aside' {
-        Install-ChocolateyEngine -Root $script:fakeRoot -State 'Orphaned' -WhatIf -WarningAction SilentlyContinue
+        Mock Move-OrphanedEngineRoot { $false }
+        Install-ChocolateyEngine -Root $script:fakeRoot -State 'Orphaned' -WarningAction SilentlyContinue
         Test-Path -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt') | Should -BeTrue
-        Should -Invoke Invoke-Expression -Times 0 -Exactly
+        Should -Invoke Invoke-ChocolateyInstaller -Times 0 -Exactly
     }
 
     It 'moves an orphaned root aside so the upstream installer can run' {
@@ -366,14 +370,14 @@ Describe 'install.ps1 -- Install-ChocolateyEngine (issue #492)' -Tag 'Light', 'M
         Test-Path -LiteralPath $script:fakeRoot | Should -BeFalse
         @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter "$(Split-Path $script:fakeRoot -Leaf).orphaned-*" -ErrorAction SilentlyContinue).Count |
             Should -Be 1
-        Should -Invoke Invoke-Expression -Times 1 -Exactly
+        Should -Invoke Invoke-ChocolateyInstaller -Times 1 -Exactly
     }
 
     It 'removes an empty root, which the upstream installer also refuses' {
         Remove-Item -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt')
         Install-ChocolateyEngine -Root $script:fakeRoot -State 'Missing'
         Test-Path -LiteralPath $script:fakeRoot | Should -BeFalse
-        Should -Invoke Invoke-Expression -Times 1 -Exactly
+        Should -Invoke Invoke-ChocolateyInstaller -Times 1 -Exactly
     }
 }
 
