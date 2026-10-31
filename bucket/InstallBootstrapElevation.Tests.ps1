@@ -153,6 +153,7 @@ Describe 'install.ps1 -- elevation gate placement' -Tag 'Light', 'Meta' {
     It 'stops with return, because exit would close the shell that ran iex' {
         $gate = $script:bodyStatements | Where-Object { $_.Extent.Text -match 'Invoke-ElevationGate' }
         $gate.Extent.Text | Should -Match '\breturn\b'
+        $gate.Extent.Text | Should -Match '-ScriptPath \$PSCommandPath' -Because 'a saved copy must relaunch itself'
         $gate.Extent.Text | Should -Not -Match '\bexit\b'
         $exits = $script:installAst.FindAll({
                 param($n) $n -is [System.Management.Automation.Language.ExitStatementAst]
