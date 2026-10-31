@@ -24,7 +24,9 @@ BeforeAll {
 
     $wanted = @(
         'Test-IsElevated'
+        'Test-EngineInstalled'
         'Get-ElevatedRelaunchHost'
+        'Get-ElevatedRelaunchStartInfo'
         'Get-ElevatedRelaunchArgument'
         'Confirm-ElevatedRelaunch'
         'Invoke-ElevationGate'
@@ -39,16 +41,41 @@ BeforeAll {
 Describe 'install.ps1 -- Get-ElevatedRelaunchHost' -Tag 'Light', 'Meta' {
 
     It 'relaunches in the PowerShell the user is already running' {
-        Get-ElevatedRelaunchHost -HostPath 'C:\Program Files\PowerShell\7\pwsh.exe' |
+        Get-ElevatedRelaunchHost -HostPath 'C:\Program Files\PowerShell\7\pwsh.exe' -Edition 'Core' |
             Should -Be 'C:\Program Files\PowerShell\7\pwsh.exe'
-        Get-ElevatedRelaunchHost -HostPath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' |
+        Get-ElevatedRelaunchHost -HostPath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -Edition 'Desktop' |
             Should -Be 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
     }
 
-    It 'falls back to Windows PowerShell for a host that cannot take the arguments' {
-        Get-ElevatedRelaunchHost -HostPath 'C:\Program Files\Editor\editor.exe' |
+    It 'launches Store pwsh by name, not by its versioned package path' {
+        Get-ElevatedRelaunchHost -HostPath 'C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.9.0_x64__8wekyb3d8bbwe\pwsh.exe' -Edition 'Core' |
+            Should -Be 'pwsh.exe'
+    }
+
+    It 'never drops PowerShell 7 to Windows PowerShell when the path is unusable' {
+        Get-ElevatedRelaunchHost -HostPath $null -Edition 'Core' | Should -Be 'pwsh.exe'
+        Get-ElevatedRelaunchHost -HostPath 'C:\Program Files\Editor\editor.exe' -Edition 'Core' | Should -Be 'pwsh.exe'
+    }
+
+    It 'falls back to Windows PowerShell for a Windows PowerShell host' {
+        Get-ElevatedRelaunchHost -HostPath 'C:\Program Files\Editor\editor.exe' -Edition 'Desktop' |
             Should -Be 'powershell.exe'
-        Get-ElevatedRelaunchHost -HostPath $null | Should -Be 'powershell.exe'
+        Get-ElevatedRelaunchHost -HostPath $null -Edition 'Desktop' | Should -Be 'powershell.exe'
+    }
+}
+
+Describe 'install.ps1 -- Get-ElevatedRelaunchStartInfo' -Tag 'Light', 'Meta' {
+
+    It 'starts the shell directly outside Windows Terminal' {
+        $start = Get-ElevatedRelaunchStartInfo -ShellPath 'pwsh.exe' -ShellArgument '-NoExit' -InTerminal $false
+        $start.FilePath | Should -Be 'pwsh.exe'
+        $start.ArgumentList | Should -Be '-NoExit'
+    }
+
+    It 'opens the same shell in Windows Terminal, quoting a path with spaces' {
+        $start = Get-ElevatedRelaunchStartInfo -ShellPath 'C:\Program Files\PowerShell\7\pwsh.exe' -ShellArgument '-NoExit' -InTerminal $true
+        $start.FilePath | Should -Be 'wt.exe'
+        $start.ArgumentList | Should -Be 'new-tab -- "C:\Program Files\PowerShell\7\pwsh.exe" -NoExit'
     }
 }
 
@@ -115,6 +142,36 @@ Describe 'install.ps1 -- Invoke-ElevationGate' -Tag 'Light', 'Meta' {
         Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
             $Verb -eq 'RunAs' -and $ArgumentList -match 'install\.ps1'
         }
+    }
+
+    It 'relaunches through Windows Terminal when the run started in it' {
+        Mock Test-IsElevated { $false }
+        Mock Confirm-ElevatedRelaunch { $true }
+        Mock Test-EngineInstalled { $true } -ParameterFilter { $Name -eq 'wt' }
+        $saved = $env:WT_SESSION
+        try {
+            $env:WT_SESSION = 'session'
+            Invoke-ElevationGate -ScriptPath 'C:\x\install.ps1' | Should -BeFalse
+        } finally {
+            $env:WT_SESSION = $saved
+        }
+        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+            $FilePath -eq 'wt.exe' -and $Verb -eq 'RunAs' -and $ArgumentList -match '^new-tab -- '
+        }
+    }
+
+    It 'starts the shell directly when Windows Terminal is not available' {
+        Mock Test-IsElevated { $false }
+        Mock Confirm-ElevatedRelaunch { $true }
+        Mock Test-EngineInstalled { $false } -ParameterFilter { $Name -eq 'wt' }
+        $saved = $env:WT_SESSION
+        try {
+            $env:WT_SESSION = 'session'
+            Invoke-ElevationGate -ScriptPath '' | Should -BeFalse
+        } finally {
+            $env:WT_SESSION = $saved
+        }
+        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter { $FilePath -ne 'wt.exe' }
     }
 
     It 'never relaunches when the user declines, and says what to do' {
