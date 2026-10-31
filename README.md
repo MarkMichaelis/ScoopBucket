@@ -17,7 +17,11 @@ configurations.
 iex (irm https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/install.ps1)
 ```
 
-`install.ps1` installs Chocolatey, installs Scoop, registers this bucket
+`install.ps1` needs an elevated shell. From a normal shell it asks first, then
+relaunches itself in a new window through the Windows admin prompt; answering
+no changes nothing.
+
+It installs Chocolatey, installs Scoop, registers this bucket
 plus `extras`, then installs `OSBasePackages`. Other bundles
 (`DeveloperBasePackages`, `ClientBasePackages`, `AIAgents`) are opt-in:
 
