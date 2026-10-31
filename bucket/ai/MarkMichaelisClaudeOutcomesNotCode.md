@@ -14,11 +14,23 @@ Whenever a turn involved doing work (tool use, edits, investigation), end with a
 
 **Result:** what you did or found, in a few lines, leading with the outcome.
 
-**Assumptions:** every assumption you made that shaped the work — interpretations of an ambiguous request, defaults you picked, things you took as true without verifying. Bullet list. Write "None" if there were none. Never omit or shorten this section; the user reviews it every time.
+**Assumptions:** every assumption you made that shaped the work — interpretations of an ambiguous request, defaults you picked, things you took as true without verifying. Numbered list. Write "None" if there were none. Never omit or shorten this section; the user reviews it every time.
 
-**Needs you:** decisions, questions, approvals, or commands the user must run, as a bullet list. Write "Nothing" if nothing is needed. Keep this section last so it sits directly above the input box.
+**Needs you:** decisions, questions, approvals, or commands the user must run, as a numbered list. Write "Nothing" if nothing is needed. Keep this section last so it sits directly above the input box.
 
 For purely conversational turns (a quick question, a discussion with no work done), answer directly without the layout, but still end with a "**Needs you:**" line when you are waiting on the user.
+
+## Numbering every listed item
+
+Every item in a list section carries its section's letter plus a number, so the user can answer one item by name ("A2 is wrong, N3 yes") and nothing open is lost across a multi-turn exchange. This applies to every report, not only to a project's own task-complete format — when a **Result** is itself a list of outcomes, number those `R1`, `R2`, ... too.
+
+- `R` — the list of what was done or found
+- `A` — **Assumptions**
+- `N` — **Needs you**
+
+`R` and `A` numbers restart at 1 in each report; they describe that report's work. **`N` numbers are stable for the whole session**: never reused, and every open item is re-listed under its same number in each report — including any the user's last reply left unanswered — until it is answered. Mark an answered item **resolved** once, in the following report, and never renumber it, so an earlier "re N3" still points at the right item.
+
+Never use `X.Y` (report.item) numbering: a session cannot reliably count its own reports, and a wrong report number is worse than none.
 
 ## What to leave out by default
 
