@@ -296,6 +296,17 @@ function Add-MachinePathEntry {
   [Environment]::SetEnvironmentVariable('ScoopBucketPathRefresh', $null, 'Machine')
 }
 
+function Invoke-ChocolateyInstaller {
+  <#
+  .SYNOPSIS
+      Download and run Chocolatey's upstream installer.
+  #>
+  [CmdletBinding()]
+  param()
+  [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+  Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+}
+
 function Install-ChocolateyEngine {
   <#
   .SYNOPSIS
@@ -325,8 +336,7 @@ function Install-ChocolateyEngine {
   if (-not $PSCmdlet.ShouldProcess($Root, 'Install Chocolatey')) { return }
   # Missing can still mean an empty root, which the installer also refuses.
   if (Test-Path -LiteralPath $Root) { Remove-Item -LiteralPath $Root -Force -ErrorAction Stop }
-  [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-  Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+  Invoke-ChocolateyInstaller
   Update-PathFromRegistry
 }
 
@@ -400,9 +410,12 @@ Update-PathFromRegistry
 
 #Install Chocolatey
 $chocoRoot = if ($env:ChocolateyInstall) { $env:ChocolateyInstall } else { Join-Path $env:ProgramData 'chocolatey' }
+# A choco that resolves counts as the payload even outside $chocoRoot: it may be
+# installed elsewhere, and leftovers in $chocoRoot are then no reason to move it.
+$chocoFound = Test-EngineInstalled 'choco'
 $chocoState = Get-EngineInstallState `
-  -CommandFound (Test-EngineInstalled 'choco') `
-  -PayloadExists ([bool](Test-Path -LiteralPath (Join-Path $chocoRoot 'bin\choco.exe'))) `
+  -CommandFound $chocoFound `
+  -PayloadExists ($chocoFound -or [bool](Test-Path -LiteralPath (Join-Path $chocoRoot 'bin\choco.exe'))) `
   -RootExists ([bool](Test-Path -LiteralPath $chocoRoot)) `
   -RootIsEmpty (Test-DirectoryEmpty -Path $chocoRoot)
 Install-ChocolateyEngine -Root $chocoRoot -State $chocoState
