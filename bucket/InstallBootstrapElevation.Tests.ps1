@@ -77,6 +77,12 @@ Describe 'install.ps1 -- Get-ElevatedRelaunchStartInfo' -Tag 'Light', 'Meta' {
         $start.FilePath | Should -Be 'wt.exe'
         $start.ArgumentList | Should -Be 'new-tab -- "C:\Program Files\PowerShell\7\pwsh.exe" -NoExit'
     }
+
+    It 'keeps a semicolon in a path from splitting the Windows Terminal command' {
+        # wt reads a bare ';' as a separator between its own subcommands.
+        $start = Get-ElevatedRelaunchStartInfo -ShellPath 'pwsh.exe' -ShellArgument '-File "D:\a;b\install.ps1"' -InTerminal $true
+        $start.ArgumentList | Should -Be 'new-tab -- "pwsh.exe" -File "D:\a\;b\install.ps1"'
+    }
 }
 
 Describe 'install.ps1 -- Get-ElevatedRelaunchArgument' -Tag 'Light', 'Meta' {
@@ -172,6 +178,21 @@ Describe 'install.ps1 -- Invoke-ElevationGate' -Tag 'Light', 'Meta' {
             $env:WT_SESSION = $saved
         }
         Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter { $FilePath -ne 'wt.exe' }
+    }
+
+    It 'starts the shell directly when the run did not start in Windows Terminal' {
+        Mock Test-IsElevated { $false }
+        Mock Confirm-ElevatedRelaunch { $true }
+        Mock Test-EngineInstalled { $true } -ParameterFilter { $Name -eq 'wt' }
+        $saved = $env:WT_SESSION
+        try {
+            $env:WT_SESSION = $null
+            Invoke-ElevationGate -ScriptPath '' | Should -BeFalse
+        } finally {
+            $env:WT_SESSION = $saved
+        }
+        # This suite runs on PowerShell 7, so the running edition must reach the choice.
+        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter { $FilePath -match 'pwsh(\.exe)?$' }
     }
 
     It 'never relaunches when the user declines, and says what to do' {
