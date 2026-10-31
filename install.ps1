@@ -120,25 +120,28 @@ function Resolve-ScoopRoot {
   Join-Path $ProgramDataPath 'scoop'
 }
 
-function Get-ScoopInstallState {
+function Get-EngineInstallState {
   <#
   .SYNOPSIS
-      Classify scoop as Installed, Unlinked, Orphaned, or Missing.
+      Classify an engine as Installed, Unlinked, Orphaned, or Missing.
   .DESCRIPTION
-      Pure: all filesystem/command facts are passed in.
+      Pure: all filesystem/command facts are passed in. PayloadExists is the
+      engine's own install under its root: apps\scoop for scoop,
+      bin\choco.exe for Chocolatey.
 
-      Orphaned is the state seen in the wild -- a populated root (leftover
-      apps\ and shims\) with NO apps\scoop. The upstream installer hard-
-      fails there with Deny-Install "'<dir>' exists and is not empty", so
-      the root must be moved aside before installing.
+      Orphaned is the state seen in the wild -- a populated root (for scoop,
+      leftover apps\ and shims\) with NO payload. Both upstream installers
+      refuse a populated root (scoop hard-fails with Deny-Install "'<dir>'
+      exists and is not empty"; Chocolatey warns and returns), so the root
+      must be moved aside before installing.
 
       Unlinked keeps that destructive path away from a working install:
-      apps\scoop is present but the command does not resolve (a shell whose
+      the payload is present but the command does not resolve (a shell whose
       $env:Path predates the install, a damaged shim). Moving that root
       aside would relocate every global app, persist\ and bucket, so the
-      only safe response is to refresh PATH and report.
+      only safe response is to repair PATH and report.
 
-      The app-dir probe is deliberately apps\scoop rather than the module's
+      The scoop probe is deliberately apps\scoop rather than the module's
       apps\scoop\current: a false negative here costs a moved root, so the
       broader check is the conservative one.
   #>
@@ -146,21 +149,21 @@ function Get-ScoopInstallState {
   [CmdletBinding()]
   param(
     [Parameter(Mandatory)][bool]$CommandFound,
-    [Parameter(Mandatory)][bool]$AppDirExists,
+    [Parameter(Mandatory)][bool]$PayloadExists,
     [Parameter(Mandatory)][bool]$RootExists,
     [Parameter(Mandatory)][bool]$RootIsEmpty
   )
-  if ($AppDirExists) {
+  if ($PayloadExists) {
     return $(if ($CommandFound) { 'Installed' } else { 'Unlinked' })
   }
   if ($RootExists -and -not $RootIsEmpty) { return 'Orphaned' }
   'Missing'
 }
 
-function Get-ScoopRootBackupPath {
+function Get-EngineRootBackupPath {
   <#
   .SYNOPSIS
-      Sibling path an orphaned scoop root is moved to.
+      Sibling path an orphaned engine root is moved to.
   #>
   [OutputType([string])]
   [CmdletBinding()]
@@ -239,29 +242,92 @@ function Test-DirectoryEmpty {
   -not $entries.Count
 }
 
-function Move-OrphanedScoopRoot {
+function Move-OrphanedEngineRoot {
   <#
   .SYNOPSIS
-      Move an orphaned scoop root to a timestamped sibling path.
+      Move an orphaned engine root to a timestamped sibling path.
   .DESCRIPTION
       Returns $true only when the root is actually out of the way, so the
       caller can skip the install rather than run the upstream installer
-      against a still-populated root (Deny-Install).
+      against a still-populated root, which it would refuse.
   #>
   [OutputType([bool])]
   [CmdletBinding(SupportsShouldProcess)]
   param(
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Root
   )
-  $backup = Get-ScoopRootBackupPath -Root $Root -Timestamp (Get-Date -Format 'yyyyMMdd-HHmmss')
-  if (-not $PSCmdlet.ShouldProcess($Root, "Move orphaned scoop root to '$backup'")) { return $false }
-  Write-Warning "'$Root' exists but has no apps\scoop; moving it to '$backup' so the installer can proceed."
+  $backup = Get-EngineRootBackupPath -Root $Root -Timestamp (Get-Date -Format 'yyyyMMdd-HHmmss')
+  if (-not $PSCmdlet.ShouldProcess($Root, "Move orphaned engine root to '$backup'")) { return $false }
+  Write-Warning "'$Root' exists but holds no working install; moving it to '$backup' so the installer can proceed."
   try {
     Move-Item -LiteralPath $Root -Destination $backup -Force -ErrorAction Stop
   } catch {
     throw "Could not move '$Root' aside to '$backup': $($_.Exception.Message). Close anything running out of that directory, re-run elevated, and try again."
   }
   $true
+}
+
+function Add-MachinePathEntry {
+  <#
+  .SYNOPSIS
+      Append a directory to the Machine PATH if it is not there already.
+  .DESCRIPTION
+      Works on the raw registry value: [Environment]::GetEnvironmentVariable
+      expands %SystemRoot%-style entries, and writing that back would bake
+      them into PATH. The temporary variable exists only to broadcast the
+      change to new shells, which a direct registry write does not do.
+  #>
+  [CmdletBinding(SupportsShouldProcess)]
+  param(
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Entry
+  )
+  if (-not $PSCmdlet.ShouldProcess('Machine PATH', "Add '$Entry'")) { return }
+  $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey(
+    'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', $true)
+  try {
+    $current = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $updated = Merge-PathValue -MachinePath $current -UserPath $Entry
+    if ($updated -eq $current.Trim(';')) { return }
+    $key.SetValue('Path', $updated, [Microsoft.Win32.RegistryValueKind]::ExpandString)
+  } finally {
+    $key.Close()
+  }
+  [Environment]::SetEnvironmentVariable('ScoopBucketPathRefresh', '1', 'Machine')
+  [Environment]::SetEnvironmentVariable('ScoopBucketPathRefresh', $null, 'Machine')
+}
+
+function Install-ChocolateyEngine {
+  <#
+  .SYNOPSIS
+      Install Chocolatey into $Root, clearing the way for its installer.
+  .DESCRIPTION
+      The upstream installer refuses whenever $Root exists, even empty, and
+      refuses by returning rather than throwing -- so a stale root must be
+      gone before it runs, and the caller must verify choco afterwards.
+  #>
+  [CmdletBinding(SupportsShouldProcess)]
+  param(
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Root,
+    [Parameter(Mandatory)][ValidateSet('Installed', 'Unlinked', 'Orphaned', 'Missing')][string]$State
+  )
+  if ($State -eq 'Installed') { return }
+  if ($State -eq 'Unlinked') {
+    # bin\choco.exe is present: Chocolatey IS installed, only off PATH. Never
+    # move or reinstall -- that would strand every package under lib\.
+    $bin = Join-Path $Root 'bin'
+    Write-Warning "Chocolatey is installed at '$Root' but '$bin' is not on PATH; adding it instead of reinstalling."
+    Add-MachinePathEntry -Entry $bin
+    $env:Path = Merge-PathValue -MachinePath $env:Path -UserPath $bin
+    return
+  }
+  # A root that was not moved aside must not be handed to the installer.
+  if ($State -eq 'Orphaned' -and -not (Move-OrphanedEngineRoot -Root $Root)) { return }
+  if (-not $PSCmdlet.ShouldProcess($Root, 'Install Chocolatey')) { return }
+  # Missing can still mean an empty root, which the installer also refuses.
+  if (Test-Path -LiteralPath $Root) { Remove-Item -LiteralPath $Root -Force -ErrorAction Stop }
+  [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+  Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+  Update-PathFromRegistry
 }
 
 function Install-ScoopEngine {
@@ -284,7 +350,7 @@ function Install-ScoopEngine {
     return
   }
   # A root that was not moved aside must not be handed to the installer.
-  if ($State -eq 'Orphaned' -and -not (Move-OrphanedScoopRoot -Root $Root)) { return }
+  if ($State -eq 'Orphaned' -and -not (Move-OrphanedEngineRoot -Root $Root)) { return }
   if (-not $PSCmdlet.ShouldProcess($Root, 'Install scoop')) { return }
   $env:SCOOP = $Root
   [Environment]::SetEnvironmentVariable('SCOOP', $env:SCOOP, 'Machine')
@@ -327,22 +393,31 @@ function Add-ScoopBucket {
 
 #endregion Helpers
 
+# Re-read PATH before probing: a shell opened before an engine landed on Machine
+# PATH carries a stale $env:Path, and a false "engine is missing" here is what
+# would misclassify a working install.
+Update-PathFromRegistry
+
 #Install Chocolatey
+$chocoRoot = if ($env:ChocolateyInstall) { $env:ChocolateyInstall } else { Join-Path $env:ProgramData 'chocolatey' }
+$chocoState = Get-EngineInstallState `
+  -CommandFound (Test-EngineInstalled 'choco') `
+  -PayloadExists ([bool](Test-Path -LiteralPath (Join-Path $chocoRoot 'bin\choco.exe'))) `
+  -RootExists ([bool](Test-Path -LiteralPath $chocoRoot)) `
+  -RootIsEmpty (Test-DirectoryEmpty -Path $chocoRoot)
+Install-ChocolateyEngine -Root $chocoRoot -State $chocoState
+
+# The upstream installer reports a refusal by returning, so probe for the result
+# here rather than letting the failure surface at the first use of choco.
 if (-not (Test-EngineInstalled 'choco')) {
-  [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-  Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
-  Update-PathFromRegistry
+  throw "Chocolatey is still not available after installing to '$chocoRoot' (it was '$chocoState'). See the installer output above."
 }
 
 #Install Scoop
-# Re-read PATH before probing: a shell opened before scoop landed on Machine
-# PATH carries a stale $env:Path, and a false "scoop is missing" here is what
-# would misclassify a working install.
-Update-PathFromRegistry
 $scoopRoot = Resolve-ScoopRoot -ScoopEnvValue $env:SCOOP -ProgramDataPath $env:ProgramData
-$scoopState = Get-ScoopInstallState `
+$scoopState = Get-EngineInstallState `
   -CommandFound (Test-EngineInstalled 'scoop') `
-  -AppDirExists ([bool](Test-Path -LiteralPath (Join-Path $scoopRoot 'apps\scoop'))) `
+  -PayloadExists ([bool](Test-Path -LiteralPath (Join-Path $scoopRoot 'apps\scoop'))) `
   -RootExists ([bool](Test-Path -LiteralPath $scoopRoot)) `
   -RootIsEmpty (Test-DirectoryEmpty -Path $scoopRoot)
 Install-ScoopEngine -Root $scoopRoot -State $scoopState
