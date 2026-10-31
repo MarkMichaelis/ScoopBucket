@@ -478,6 +478,31 @@ function Install-ScoopEngine {
   Update-PathFromRegistry
 }
 
+function Install-BootstrapGit {
+  <#
+  .SYNOPSIS
+      Put a temporary git on the machine if there is none.
+  .DESCRIPTION
+      `scoop bucket add` needs git, and the bundle that declares the real Git
+      package lives in a bucket. main/mingit breaks that cycle: unlike main/git
+      it unpacks without scoop's 7zip, whose `7z` would collide with the winget
+      7-Zip package. The Git package names main/mingit as its predecessor, so
+      installing OSBasePackages replaces this copy.
+  .PARAMETER ScoopPath
+      Path to the real scoop executable/script, from Get-RequiredEnginePath.
+  #>
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ScoopPath
+  )
+  if (Test-EngineInstalled 'git') { return }
+  & $ScoopPath install -g main/mingit
+  Update-PathFromRegistry
+  if (-not (Test-EngineInstalled 'git')) {
+    throw "git is still not available after 'scoop install -g main/mingit'; buckets cannot be added. See the scoop output above."
+  }
+}
+
 function Add-ScoopBucket {
   <#
   .SYNOPSIS
@@ -493,13 +518,6 @@ function Add-ScoopBucket {
     [Parameter()][string]$Url,
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ScoopPath
   )
-
-  # Git is required when adding an additional scoop bucket.
-  if (-not (Test-EngineInstalled 'git')) {
-    & (Get-RequiredEnginePath 'choco') install git -y --params '/GitOnlyOnPath /NoAutoCrlf /NoShellHereIntegration'
-    Update-PathFromRegistry
-    $env:Path = "$env:Path;$env:ProgramFiles\Git\cmd\"
-  }
 
   if ((& $ScoopPath bucket list).Name -notcontains $Name) {
     $bucketArgs = @('bucket', 'add', $Name)
@@ -550,6 +568,9 @@ Install-ScoopEngine -Root $scoopRoot -State $scoopState
 # Resolve the real scoop once and invoke it by path from here on: the bare
 # name would enter the module's `scoop` wrapper function.
 $scoopPath = Get-RequiredEnginePath 'scoop'
+
+# Git is required when adding an additional scoop bucket.
+Install-BootstrapGit -ScoopPath $scoopPath
 
 Add-ScoopBucket -Name 'MarkMichaelis' -Url 'https://github.com/MarkMichaelis/ScoopBucket' -ScoopPath $scoopPath
 Add-ScoopBucket -Name 'extras' -ScoopPath $scoopPath
