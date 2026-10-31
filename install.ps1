@@ -50,18 +50,41 @@ function Get-ElevatedRelaunchHost {
   .SYNOPSIS
       Pick the PowerShell executable to relaunch in.
   .DESCRIPTION
-      Pure. Stays in the PowerShell the user is running; any other host
-      (an editor embedding PowerShell) cannot take the relaunch arguments.
+      Pure. Stays in the PowerShell the user is running. Store pwsh reports
+      a versioned path under Program Files\WindowsApps that is not a
+      dependable launch target, and a host that is not PowerShell cannot
+      take the relaunch arguments, so both go by the edition's name instead.
   #>
   [OutputType([string])]
   [CmdletBinding()]
   param(
-    [Parameter()][AllowNull()][AllowEmptyString()][string]$HostPath
+    [Parameter()][AllowNull()][AllowEmptyString()][string]$HostPath,
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Edition
   )
-  if ($HostPath -and [System.IO.Path]::GetFileNameWithoutExtension($HostPath) -in 'pwsh', 'powershell') {
+  if ($HostPath -and $HostPath -notmatch '\\WindowsApps\\' -and
+    [System.IO.Path]::GetFileNameWithoutExtension($HostPath) -in 'pwsh', 'powershell') {
     return $HostPath
   }
+  if ($Edition -eq 'Core') { return 'pwsh.exe' }
   'powershell.exe'
+}
+
+function Get-ElevatedRelaunchStartInfo {
+  <#
+  .SYNOPSIS
+      Build the Start-Process splat for the relaunch.
+  .DESCRIPTION
+      Pure. A run inside Windows Terminal comes back in Windows Terminal.
+  #>
+  [OutputType([hashtable])]
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ShellPath,
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ShellArgument,
+    [Parameter(Mandatory)][bool]$InTerminal
+  )
+  if (-not $InTerminal) { return @{ FilePath = $ShellPath; ArgumentList = $ShellArgument } }
+  @{ FilePath = 'wt.exe'; ArgumentList = "new-tab -- `"$ShellPath`" $ShellArgument" }
 }
 
 function Get-ElevatedRelaunchArgument {
@@ -126,14 +149,16 @@ function Invoke-ElevationGate {
   if (Test-IsElevated) { return $true }
   $guidance = 'Nothing was changed. Re-run this installer from an elevated shell.'
   if (-not (Confirm-ElevatedRelaunch)) { throw $guidance }
+  $start = Get-ElevatedRelaunchStartInfo `
+    -ShellPath (Get-ElevatedRelaunchHost -HostPath (Get-Process -Id $PID).Path -Edition $PSVersionTable.PSEdition) `
+    -ShellArgument (Get-ElevatedRelaunchArgument -ScriptPath $ScriptPath) `
+    -InTerminal ([bool]$env:WT_SESSION -and (Test-EngineInstalled 'wt'))
   try {
-    Start-Process -FilePath (Get-ElevatedRelaunchHost -HostPath (Get-Process -Id $PID).Path) `
-      -ArgumentList (Get-ElevatedRelaunchArgument -ScriptPath $ScriptPath) `
-      -Verb RunAs -ErrorAction Stop
+    Start-Process @start -Verb RunAs -ErrorAction Stop
   } catch {
     throw "$guidance The relaunch failed: $($_.Exception.Message)"
   }
-  Write-Host 'Continuing in the elevated window.' -ForegroundColor Cyan
+  Write-Host "Continuing elevated in a new window: $($start.FilePath) $($start.ArgumentList)" -ForegroundColor Cyan
   $false
 }
 
