@@ -41,13 +41,15 @@ BeforeAll {
         'Test-EngineInstalled'
         'Select-EngineCommandPath'
         'Resolve-ScoopRoot'
-        'Get-ScoopInstallState'
-        'Get-ScoopRootBackupPath'
+        'Get-EngineInstallState'
+        'Get-EngineRootBackupPath'
         'Merge-PathValue'
         'Test-DirectoryEmpty'
         'Update-PathFromRegistry'
-        'Move-OrphanedScoopRoot'
+        'Move-OrphanedEngineRoot'
         'Install-ScoopEngine'
+        'Add-MachinePathEntry'
+        'Install-ChocolateyEngine'
     )
     foreach ($fn in $script:installFunctions) {
         if ($fn.Name -in $wanted) { . ([scriptblock]::Create($fn.Extent.Text)) }
@@ -150,10 +152,10 @@ Describe 'install.ps1 -- Resolve-ScoopRoot' -Tag 'Light', 'Meta' {
     }
 }
 
-Describe 'install.ps1 -- Get-ScoopInstallState' -Tag 'Light', 'Meta' {
+Describe 'install.ps1 -- Get-EngineInstallState' -Tag 'Light', 'Meta' {
 
     It 'reports Installed only when the engine resolves AND apps\scoop exists' {
-        Get-ScoopInstallState -CommandFound $true -AppDirExists $true -RootExists $true -RootIsEmpty $false |
+        Get-EngineInstallState -CommandFound $true -PayloadExists $true -RootExists $true -RootIsEmpty $false |
             Should -Be 'Installed'
     }
 
@@ -161,12 +163,12 @@ Describe 'install.ps1 -- Get-ScoopInstallState' -Tag 'Light', 'Meta' {
         # The state seen in the wild: leftover apps\ + shims\, no apps\scoop.
         # The upstream installer hard-fails here with Deny-Install
         # "exists and is not empty", so the bootstrap must move it aside.
-        Get-ScoopInstallState -CommandFound $false -AppDirExists $false -RootExists $true -RootIsEmpty $false |
+        Get-EngineInstallState -CommandFound $false -PayloadExists $false -RootExists $true -RootIsEmpty $false |
             Should -Be 'Orphaned'
     }
 
     It 'reports Orphaned when a stale shim resolves but the app dir is gone' {
-        Get-ScoopInstallState -CommandFound $true -AppDirExists $false -RootExists $true -RootIsEmpty $false |
+        Get-EngineInstallState -CommandFound $true -PayloadExists $false -RootExists $true -RootIsEmpty $false |
             Should -Be 'Orphaned'
     }
 
@@ -176,27 +178,27 @@ Describe 'install.ps1 -- Get-ScoopInstallState' -Tag 'Light', 'Meta' {
         # install. Classifying that as Orphaned would move a working scoop
         # root -- global apps, persist\, buckets and all -- aside and
         # reinstall from scratch. Never do that.
-        Get-ScoopInstallState -CommandFound $false -AppDirExists $true -RootExists $true -RootIsEmpty $false |
+        Get-EngineInstallState -CommandFound $false -PayloadExists $true -RootExists $true -RootIsEmpty $false |
             Should -Be 'Unlinked'
     }
 
     It 'reports Missing when the root is absent or empty' {
-        Get-ScoopInstallState -CommandFound $false -AppDirExists $false -RootExists $false -RootIsEmpty $true |
+        Get-EngineInstallState -CommandFound $false -PayloadExists $false -RootExists $false -RootIsEmpty $true |
             Should -Be 'Missing'
-        Get-ScoopInstallState -CommandFound $false -AppDirExists $false -RootExists $true -RootIsEmpty $true |
+        Get-EngineInstallState -CommandFound $false -PayloadExists $false -RootExists $true -RootIsEmpty $true |
             Should -Be 'Missing'
     }
 }
 
-Describe 'install.ps1 -- Get-ScoopRootBackupPath' -Tag 'Light', 'Meta' {
+Describe 'install.ps1 -- Get-EngineRootBackupPath' -Tag 'Light', 'Meta' {
 
     It 'derives a sibling backup path stamped with the supplied timestamp' {
-        Get-ScoopRootBackupPath -Root 'C:\ProgramData\scoop' -Timestamp '20260101-120000' |
+        Get-EngineRootBackupPath -Root 'C:\ProgramData\scoop' -Timestamp '20260101-120000' |
             Should -Be 'C:\ProgramData\scoop.orphaned-20260101-120000'
     }
 
     It 'ignores a trailing separator on the root' {
-        Get-ScoopRootBackupPath -Root 'C:\ProgramData\scoop\' -Timestamp '20260101-120000' |
+        Get-EngineRootBackupPath -Root 'C:\ProgramData\scoop\' -Timestamp '20260101-120000' |
             Should -Be 'C:\ProgramData\scoop.orphaned-20260101-120000'
     }
 }
@@ -300,15 +302,78 @@ Describe 'install.ps1 -- Install-ScoopEngine' -Tag 'Light', 'Meta' {
     It 'skips the install when the orphaned root was not moved aside' {
         # Declining (or -WhatIf-ing) the move must not fall through into the
         # installer, which would hit Deny-Install on the populated root.
-        Move-OrphanedScoopRoot -Root $script:fakeRoot -WhatIf | Should -BeFalse
+        Move-OrphanedEngineRoot -Root $script:fakeRoot -WhatIf | Should -BeFalse
         Test-Path -LiteralPath $script:fakeRoot | Should -BeTrue
     }
 
     It 'moves an orphaned root to the timestamped sibling path' {
-        Move-OrphanedScoopRoot -Root $script:fakeRoot -WarningAction SilentlyContinue | Should -BeTrue
+        Move-OrphanedEngineRoot -Root $script:fakeRoot -WarningAction SilentlyContinue | Should -BeTrue
         Test-Path -LiteralPath $script:fakeRoot | Should -BeFalse
         @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter "$(Split-Path $script:fakeRoot -Leaf).orphaned-*" -ErrorAction SilentlyContinue).Count |
             Should -Be 1
+    }
+}
+
+Describe 'install.ps1 -- Install-ChocolateyEngine (issue #492)' -Tag 'Light', 'Meta' {
+
+    BeforeEach {
+        $script:fakeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chocoroot492_" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:fakeRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt') -Value 'x' -Encoding ascii
+        $script:savedPath = $env:Path
+        # Any path that reaches the upstream installer goes through this.
+        Mock Invoke-Expression { }
+    }
+
+    AfterEach {
+        $env:Path = $script:savedPath
+        Remove-Item -LiteralPath $script:fakeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'chocoroot492_*' -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'classifies a root with no choco.exe as Orphaned, not Installed' {
+        Get-EngineInstallState -CommandFound $false -PayloadExists $false -RootExists $true -RootIsEmpty $false |
+            Should -Be 'Orphaned'
+    }
+
+    It 'classifies choco.exe off PATH as Unlinked' {
+        Get-EngineInstallState -CommandFound $false -PayloadExists $true -RootExists $true -RootIsEmpty $false |
+            Should -Be 'Unlinked'
+    }
+
+    It 'leaves an Installed root completely alone' {
+        Install-ChocolateyEngine -Root $script:fakeRoot -State 'Installed'
+        Test-Path -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt') | Should -BeTrue
+        Should -Invoke Invoke-Expression -Times 0 -Exactly
+    }
+
+    It 'repairs PATH for an Unlinked root without moving or reinstalling' {
+        Install-ChocolateyEngine -Root $script:fakeRoot -State 'Unlinked' -WhatIf -WarningAction SilentlyContinue
+        $env:Path -split ';' | Should -Contain (Join-Path $script:fakeRoot 'bin')
+        Test-Path -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt') | Should -BeTrue
+        Should -Invoke Invoke-Expression -Times 0 -Exactly
+    }
+
+    It 'skips the install when the orphaned root was not moved aside' {
+        Install-ChocolateyEngine -Root $script:fakeRoot -State 'Orphaned' -WhatIf -WarningAction SilentlyContinue
+        Test-Path -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt') | Should -BeTrue
+        Should -Invoke Invoke-Expression -Times 0 -Exactly
+    }
+
+    It 'moves an orphaned root aside so the upstream installer can run' {
+        Install-ChocolateyEngine -Root $script:fakeRoot -State 'Orphaned' -WarningAction SilentlyContinue
+        Test-Path -LiteralPath $script:fakeRoot | Should -BeFalse
+        @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter "$(Split-Path $script:fakeRoot -Leaf).orphaned-*" -ErrorAction SilentlyContinue).Count |
+            Should -Be 1
+        Should -Invoke Invoke-Expression -Times 1 -Exactly
+    }
+
+    It 'removes an empty root, which the upstream installer also refuses' {
+        Remove-Item -LiteralPath (Join-Path $script:fakeRoot 'keepme.txt')
+        Install-ChocolateyEngine -Root $script:fakeRoot -State 'Missing'
+        Test-Path -LiteralPath $script:fakeRoot | Should -BeFalse
+        Should -Invoke Invoke-Expression -Times 1 -Exactly
     }
 }
 
