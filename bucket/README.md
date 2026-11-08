@@ -27,7 +27,7 @@ bucket/
 | OS | `os/` | `OSBasePackages` | OS configuration tweaks (power, hibernate, OneDrive, McAfee removal, key remap) |
 | Client | `client/` | `ClientBasePackages` | End-user apps (Office, Dropbox CLI, Lightroom, Overdrive, SmugMug, Total Commander, Epubor) |
 | Developer | `developer/` | `DeveloperBasePackages` | Dev tools, PowerShell editions, WSL, git config, Visual Studio, .NET |
-| AI | `ai/` | `AIAgents` | AI assistant apps and CLIs (Claude, ChatGPT, Gemini, Copilot, Codex) |
+| AI | `ai/` | `AIAgents` | AI assistant apps and CLIs (Claude, ChatGPT, Gemini, Copilot, Codex, Grok) |
 | Admin | `admin/` | _(none)_ | Bucket-bootstrap manifests + the `Invoke-GitDiffCode` helper. Infrastructure, not installed by any bundle. |
 
 `AIAgents` is nested under `ClientBasePackages`.
