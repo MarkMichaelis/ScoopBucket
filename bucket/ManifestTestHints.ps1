@@ -69,8 +69,8 @@
 
     # --- Manual / heavyweight installs -------------------------------------
     ChatGPT                    = @{ Verify = 'Custom'; Manual = $true
-                                    Script = { Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\ChatGPT\ChatGPT.exe') }
-                                    Reason = "ChatGPT.ps1 uses a browser-watch pattern: it opens the official download page and waits for the user to click 'Download for Windows'. Cannot run unattended in CI." }
+                                    Script = { [bool](Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue) }
+                                    Reason = "ChatGPT.ps1 installs Microsoft Store product 9PLM9XGG6VKS (Appx package OpenAI.Codex) through winget's msstore source, which hosted Windows Server runners cannot reach. Not ChatGPT Classic's OpenAI.ChatGPT-Desktop (#511)." }
     Gemini                     = @{ Verify = 'Custom'
                                     Script = { Test-Path (Join-Path $env:LOCALAPPDATA 'Google\Google\latest\google.exe') }
                                     Reason = "Gemini.ps1 performs a fully automated install via direct download from dl.google.com (~11 MB Omaha installer); falls back to the legacy browser-watch pattern only if that direct fetch fails." }
