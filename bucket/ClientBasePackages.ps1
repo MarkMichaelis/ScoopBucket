@@ -165,7 +165,9 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
         Notes       = 'PowerShell module mounting Dropbox as the Dbx: drive (github.com/MarkMichaelis/DbxProvider). Not on winget, scoop or the PowerShell Gallery: installed from its GitHub release zip into the CurrentUser module path. ConfigScript writes a lazy Dbx: function to $PROFILE.CurrentUserAllHosts that connects on first use with the refresh token saved by a one-time manual `Connect-Dropbox -DriveName Dbx`; that sign-in opens a browser, so it is never run here (#509). Per-user: the module path and profile belong to the account running the install, so under SYSTEM both hooks skip with a warning.'
         UpdateMode  = 'Reinstall'  # rerun the install; it downloads only when a newer release exists.
         CustomInstallScript = { Install-DbxProviderModule }
-        VerifyScript        = { [bool](Get-Module -ListAvailable -Name DbxProvider) }
+        # Under SYSTEM the install deliberately skips (per-user module), so
+        # report present rather than failing the package.
+        VerifyScript        = { [Security.Principal.WindowsIdentity]::GetCurrent().IsSystem -or [bool](Get-Module -ListAvailable -Name DbxProvider) }
         ConfigScript        = { Set-DbxDriveProfile }
     }
     [Package]@{ Name = 'PowerToys';        Installer = 'winget'; Id = 'Microsoft.PowerToys'

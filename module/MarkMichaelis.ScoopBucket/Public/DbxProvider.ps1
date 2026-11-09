@@ -91,7 +91,12 @@ function Install-DbxProviderModule {
     $version = $tag -replace '^v', ''
     $parsed = $null
     if (-not [version]::TryParse($version, [ref]$parsed)) {
-        throw "DbxProvider release tag '$tag' is not a version (expected v<major>.<minor>.<patch>)."
+        $message = "DbxProvider release tag '$tag' is not a version (expected v<major>.<minor>.<patch>)."
+        if ($installed) {
+            Write-Warning "$message Keeping installed version $($installed.Name -join ', ')."
+            return
+        }
+        throw $message
     }
     $target = Join-Path $moduleDir $version
 

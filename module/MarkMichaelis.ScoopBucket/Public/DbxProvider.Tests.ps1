@@ -112,6 +112,16 @@ Describe 'Install-DbxProviderModule' -Tag 'Light' {
         Join-Path $script:modulesRoot 'DbxProvider\release-3' | Should -Not -Exist
     }
 
+    It 'keeps the installed version and only warns when the latest tag is not a version' {
+        $existing = Join-Path $script:modulesRoot 'DbxProvider\1.2.3'
+        New-Item -ItemType Directory -Path $existing -Force | Out-Null
+        Set-Content -Path (Join-Path $existing 'DbxProvider.psd1') -Value "@{ ModuleVersion = '1.2.3' }"
+        $release = [pscustomobject]@{ tag_name = 'release-3'; assets = @() }
+
+        { Install-DbxProviderModule -ModulesRoot $script:modulesRoot -Release $release -WarningAction SilentlyContinue } |
+            Should -Not -Throw
+    }
+
     It 'leaves no partial version folder when the zip holds no manifest' {
         Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-WebRequest {
             $src = Join-Path $TestDrive ([guid]::NewGuid())
