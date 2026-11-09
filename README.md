@@ -678,7 +678,7 @@ Behavior:
 Completions are declarative and the framework re-applies them across
 install and update. **Configuration** -- idempotent machine state a
 package owns, such as the AIAgents MCP-server wiring (`mcpServers` JSON /
-Codex TOML entries, the persisted GitHub PAT, the profile self-heal
+Codex and Grok TOML entries, the persisted GitHub PAT, the profile self-heal
 block) -- gets the same treatment via the `[Package].ConfigScript` hook.
 
 The **Windows Terminal** and **Claude Code CLI** entries use the same hook
