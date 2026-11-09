@@ -115,7 +115,7 @@ $NoCliPackages = @(
     'Google.Chrome','Brave.Brave','voidtools.Everything','WinDirStat.WinDirStat',
     'Microsoft.Sysinternals.ProcessExplorer','Microsoft.Sysinternals.Suite',
     'WindowsPostInstallWizard.UniversalSilentSwitchFinder',
-    '9NT1R1C2HH7J','9NRQBLR605RG','XPDDXX9QW8N9D7','9NKSQGP7F2NH','XPDNSF6TXN2R6Z',
+    '9PLM9XGG6VKS','9NRQBLR605RG','XPDDXX9QW8N9D7','9NKSQGP7F2NH','XPDNSF6TXN2R6Z',
     'gitextensions','gitkraken','git-credential-manager-for-windows',
     'Microsoft.Teams','Office365ProPlus','foxitreader','Foxit.FoxitReader',
     'geosetter','TotalCommander','MarkMichaelis/ChatGPT',
