@@ -451,23 +451,23 @@ exit /b 1
         }
     }
 
-    Context 'Add-McpServerToCodex: env emission' {
+    Context 'Add-McpServerToTomlConfig: env emission' {
         BeforeEach {
             $script:TmpDir = New-TempDir
             $script:TempRoots.Add($script:TmpDir)
-            $script:CodexPath = Join-Path $script:TmpDir 'config.toml'
+            $script:TomlPath = Join-Path $script:TmpDir 'config.toml'
         }
 
         It 'omits [mcp_servers.<name>.env] when Server has no Env key' {
             $server = @{ Name = 'github'; Command = 'npx'; Arguments = @('-y','@modelcontextprotocol/server-github') }
-            Add-McpServerToCodex -Server $server -Path $script:CodexPath
-            $content = Get-Content -Path $script:CodexPath -Raw
+            Add-McpServerToTomlConfig -Path $script:TomlPath -AgentLabel 'Test' -Server $server
+            $content = Get-Content -Path $script:TomlPath -Raw
             $content | Should -Match '\[mcp_servers\.github\]'
             $content | Should -Not -Match '\[mcp_servers\.github\.env\]'
         }
 
         It 'strips an existing [mcp_servers.github.env] block on rewrite' {
-            Set-Content -Path $script:CodexPath -Value @"
+            Set-Content -Path $script:TomlPath -Value @"
 [mcp_servers.github]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
@@ -477,10 +477,59 @@ GITHUB_PERSONAL_ACCESS_TOKEN = "leaked"
 "@ -Encoding UTF8
 
             $server = @{ Name = 'github'; Command = 'npx'; Arguments = @('-y','@modelcontextprotocol/server-github') }
-            Add-McpServerToCodex -Server $server -Path $script:CodexPath
-            $content = Get-Content -Path $script:CodexPath -Raw
+            Add-McpServerToTomlConfig -Path $script:TomlPath -AgentLabel 'Test' -Server $server
+            $content = Get-Content -Path $script:TomlPath -Raw
             $content | Should -Not -Match 'leaked'
             $content | Should -Not -Match '\[mcp_servers\.github\.env\]'
+        }
+
+        It 'keeps the other sections of an existing config (e.g. Grok [models]) on rewrite' {
+            Set-Content -Path $script:TomlPath -Value @"
+[models]
+default = "grok-build"
+"@ -Encoding UTF8
+
+            $server = @{ Name = 'context7'; Command = 'npx'; Arguments = @('-y','@upstash/context7-mcp') }
+            Add-McpServerToTomlConfig -Path $script:TomlPath -AgentLabel 'Test' -Server $server
+            Add-McpServerToTomlConfig -Path $script:TomlPath -AgentLabel 'Test' -Server $server
+            $content = Get-Content -Path $script:TomlPath -Raw
+            $content | Should -Match '(?m)^\[models\]\r?\ndefault = "grok-build"'
+            ([regex]::Matches($content, '(?m)^\[mcp_servers\.context7\]')).Count | Should -Be 1
+        }
+    }
+
+    Context 'Remove-McpServerFromTomlConfig' {
+        It 'removes the named server and its env block, keeping the others' {
+            $tmp = New-TempDir
+            $script:TempRoots.Add($tmp)
+            $path = Join-Path $tmp 'config.toml'
+            Set-Content -Path $path -Value @"
+[mcp_servers.shell]
+command = "old"
+args = []
+
+[mcp_servers.shell.env]
+X = "1"
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+"@ -Encoding UTF8
+
+            Remove-McpServerFromTomlConfig -Path $path -AgentLabel 'Test' -ServerName 'shell'
+            $content = Get-Content -Path $path -Raw
+            $content | Should -Not -Match 'mcp_servers\.shell'
+            $content | Should -Match '\[mcp_servers\.context7\]'
+        }
+    }
+
+    Context 'Get-AIAgentsMcpTomlAgent' {
+        It 'lists Codex CLI and Grok CLI with their user config.toml paths' {
+            $agents = @(Get-AIAgentsMcpTomlAgent)
+            ($agents | Where-Object Label -eq 'Codex CLI').Path |
+                Should -Be (Join-Path $env:USERPROFILE '.codex\config.toml')
+            ($agents | Where-Object Label -eq 'Grok CLI').Path |
+                Should -Be (Join-Path $env:USERPROFILE '.grok\config.toml')
         }
     }
 
@@ -493,7 +542,7 @@ GITHUB_PERSONAL_ACCESS_TOKEN = "leaked"
             Mock Get-NpmGlobalRoot { 'C:\fake\npm' }
             Mock Resolve-McpServerCommand { @{ Command = 'npx'; Arguments = @('-y', $PackageName) } }
             Mock Add-McpServerToJsonConfig { }
-            Mock Add-McpServerToCodex { }
+            Mock Add-McpServerToTomlConfig { }
             Mock Test-IsElevated { $false }
             Mock Set-PersistedGitHubToken { }
             Mock Get-McpProfileTargets { @() }
@@ -506,6 +555,18 @@ GITHUB_PERSONAL_ACCESS_TOKEN = "leaked"
             # 4 servers (no posh -- dotnet absent) x 4 agents = 16, minus the
             # single github/GitHub Copilot CLI skip = 15.
             Should -Invoke Add-McpServerToJsonConfig -Times 15 -Exactly
+        }
+
+        It 'writes every MCP server into both TOML agents, Codex CLI and Grok CLI' {
+            $env:GITHUB_PERSONAL_ACCESS_TOKEN = ''
+            Install-AIAgentsMcpConfiguration 6>$null
+            # 4 servers (no posh -- dotnet absent), none skipped for TOML agents.
+            Should -Invoke Add-McpServerToTomlConfig -Times 4 -Exactly -ParameterFilter {
+                $AgentLabel -eq 'Codex CLI' -and $Path -like '*\.codex\config.toml'
+            }
+            Should -Invoke Add-McpServerToTomlConfig -Times 4 -Exactly -ParameterFilter {
+                $AgentLabel -eq 'Grok CLI' -and $Path -like '*\.grok\config.toml'
+            }
         }
 
         It 'does NOT write the github server into GitHub Copilot CLI (built-in)' {
@@ -525,6 +586,28 @@ GITHUB_PERSONAL_ACCESS_TOKEN = "leaked"
                 }
             } finally {
                 $env:GITHUB_PERSONAL_ACCESS_TOKEN = ''
+            }
+        }
+    }
+
+    Context 'Reset-AIAgentsMcpConfiguration (prune)' {
+        BeforeEach {
+            Mock Get-Command -ParameterFilter { $Name -eq 'npm' } { $null }
+            Mock Remove-McpServerFromJsonConfig { }
+            Mock Remove-McpServerFromTomlConfig { }
+            Mock Test-IsElevated { $false }
+            Mock Get-McpProfileTargets { @() }
+            Mock Clear-PersistedGitHubToken { }
+        }
+
+        It 'prunes every deprecated server from both TOML agents, Codex CLI and Grok CLI' {
+            Reset-AIAgentsMcpConfiguration 6>$null
+            foreach ($name in (Get-AIAgentsDeprecatedMcpServer)) {
+                foreach ($label in 'Codex CLI','Grok CLI') {
+                    Should -Invoke Remove-McpServerFromTomlConfig -Times 1 -Exactly -ParameterFilter {
+                        $AgentLabel -eq $label -and $ServerName -eq $name
+                    }
+                }
             }
         }
     }
