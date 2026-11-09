@@ -28,44 +28,68 @@
     accounted for, so a contributor who adds a new <name>.json without
     wiring it into either the hints table or a bespoke Tests.ps1 file
     fails fast.
+
+    Discovery is recursive: member manifests live in the category
+    subfolders (os/ client/ developer/ ai/ admin/, #302). Until #513 this
+    file globbed only bucket\*.json, which matches just the bundles, so the
+    harness generated zero cases. Discovery data reaches the run-phase
+    drift tests through -ForEach, because $script: variables set in
+    BeforeDiscovery do not survive into the run phase (they read as $null,
+    which left every drift check looping over nothing).
 #>
 
 BeforeDiscovery {
     $bucketRoot = $PSScriptRoot
 
     # Manifests handled elsewhere — see comment block above.
-    $script:BundleNames = @(
+    $bundleNames = @(
         'OSBasePackages','DeveloperBasePackages','ClientBasePackages',
         'MicrosoftOffice365','AIAgents'
     )
-    $script:BespokeNames = @(
+    $bespokeNames = @(
         'McAfeeUninstall',
         'AddLocalRepoBucket','AddMarkMichaelisScoopBucket',
         'GitConfigBeyondCompare','GitConfigVSCode',
         'GitConfigVisualStudio','GitConfigure'
     )
 
-    $hintsPath = Join-Path $bucketRoot 'ManifestTestHints.ps1'
-    $script:Hints = & $hintsPath
+    $hints = & (Join-Path $bucketRoot 'ManifestTestHints.ps1')
 
-    $script:AllManifestNames = @(
-        Get-ChildItem (Join-Path $bucketRoot '*.json') |
-            ForEach-Object { $_.BaseName }
+    # -Filter '*.json' alone would also match '.jsonc' via 8.3 short names.
+    $manifests = @(
+        Get-ChildItem -Path $bucketRoot -Filter '*.json' -File -Recurse |
+            Where-Object { $_.Extension -eq '.json' }
     )
 
-    $script:HarnessCases = foreach ($name in $script:AllManifestNames) {
-        if ($name -in $script:BundleNames)  { continue }
-        if ($name -in $script:BespokeNames) { continue }
-        $hint = if ($script:Hints.ContainsKey($name)) { $script:Hints[$name] } else { @{ Verify = 'Scoop' } }
-        @{
-            Name   = $name
-            Hint   = $hint
-            Manual = [bool]$hint.Manual
+    $harnessCases = @(
+        foreach ($m in $manifests) {
+            $name = $m.BaseName
+            if ($name -in $bundleNames)  { continue }
+            if ($name -in $bespokeNames) { continue }
+            $hint = if ($hints.ContainsKey($name)) { $hints[$name] } else { @{ Verify = 'Scoop' } }
+            @{
+                Name   = $name
+                Path   = $m.FullName
+                Hint   = $hint
+                Manual = [bool]$hint.Manual
+            }
         }
-    }
+    )
 
-    $script:AutoCases   = @($script:HarnessCases | Where-Object { -not $_.Manual })
-    $script:ManualCases = @($script:HarnessCases | Where-Object {      $_.Manual })
+    $script:AutoCases   = @($harnessCases | Where-Object { -not $_.Manual })
+    $script:ManualCases = @($harnessCases | Where-Object {      $_.Manual })
+
+    $script:Discovery = @{
+        BundleNames   = $bundleNames
+        BespokeNames  = $bespokeNames
+        HintNames     = @($hints.Keys)
+        ManifestNames = @($manifests | ForEach-Object { $_.BaseName })
+        HarnessCases  = $harnessCases
+        TestFileNames = @(
+            Get-ChildItem -Path $bucketRoot -Filter '*.Tests.ps1' -File -Recurse |
+                ForEach-Object { $_.Name }
+        )
+    }
 }
 
 BeforeAll {
@@ -104,7 +128,7 @@ BeforeAll {
 Describe 'Install <Name>' -ForEach $script:AutoCases -Tag 'Heavy','Install' {
 
     BeforeAll {
-        $script:manifestPath = Join-Path $PSScriptRoot ($Name + '.json')
+        $script:manifestPath = $Path
         if ($Hint.PreserveIfInstalled) {
             $script:preInstalled = [bool](Test-ScoopPackageInstalled $Name)
         } else {
@@ -133,7 +157,7 @@ Describe 'Install <Name>' -ForEach $script:AutoCases -Tag 'Heavy','Install' {
 Describe 'Install <Name>' -ForEach $script:ManualCases -Tag 'Manual','Heavy','Install' {
 
     BeforeAll {
-        $script:manifestPath = Join-Path $PSScriptRoot ($Name + '.json')
+        $script:manifestPath = $Path
         if ($Hint.PreserveIfInstalled) {
             $script:preInstalled = [bool](Test-ScoopPackageInstalled $Name)
         } else {
@@ -159,36 +183,37 @@ Describe 'Install <Name>' -ForEach $script:ManualCases -Tag 'Manual','Heavy','In
     }
 }
 
-Describe 'Manifest test coverage (drift)' -Tag 'Light' {
+Describe 'Manifest test coverage (drift)' -Tag 'Light' -ForEach @(@{ D = $script:Discovery }) {
 
-    It 'partitions every <name>.json into exactly one of: bundle, bespoke, harness' {
+    It 'discovers the member manifests in the category subfolders (#302, #513)' {
+        @($D.HarnessCases).Count | Should -BeGreaterThan 0 -Because 'an empty harness means the Install suite above silently runs nothing'
+        @($D.HarnessCases | ForEach-Object { $_.Name }) | Should -Contain 'Codex' -Because 'ai/Codex.json is a harness manifest'
+        foreach ($c in $D.HarnessCases) {
+            Test-Path -LiteralPath $c.Path -PathType Leaf | Should -BeTrue -Because "case '$($c.Name)' must point at its manifest"
+        }
+    }
+
+    It 'partitions every manifest into exactly one of: bundle, bespoke, harness' {
         $partitioned = New-Object System.Collections.Generic.HashSet[string]
-        foreach ($n in $script:BundleNames)  { [void]$partitioned.Add($n) }
-        foreach ($n in $script:BespokeNames) { [void]$partitioned.Add($n) }
-        foreach ($c in $script:HarnessCases) { [void]$partitioned.Add($c.Name) }
-        $unaccounted = @($script:AllManifestNames | Where-Object { -not $partitioned.Contains($_) })
+        foreach ($n in $D.BundleNames)  { [void]$partitioned.Add($n) }
+        foreach ($n in $D.BespokeNames) { [void]$partitioned.Add($n) }
+        foreach ($c in $D.HarnessCases) { [void]$partitioned.Add($c.Name) }
+        $unaccounted = @($D.ManifestNames | Where-Object { -not $partitioned.Contains($_) })
         $unaccounted | Should -BeNullOrEmpty -Because "Manifests in bucket/ not covered by bundle, bespoke, or harness: $($unaccounted -join ', ')"
     }
 
-    It 'every hint entry corresponds to an existing <name>.json manifest' {
-        $orphans = New-Object System.Collections.Generic.List[string]
-        foreach ($key in $script:Hints.Keys) {
-            $path = Join-Path $PSScriptRoot ($key + '.json')
-            if (-not (Test-Path $path)) {
-                $orphans.Add($key)
-            }
-        }
+    It 'every bundle and bespoke name corresponds to an existing manifest' {
+        $stale = @(@($D.BundleNames) + @($D.BespokeNames) | Where-Object { $_ -notin $D.ManifestNames })
+        $stale | Should -BeNullOrEmpty -Because "Skip-list names with no matching manifest: $($stale -join ', ')"
+    }
+
+    It 'every hint entry corresponds to an existing manifest' {
+        $orphans = @($D.HintNames | Where-Object { $_ -notin $D.ManifestNames })
         $orphans | Should -BeNullOrEmpty -Because "Hint entries with no matching manifest: $($orphans -join ', ')"
     }
 
     It 'every bespoke Tests.ps1 referenced by the skip list still exists' {
-        $missing = New-Object System.Collections.Generic.List[string]
-        foreach ($name in $script:BespokeNames) {
-            $path = Join-Path $PSScriptRoot ($name + '.Tests.ps1')
-            if (-not (Test-Path $path)) {
-                $missing.Add($name)
-            }
-        }
+        $missing = @($D.BespokeNames | Where-Object { "$_.Tests.ps1" -notin $D.TestFileNames })
         $missing | Should -BeNullOrEmpty -Because "Bespoke skip list references missing files: $($missing -join ', ')"
     }
 }

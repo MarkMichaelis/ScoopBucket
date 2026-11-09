@@ -17,15 +17,19 @@
     so PowerShell's real completion engine produces the candidate list.
     No mocks of psc, Register-ArgumentCompleter, or anything else —
     this is the spec for "Tab actually works."
+
+    The cases MUST be built in BeforeDiscovery: -ForEach is evaluated at
+    discovery, before any BeforeAll runs. Built in BeforeAll (as they were
+    until #513) the list is always $null there, so the suite silently
+    generated zero tests. The Light guard below fails if that recurs.
 #>
 
-BeforeAll {
-    $script:moduleManifest = Resolve-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1')
-    Import-Module $script:moduleManifest -Force
+BeforeDiscovery {
+    $moduleManifest = Join-Path (Split-Path -Parent $PSScriptRoot) 'module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+    Import-Module $moduleManifest -Force
 
-    $script:allPkgs = @(Get-Package -BucketPath $PSScriptRoot)
     $script:completionCases = @(
-        foreach ($p in $script:allPkgs) {
+        foreach ($p in @(Get-Package -BucketPath $PSScriptRoot)) {
             if ($p.Completion -eq 'none') { continue }
             foreach ($cli in @($p.CliCommands)) {
                 @{
@@ -37,9 +41,19 @@ BeforeAll {
             }
         }
     )
+}
 
+BeforeAll {
     $script:profilePath = $PROFILE.CurrentUserAllHosts
     $script:profileExists = $script:profilePath -and (Test-Path $script:profilePath)
+}
+
+Describe 'Completion end-to-end case discovery' -Tag 'Light' -ForEach @(@{ Cases = $script:completionCases }) {
+
+    It 'discovers a case for every declared CLI with completion (#513)' {
+        @($Cases).Count | Should -BeGreaterThan 0 -Because 'an empty list means the Heavy suite below silently runs nothing'
+        @($Cases | ForEach-Object { $_.Cli }) | Should -Contain 'rg'
+    }
 }
 
 Describe 'Completion end-to-end (real Tab, no mocks)' -Tag 'Heavy','Completion' {
