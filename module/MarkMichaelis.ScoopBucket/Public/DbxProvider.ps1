@@ -9,11 +9,19 @@
 #   Set-DbxDriveProfile        -- ConfigScript: write the lazy `Dbx:` block
 #                                 into the user's profile.
 #
+# Both are per-user: they resolve MyDocuments and $PROFILE for the account
+# running the install. Under SYSTEM they skip with a warning rather than
+# installing into systemprofile.
+#
 # The one-time Dropbox sign-in is deliberately NOT automated: it opens a
 # browser and waits, which would hang unattended runs (CI, the post-Windows-
 # Update task). Set-DbxDriveProfile prints a reminder instead.
 
 $script:DbxProviderRepo = 'MarkMichaelis/DbxProvider'
+
+function Test-DbxRunningAsSystem {
+    $IsWindows -and [Security.Principal.WindowsIdentity]::GetCurrent().IsSystem
+}
 
 function Install-DbxProviderModule {
     <#
@@ -25,6 +33,11 @@ function Install-DbxProviderModule {
         <ModulesRoot>\DbxProvider\<version>. When that version's manifest is
         already there it downloads nothing, so it is cheap to rerun -- the
         package uses UpdateMode='Reinstall', which runs this on every update.
+
+        If GitHub can't be reached (offline, rate-limited) and some version is
+        already installed, it warns and keeps that version instead of failing
+        the package. Set $env:GITHUB_TOKEN or $env:GH_TOKEN to authenticate the
+        release lookup and avoid the anonymous rate limit.
 
         Older versions are left in place: PowerShell loads the highest one,
         and a running pwsh may still hold the older DLL open.
@@ -48,13 +61,38 @@ function Install-DbxProviderModule {
         [object]$Release
     )
 
-    if (-not $Release) {
-        $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$script:DbxProviderRepo/releases/latest" `
-            -Headers @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'MarkMichaelis.ScoopBucket' }
+    if (Test-DbxRunningAsSystem) {
+        Write-Warning 'DbxProvider installs per user; skipping under the SYSTEM account. Rerun as the user who will use Dbx:.'
+        return
     }
 
-    $version = ([string]$Release.tag_name).TrimStart('v')
     $moduleDir = Join-Path $ModulesRoot 'DbxProvider'
+    $installed = @(Get-ChildItem -LiteralPath $moduleDir -Directory -ErrorAction Ignore |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'DbxProvider.psd1') })
+
+    if (-not $Release) {
+        $headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'MarkMichaelis.ScoopBucket' }
+        $token = if ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } else { $env:GH_TOKEN }
+        if ($token) { $headers.Authorization = "Bearer $token" }
+        try {
+            $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$script:DbxProviderRepo/releases/latest" `
+                -Headers $headers -ErrorAction Stop
+        }
+        catch {
+            if ($installed) {
+                Write-Warning "Could not check GitHub for a newer DbxProvider ($($_.Exception.Message)); keeping installed version $($installed.Name -join ', ')."
+                return
+            }
+            throw "Could not read the latest DbxProvider release from GitHub: $($_.Exception.Message)"
+        }
+    }
+
+    $tag = [string]$Release.tag_name
+    $version = $tag -replace '^v', ''
+    $parsed = $null
+    if (-not [version]::TryParse($version, [ref]$parsed)) {
+        throw "DbxProvider release tag '$tag' is not a version (expected v<major>.<minor>.<patch>)."
+    }
     $target = Join-Path $moduleDir $version
 
     if (Test-Path -LiteralPath (Join-Path $target 'DbxProvider.psd1')) {
@@ -65,7 +103,7 @@ function Install-DbxProviderModule {
     $assetName = "DbxProvider-$version.zip"
     $asset = @($Release.assets) | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
     if (-not $asset) {
-        throw "DbxProvider release '$($Release.tag_name)' has no '$assetName' asset."
+        throw "DbxProvider release '$tag' has no '$assetName' asset."
     }
 
     New-Item -ItemType Directory -Path $moduleDir -Force | Out-Null
@@ -87,6 +125,12 @@ function Install-DbxProviderModule {
         Remove-Item -LiteralPath $zip -Force -ErrorAction Ignore
         if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction Ignore }
     }
+
+    $onPath = ($env:PSModulePath -split [IO.Path]::PathSeparator) |
+        Where-Object { $_ -and ($_.TrimEnd('\', '/') -ieq $ModulesRoot.TrimEnd('\', '/')) }
+    if (-not $onPath) {
+        Write-Warning "$ModulesRoot is not on PSModulePath, so 'Import-Module DbxProvider' will not find it."
+    }
 }
 
 function Set-DbxDriveProfile {
@@ -98,7 +142,11 @@ function Set-DbxDriveProfile {
         Writes a block delimited by `# ScoopBucket:DbxDrive:BEGIN <ver>` and
         `# ScoopBucket:DbxDrive:END`, replacing any earlier copy in place and
         rewriting the file only when its content changes. A rerun leaves the
-        profile byte-identical.
+        profile byte-identical. The profile keeps its encoding (including a
+        BOM) and its line endings.
+
+        If a BEGIN marker has no matching END (a hand edit), it warns and
+        leaves the profile alone rather than guessing where the block ends.
 
         The block only defines a global `Dbx:` function. The first time it
         runs in a session it imports DbxProvider and calls
@@ -123,10 +171,27 @@ function Set-DbxDriveProfile {
         [string]$CredentialPath = $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'DbxProvider\credentials.json' })
     )
 
+    if (Test-DbxRunningAsSystem) {
+        Write-Warning 'The Dbx: profile block is per user; skipping under the SYSTEM account.'
+        return
+    }
     if (-not $ProfilePath) {
         Write-Warning 'No CurrentUserAllHosts profile path for this account; skipping the Dbx: profile block.'
         return
     }
+
+    # Read with BOM detection so the rewrite keeps the file's encoding.
+    $content = ''
+    $encoding = [Text.UTF8Encoding]::new($false)
+    if (Test-Path -LiteralPath $ProfilePath) {
+        $reader = [IO.StreamReader]::new($ProfilePath, $encoding, $true)
+        try {
+            $content = $reader.ReadToEnd()
+            $encoding = $reader.CurrentEncoding
+        } finally { $reader.Dispose() }
+    }
+
+    $nl = if ($content -match "`r`n" -or $content -notmatch "`n") { "`r`n" } else { "`n" }
 
     $sentinelVersion = 'v1'
     $block = @(
@@ -142,25 +207,29 @@ function Set-DbxDriveProfile {
         "    Set-Location -LiteralPath 'Dbx:\'"
         '}'
         '# ScoopBucket:DbxDrive:END'
-    ) -join "`r`n"
-    $block += "`r`n"
-
-    $content = if (Test-Path -LiteralPath $ProfilePath) { Get-Content -LiteralPath $ProfilePath -Raw } else { '' }
-    if ($null -eq $content) { $content = '' }
+    ) -join $nl
+    $block += $nl
 
     $pattern = '(?ms)^# ScoopBucket:DbxDrive:BEGIN \w+.*?^# ScoopBucket:DbxDrive:END[^\S\r\n]*\r?\n?'
     $match = [regex]::Match($content, $pattern)
+    $beginCount = [regex]::Matches($content, '(?m)^# ScoopBucket:DbxDrive:BEGIN').Count
+    $endCount   = [regex]::Matches($content, '(?m)^# ScoopBucket:DbxDrive:END').Count
+    if ($beginCount -ne $endCount) {
+        Write-Warning "$ProfilePath has a '# ScoopBucket:DbxDrive:BEGIN' line without a matching END (or the reverse); leaving it unchanged. Fix or remove the markers and rerun."
+        return
+    }
+
     $updated = if ($match.Success) {
         $content.Substring(0, $match.Index) + $block + $content.Substring($match.Index + $match.Length)
     } else {
         $trimmed = $content.TrimEnd("`r", "`n")
-        if ($trimmed) { "$trimmed`r`n`r`n$block" } else { $block }
+        if ($trimmed) { "$trimmed$nl$nl$block" } else { $block }
     }
 
     if ($updated -cne $content) {
         $dir = Split-Path -Parent $ProfilePath
         if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        Set-Content -LiteralPath $ProfilePath -Value $updated -NoNewline
+        [IO.File]::WriteAllText($ProfilePath, $updated, $encoding)
         Write-Verbose "Wrote the Dbx: block to $ProfilePath."
     }
 

@@ -87,6 +87,31 @@ Describe 'Install-DbxProviderModule' -Tag 'Light' {
         Join-Path $script:modulesRoot 'DbxProvider\1.2.3' | Should -Not -Exist
     }
 
+    It 'keeps the installed version and only warns when GitHub cannot be reached' {
+        $existing = Join-Path $script:modulesRoot 'DbxProvider\1.2.3'
+        New-Item -ItemType Directory -Path $existing -Force | Out-Null
+        Set-Content -Path (Join-Path $existing 'DbxProvider.psd1') -Value "@{ ModuleVersion = '1.2.3' }"
+        Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-RestMethod { throw 'API rate limit exceeded' }
+
+        { Install-DbxProviderModule -ModulesRoot $script:modulesRoot -WarningVariable warn -WarningAction SilentlyContinue } |
+            Should -Not -Throw
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket Invoke-WebRequest -Times 0 -Exactly
+    }
+
+    It 'throws when GitHub cannot be reached and nothing is installed' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-RestMethod { throw 'API rate limit exceeded' }
+
+        { Install-DbxProviderModule -ModulesRoot $script:modulesRoot } | Should -Throw '*rate limit*'
+    }
+
+    It 'rejects a release tag that is not a version' {
+        $release = [pscustomobject]@{ tag_name = 'release-3'; assets = @() }
+
+        { Install-DbxProviderModule -ModulesRoot $script:modulesRoot -Release $release } |
+            Should -Throw '*release-3*'
+        Join-Path $script:modulesRoot 'DbxProvider\release-3' | Should -Not -Exist
+    }
+
     It 'leaves no partial version folder when the zip holds no manifest' {
         Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-WebRequest {
             $src = Join-Path $TestDrive ([guid]::NewGuid())
@@ -155,6 +180,40 @@ Describe 'Set-DbxDriveProfile' -Tag 'Light' {
         ([regex]::Matches($content, 'ScoopBucket:DbxDrive:BEGIN')).Count | Should -Be 1
         $content.IndexOf('$before') | Should -BeLessThan $content.IndexOf('DbxDrive:BEGIN')
         $content.IndexOf('DbxDrive:END') | Should -BeLessThan $content.IndexOf('$after')
+    }
+
+    It 'keeps a UTF-8 BOM the profile already had' {
+        New-Item -ItemType Directory -Path (Split-Path $script:profilePath) -Force | Out-Null
+        [IO.File]::WriteAllText($script:profilePath, "`$x = 'café'`r`n", [Text.UTF8Encoding]::new($true))
+
+        Set-DbxDriveProfile -ProfilePath $script:profilePath -CredentialPath $script:credentialPath 6>$null
+
+        $bytes = [IO.File]::ReadAllBytes($script:profilePath)
+        $bytes[0..2] | Should -Be @(0xEF, 0xBB, 0xBF)
+        [IO.File]::ReadAllText($script:profilePath) | Should -Match "café"
+    }
+
+    It 'matches the line endings of an LF-only profile' {
+        New-Item -ItemType Directory -Path (Split-Path $script:profilePath) -Force | Out-Null
+        [IO.File]::WriteAllText($script:profilePath, "`$a = 1`n`$b = 2`n")
+
+        Set-DbxDriveProfile -ProfilePath $script:profilePath -CredentialPath $script:credentialPath 6>$null
+
+        [IO.File]::ReadAllText($script:profilePath) | Should -Not -Match "`r"
+    }
+
+    It 'leaves the profile alone when a BEGIN marker has no END' {
+        New-Item -ItemType Directory -Path (Split-Path $script:profilePath) -Force | Out-Null
+        Set-Content -Path $script:profilePath -Value @(
+            '# ScoopBucket:DbxDrive:BEGIN v1'
+            '$userEdit = 1'
+        )
+        $before = Get-Content -Raw $script:profilePath
+
+        Set-DbxDriveProfile -ProfilePath $script:profilePath -CredentialPath $script:credentialPath -WarningVariable warn -WarningAction SilentlyContinue 6>$null
+
+        Get-Content -Raw $script:profilePath | Should -BeExactly $before
+        ($warn | Out-String) | Should -Match 'END'
     }
 
     It 'writes a block that connects lazily, not at profile load' {
