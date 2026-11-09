@@ -9,7 +9,7 @@
 #
 @{
     RootModule        = 'MarkMichaelis.ScoopBucket.psm1'
-    ModuleVersion     = '1.6.0'
+    ModuleVersion     = '1.7.0'
     GUID              = 'b7e8a4c2-9f3d-4b76-8e6a-1c5d2f7b9e10'
     Author            = 'Mark Michaelis'
     CompanyName       = 'IntelliTect'
@@ -63,7 +63,9 @@
         'Import-PowerToysSettings',
         'Import-WindowsTerminalSettings',
         'Import-ClaudeCodeSettings',
-        'Set-DefaultEditorVariable'
+        'Set-DefaultEditorVariable',
+        'Install-DbxProviderModule',
+        'Set-DbxDriveProfile'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
