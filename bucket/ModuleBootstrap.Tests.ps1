@@ -51,7 +51,7 @@ Describe 'ChatGPT.ps1 declarative migration' -Tag 'Light', 'Module' {
         @($pkgs).Count     | Should -Be 1
         $pkgs[0].Name      | Should -Be 'ChatGPT'
         $pkgs[0].Installer | Should -Be 'winget'
-        $pkgs[0].Id        | Should -Be '9NT1R1C2HH7J'
+        $pkgs[0].Id        | Should -Be '9PLM9XGG6VKS'
         $pkgs[0].Source    | Should -Be 'msstore'
         $pkgs[0].Bundle    | Should -Be 'ChatGPT'
     }

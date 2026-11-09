@@ -188,7 +188,8 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
     [Package]@{ Name = 'Amazon Kindle';    Installer = 'winget'; Id = '9P8JQ0JJSTLL'; Source = 'msstore'
                 HoldUpgrade = 'DRM-coupled to Epubor (bucket/client/Epubor.json): a newer Kindle build routinely breaks Epubor until it ships support. Confirm Epubor lists the target Kindle version as supported, then clear HoldUpgrade for that upgrade. Only stops THIS tool -- Store auto-update can still move it (#394).'
                 Notes = 'Legacy Kindle for PC (Amazon.Kindle, winget default source) was discontinued 2026-06-30; the Store app is the only supported distribution (#394). Version is upstream-coupled to Epubor (bucket/client/Epubor.json) and cannot be pinned: msstore exposes a single "Unknown" version, winget pin does not stop Store auto-update, and Store update suppression is machine-wide only. Expect occasional DRM breakage until Epubor catches up to a new Kindle build.' }
-    [Package]@{ Name = 'ChatGPT (Store)';  Installer = 'winget'; Id = '9NT1R1C2HH7J'; Source = 'msstore' }
+    [Package]@{ Name = 'ChatGPT (Store)';  Installer = 'winget'; Id = '9PLM9XGG6VKS'; Source = 'msstore'
+                Notes = 'Current ChatGPT app (package OpenAI.Codex). Replaces ChatGPT Classic (9NT1R1C2HH7J), retiring 2027-01-30 (#511); canonical declaration is bucket/ai/ChatGPT.ps1.' }
     [Package]@{ Name = 'VPN Unlimited';    Installer = 'winget'; Id = '9NRQBLR605RG'; Source = 'msstore' }
     [Package]@{ Name = 'Grammarly';        Installer = 'winget'; Id = 'XPDDXX9QW8N9D7'; Source = 'msstore' }
     [Package]@{ Name = 'WhatsApp';         Installer = 'winget'; Id = '9NKSQGP7F2NH'; Source = 'msstore' }
