@@ -55,6 +55,7 @@ BeforeAll {
         'Resolve-EnginePath'
         'Resolve-PowerShellPath'
         'Install-BootstrapPowerShell'
+        'Install-BootstrapBundle'
     )
     foreach ($fn in $script:installFunctions) {
         if ($fn.Name -in $wanted) { . ([scriptblock]::Create($fn.Extent.Text)) }
@@ -442,6 +443,31 @@ Describe 'install.ps1 -- PowerShell 7 for bundles (issue #504)' -Tag 'Light', 'M
         }
     }
 
+    Context 'when the MSI build is absent' {
+
+        BeforeEach {
+            $script:savedProgramFiles = $env:ProgramFiles
+            $script:emptyRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("pwsh504_" + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $script:emptyRoot -Force | Out-Null
+            $env:ProgramFiles = $script:emptyRoot
+        }
+
+        AfterEach {
+            $env:ProgramFiles = $script:savedProgramFiles
+            Remove-Item -LiteralPath $script:emptyRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        It 'does not take a Store pwsh under WindowsApps in its place (#281)' {
+            Mock Resolve-EnginePath { 'C:\Users\u\AppData\Local\Microsoft\WindowsApps\pwsh.exe' }
+            Resolve-PowerShellPath | Should -BeNullOrEmpty -Because 'the sealed MSIX build is what #281 avoids, so the MSI must still be installed'
+        }
+
+        It 'accepts a pwsh on PATH outside WindowsApps' {
+            Mock Resolve-EnginePath { 'D:\tools\pwsh\pwsh.exe' }
+            Resolve-PowerShellPath | Should -Be 'D:\tools\pwsh\pwsh.exe'
+        }
+    }
+
     It 'installs nothing when PowerShell 7 already exists' {
         Mock Resolve-PowerShellPath { 'D:\p7\pwsh.exe' }
         Install-BootstrapPowerShell | Should -Be 'D:\p7\pwsh.exe'
@@ -466,21 +492,65 @@ Describe 'install.ps1 -- PowerShell 7 for bundles (issue #504)' -Tag 'Light', 'M
         { Install-BootstrapPowerShell } | Should -Throw '*PowerShell 7*'
     }
 
-    It 'runs the bundle under PowerShell 7 on both the install and update paths' {
+    It 'hands every bundle to Install-BootstrapBundle rather than calling scoop directly' {
         $body = Get-Content -LiteralPath $script:installPath -Raw
-        $body | Should -Match '& \$pwshPath [^\r\n]*-File \$scoopPath install -g \$app'
-        $body | Should -Match '& \$pwshPath [^\r\n]*-File \$scoopPath update \$app --global --force'
-        $body | Should -Not -Match '& \$scoopPath (install -g|update) \$app'
-    }
-
-    It 'refreshes the buckets and skips the cache before re-applying a bundle' {
-        $body = Get-Content -LiteralPath $script:installPath -Raw
-        $body | Should -Match '(?s)-File \$scoopPath update\r?\n.*-File \$scoopPath update \$app --global --force --no-cache'
+        $body | Should -Match "Install-BootstrapBundle -Name \`$_ -ScoopPath \`$scoopPath -PwshPath \`$pwshPath"
+        $body | Should -Not -Match '& \$scoopPath (install -g|update) \$(app|Name)\b' -Because 'a bundle run by scoop in this host would run under Windows PowerShell'
     }
 
     It 'refuses to run <_> below PowerShell 7' -ForEach @('OSBasePackages', 'DeveloperBasePackages', 'ClientBasePackages', 'AIAgents') {
         (Get-Content -LiteralPath (Join-Path $PSScriptRoot "$_.ps1") -TotalCount 1) |
             Should -Be '#requires -Version 7.0'
+    }
+
+    Context 'Install-BootstrapBundle' {
+
+        BeforeEach {
+            $script:savedExitCode = $global:LASTEXITCODE
+            $script:pwshCalls = [System.Collections.Generic.List[string]]::new()
+            $script:fakeExitCode = 0
+            $script:scoopList = @()
+            function script:Invoke-FakePwsh { $script:pwshCalls.Add($args -join ' '); $global:LASTEXITCODE = $script:fakeExitCode }
+            function script:Invoke-FakeScoop { $script:scoopList }
+        }
+
+        AfterEach {
+            $global:LASTEXITCODE = $script:savedExitCode
+        }
+
+        It 'installs a bundle that is not installed yet, under PowerShell 7' {
+            Install-BootstrapBundle -Name 'OSBasePackages' -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh'
+            $script:pwshCalls | Should -HaveCount 1
+            $script:pwshCalls[0] | Should -Match '-File Invoke-FakeScoop install -g OSBasePackages$'
+        }
+
+        It 'refreshes the buckets, then re-applies an installed bundle without the cache' {
+            $script:scoopList = [pscustomobject]@{ Name = 'OSBasePackages'; Info = 'Global install' }
+            Install-BootstrapBundle -Name 'OSBasePackages' -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh'
+            $script:pwshCalls | Should -HaveCount 2
+            $script:pwshCalls[0] | Should -Match '-File Invoke-FakeScoop update$'
+            $script:pwshCalls[1] | Should -Match '-File Invoke-FakeScoop update OSBasePackages --global --force --no-cache$'
+        }
+
+        It 'treats a per-user install as not installed' {
+            $script:scoopList = [pscustomobject]@{ Name = 'OSBasePackages'; Info = '' }
+            Install-BootstrapBundle -Name 'OSBasePackages' -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh'
+            $script:pwshCalls[-1] | Should -Match 'install -g OSBasePackages$'
+        }
+
+        It 'stops when scoop fails to install the bundle' {
+            $script:fakeExitCode = 3
+            { Install-BootstrapBundle -Name 'OSBasePackages' -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh' } |
+                Should -Throw "*scoop failed for 'OSBasePackages' (exit code 3)*"
+        }
+
+        It 'stops when scoop fails to re-apply a bundle that is already installed' {
+            $script:scoopList = [pscustomobject]@{ Name = 'OSBasePackages'; Info = 'Global install' }
+            $script:fakeExitCode = 1
+            { Install-BootstrapBundle -Name 'OSBasePackages' -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh' } |
+                Should -Throw "*scoop failed for 'OSBasePackages' (exit code 1)*"
+            $script:pwshCalls[-1] | Should -Match 'update OSBasePackages --global --force --no-cache$'
+        }
     }
 }
 
