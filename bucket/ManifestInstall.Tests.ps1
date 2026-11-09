@@ -21,13 +21,12 @@
         install + idempotent + verify shape: McAfeeUninstall (uninstaller
         flow), AddLocalRepoBucket / AddMarkMichaelisScoopBucket (scoop
         bucket-add rather than scoop-install), GitConfigBeyondCompare /
-        GitConfigVSCode / GitConfigVisualStudio / GitConfigure (multi-
-        assertion git-config tests, some with Light unit coverage).
+        GitConfigGitHubCli / GitConfigVSCode / GitConfigVisualStudio /
+        GitConfigure (multi-assertion git-config tests, some with Light unit
+        coverage).
 
-    A Light-tag drift test asserts every harness-eligible manifest is
-    accounted for, so a contributor who adds a new <name>.json without
-    wiring it into either the hints table or a bespoke Tests.ps1 file
-    fails fast.
+    Light-tag drift tests check the skip lists and hints against the
+    manifests on disk, and fail if discovery finds no harness cases.
 
     Discovery is recursive: member manifests live in the category
     subfolders (os/ client/ developer/ ai/ admin/, #302). Until #513 this
@@ -36,6 +35,13 @@
     drift tests through -ForEach, because $script: variables set in
     BeforeDiscovery do not survive into the run phase (they read as $null,
     which left every drift check looping over nothing).
+
+    WARNING -- Heavy/Install is destructive by design: each case uninstalls
+    the app if present, and Install-LocalManifest re-points the registered
+    MarkMichaelis scoop bucket at this working copy. Run it on a test
+    machine. Install-LocalManifest is passed the bucket root explicitly:
+    its default (the manifest's own folder) predates the foldered layout
+    and would rewrite url entries to bucket\<category>\<category>\... .
 #>
 
 BeforeDiscovery {
@@ -49,7 +55,7 @@ BeforeDiscovery {
     $bespokeNames = @(
         'McAfeeUninstall',
         'AddLocalRepoBucket','AddMarkMichaelisScoopBucket',
-        'GitConfigBeyondCompare','GitConfigVSCode',
+        'GitConfigBeyondCompare','GitConfigGitHubCli','GitConfigVSCode',
         'GitConfigVisualStudio','GitConfigure'
     )
 
@@ -140,12 +146,12 @@ Describe 'Install <Name>' -ForEach $script:AutoCases -Tag 'Heavy','Install' {
     }
 
     It 'installs from the local manifest' -Skip:($script:preInstalled) {
-        Install-LocalManifest $script:manifestPath
+        Install-LocalManifest $script:manifestPath -LocalBucketRoot $PSScriptRoot
         Test-ScoopPackageInstalled $Name | Should -Be $true
     }
 
     It 'is idempotent on re-run' {
-        { Install-LocalManifest $script:manifestPath } | Should -Not -Throw
+        { Install-LocalManifest $script:manifestPath -LocalBucketRoot $PSScriptRoot } | Should -Not -Throw
         Test-ScoopPackageInstalled $Name | Should -Be $true
     }
 
@@ -169,12 +175,12 @@ Describe 'Install <Name>' -ForEach $script:ManualCases -Tag 'Manual','Heavy','In
     }
 
     It 'installs from the local manifest' -Skip:($script:preInstalled) {
-        Install-LocalManifest $script:manifestPath
+        Install-LocalManifest $script:manifestPath -LocalBucketRoot $PSScriptRoot
         Test-ScoopPackageInstalled $Name | Should -Be $true
     }
 
     It 'is idempotent on re-run' {
-        { Install-LocalManifest $script:manifestPath } | Should -Not -Throw
+        { Install-LocalManifest $script:manifestPath -LocalBucketRoot $PSScriptRoot } | Should -Not -Throw
         Test-ScoopPackageInstalled $Name | Should -Be $true
     }
 
@@ -193,13 +199,11 @@ Describe 'Manifest test coverage (drift)' -Tag 'Light' -ForEach @(@{ D = $script
         }
     }
 
-    It 'partitions every manifest into exactly one of: bundle, bespoke, harness' {
-        $partitioned = New-Object System.Collections.Generic.HashSet[string]
-        foreach ($n in $D.BundleNames)  { [void]$partitioned.Add($n) }
-        foreach ($n in $D.BespokeNames) { [void]$partitioned.Add($n) }
-        foreach ($c in $D.HarnessCases) { [void]$partitioned.Add($c.Name) }
-        $unaccounted = @($D.ManifestNames | Where-Object { -not $partitioned.Contains($_) })
-        $unaccounted | Should -BeNullOrEmpty -Because "Manifests in bucket/ not covered by bundle, bespoke, or harness: $($unaccounted -join ', ')"
+    It 'has no two manifests with the same name across the category subfolders' {
+        # Names key the skip lists, the hints and scoop's app names, so a
+        # duplicate would silently collapse two manifests into one case.
+        $dupes = @($D.ManifestNames | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name)
+        $dupes | Should -BeNullOrEmpty -Because "Duplicate manifest names: $($dupes -join ', ')"
     }
 
     It 'every bundle and bespoke name corresponds to an existing manifest' {
