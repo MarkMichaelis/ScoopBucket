@@ -1,3 +1,6 @@
+#requires -Version 7.0
+# See OSBasePackages.ps1: stops scoop recording a failed install (#504).
+
 #region MarkMichaelis.ScoopBucket bundle module import (scoop-portable; see README)
 $scoopBucketModule = 'MarkMichaelis.ScoopBucket'
 $scoopBucketPsd1 = Join-Path $PSScriptRoot "..\module\$scoopBucketModule\$scoopBucketModule.psd1"

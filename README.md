@@ -25,7 +25,9 @@ because Microsoft Defender blocks an elevated command that downloads and runs a
 script.
 
 It installs Chocolatey, installs Scoop, registers this bucket
-plus `extras`, then installs `OSBasePackages`. If the machine has no git, it
+plus `extras`, installs PowerShell 7 if it is missing, then installs
+`OSBasePackages` under PowerShell 7, whichever shell you started from. Re-running
+it re-applies the bundle. If the machine has no git, it
 first installs a temporary one from Scoop, because adding a bucket needs git.
 `OSBasePackages` replaces that copy with the `Git` package, which `Update-Package`
 keeps current like any other package. Other bundles
