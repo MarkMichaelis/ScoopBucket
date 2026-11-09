@@ -531,13 +531,18 @@ function Resolve-PowerShellPath {
   <#
   .SYNOPSIS
       Path to PowerShell 7, or $null. Prefers the MSI build (#281).
+  .DESCRIPTION
+      A Store pwsh under WindowsApps does not count: it is the sealed MSIX
+      build that #281 avoids, so the MSI still gets installed beside it.
   #>
   [OutputType([string])]
   [CmdletBinding()]
   param()
   $msi = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
   if (Test-Path -LiteralPath $msi) { return $msi }
-  Resolve-EnginePath -Name 'pwsh'
+  $onPath = Resolve-EnginePath -Name 'pwsh'
+  if ($onPath -and $onPath -notmatch '\\WindowsApps\\') { return $onPath }
+  $null
 }
 
 function Install-BootstrapPowerShell {
@@ -566,6 +571,45 @@ function Install-BootstrapPowerShell {
     throw "PowerShell 7 is still not available after 'winget install Microsoft.PowerShell'; bundles cannot run without it. See the winget output above."
   }
   $path
+}
+
+function Install-BootstrapBundle {
+  <#
+  .SYNOPSIS
+      Install a bundle, or re-apply one already installed, under PowerShell 7.
+  .DESCRIPTION
+      Stops when scoop fails, so a bundle that did not apply is never
+      reported as done.
+  .PARAMETER ScoopPath
+      Path to the real scoop script, from Get-RequiredEnginePath.
+  .PARAMETER PwshPath
+      Path to PowerShell 7, from Install-BootstrapPowerShell.
+  #>
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Name,
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ScoopPath,
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$PwshPath
+  )
+  # Check if app is already installed globally. `scoop list` has NO `-g`
+  # flag -- it's `scoop list [query]`. A row with Info='Global install' is
+  # how scoop signals scope; treat its presence as the "installed" probe.
+  $installed = @(& $ScoopPath list $Name 2>$null | Where-Object { $_.Name -eq $Name -and ($_.Info -as [string]) -match 'Global' }).Count -gt 0
+
+  if ($installed) {
+    Write-Host "'$Name' is already installed. Checking for updates..." -ForegroundColor Green
+    # Refresh the buckets first: updating a named app does not, so a local clone
+    # would keep serving the old bundle.
+    & $PwshPath -NoProfile -ExecutionPolicy Bypass -File $ScoopPath update
+    # --force: a bundle at the current version is otherwise skipped, which would
+    # strand one that scoop recorded as installed after its script failed (#504).
+    # --no-cache: the same version would otherwise replay the cached script.
+    & $PwshPath -NoProfile -ExecutionPolicy Bypass -File $ScoopPath update $Name --global --force --no-cache
+  } else {
+    Write-Host "Installing $Name..." -ForegroundColor Cyan
+    & $PwshPath -NoProfile -ExecutionPolicy Bypass -File $ScoopPath install -g $Name
+  }
+  if ($LASTEXITCODE) { throw "scoop failed for '$Name' (exit code $LASTEXITCODE). See the output above." }
 }
 
 function Add-ScoopBucket {
@@ -643,24 +687,5 @@ Add-ScoopBucket -Name 'extras' -ScoopPath $scoopPath
 $pwshPath = Install-BootstrapPowerShell
 
 <#'McAfeeUninstall',#> 'OSBasePackages' | ForEach-Object {
-  $app = $_
-  # Check if app is already installed globally. `scoop list` has NO `-g`
-  # flag -- it's `scoop list [query]`. A row with Info='Global install' is
-  # how scoop signals scope; treat its presence as the "installed" probe.
-  $installed = @(& $scoopPath list $app 2>$null | Where-Object { $_.Name -eq $app -and ($_.Info -as [string]) -match 'Global' }).Count -gt 0
-
-  if ($installed) {
-    Write-Host "'$app' is already installed. Checking for updates..." -ForegroundColor Green
-    # Refresh the buckets first: updating a named app does not, so a local clone
-    # would keep serving the old bundle.
-    & $pwshPath -NoProfile -ExecutionPolicy Bypass -File $scoopPath update
-    # --force: a bundle at the current version is otherwise skipped, which would
-    # strand one that scoop recorded as installed after its script failed (#504).
-    # --no-cache: the same version would otherwise replay the cached script.
-    & $pwshPath -NoProfile -ExecutionPolicy Bypass -File $scoopPath update $app --global --force --no-cache
-  } else {
-    Write-Host "Installing $app..." -ForegroundColor Cyan
-    & $pwshPath -NoProfile -ExecutionPolicy Bypass -File $scoopPath install -g $app
-  }
-  if ($LASTEXITCODE) { throw "scoop failed for '$app' (exit code $LASTEXITCODE). See the output above." }
+  Install-BootstrapBundle -Name $_ -ScoopPath $scoopPath -PwshPath $pwshPath
 }
