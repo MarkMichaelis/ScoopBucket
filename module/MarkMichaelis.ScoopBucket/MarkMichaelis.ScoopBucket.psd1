@@ -64,7 +64,10 @@
         'Import-WindowsTerminalSettings',
         'Import-ClaudeCodeSettings',
         'Set-DefaultEditorVariable',
-        'Set-ScoopExternal7Zip'
+        'Set-ScoopExternal7Zip',
+        # Called by the plain-script installers Chocolatey.ps1 and
+        # GitConfigure.ps1, which see only exported functions (#524).
+        'Import-ChocolateyModule'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
