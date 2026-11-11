@@ -64,18 +64,10 @@ Register-ArgumentCompleter -Native -CommandName wt -ScriptBlock {
         # removes it, and point scoop at this 7z so it is not reinstalled (#518).
         PreviousInstaller = 'scoop'
         PreviousId        = 'main/7zip'
-        # Only when a non-scoop 7z answers on PATH: with use_external_7zip set
-        # and no 7z to find, scoop aborts every 7z extraction instead of
-        # installing its own helper. Uninstalling this package leaves the flag
-        # set; `scoop config rm use_external_7zip` restores scoop's own 7zip.
-        ConfigScript      = {
-            $sevenZip = Get-CommandSourcePath -Cli '7z'
-            if ($sevenZip -and (Resolve-PathOwningEngine -Path $sevenZip -EngineRoot (Get-EngineRootMap)) -ne 'scoop') {
-                scoop config use_external_7zip true
-            } else {
-                Write-Warning "7-Zip: no non-scoop 7z on PATH (found '$sevenZip'); leaving scoop's use_external_7zip unchanged."
-            }
-        }
+        # Sets use_external_7zip only when a non-scoop 7z answers on PATH. A
+        # ConfigScript may call only exported functions: scoop runs this
+        # bundle outside the module (#524).
+        ConfigScript      = { $null = Set-ScoopExternal7Zip }
         CliCommands = @('7z')
         Completion  = 'auto'
         Notes       = '7z has no `7z completion powershell` subcommand; the PSCompletions catalog entry is third-party. Phase 2 of the native-completion migration replaces it with a hand-curated NativeCommandScript covering 7z''s small/stable CLI surface (commands a/b/d/e/h/i/l/rn/t/u/x and the common switches). See #233.'

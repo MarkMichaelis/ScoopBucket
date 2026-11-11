@@ -63,7 +63,8 @@
         'Import-PowerToysSettings',
         'Import-WindowsTerminalSettings',
         'Import-ClaudeCodeSettings',
-        'Set-DefaultEditorVariable'
+        'Set-DefaultEditorVariable',
+        'Set-ScoopExternal7Zip'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()

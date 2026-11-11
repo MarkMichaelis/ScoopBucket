@@ -54,38 +54,54 @@ Describe 'OSBasePackages: 7-Zip replaces scoop''s own 7zip (#518)' -Tag 'Light',
         $conflict.UninstallCommand | Should -Be 'scoop uninstall -g 7zip'
     }
 
-    Context 'ConfigScript' {
-        BeforeEach {
-            # The ConfigScript is bound to the module, where `scoop` is the
-            # module's wrapper function, so mock it there or the real scoop
-            # config runs.
-            Mock -ModuleName MarkMichaelis.ScoopBucket scoop { }
-            Mock -ModuleName MarkMichaelis.ScoopBucket Get-EngineRootMap {
-                @{ winget = @('C:\Program Files\WinGet'); scoop = @('C:\ProgramData\scoop') }
-            }
-        }
+    # Scoop runs the bundle as a plain script, so the ConfigScript is bound to
+    # the bundle's scope, not the module's. Rebuild it unbound -- the harvested
+    # copy above was evaluated inside the module and would resolve private
+    # functions that fail under scoop (#524).
+    It 'runs its ConfigScript outside the module by calling Set-ScoopExternal7Zip' {
+        Mock Set-ScoopExternal7Zip { }
+        $unbound = [scriptblock]::Create($script:sevenZipDeclaration.ConfigScript.ToString())
+        & $unbound
+        Should -Invoke Set-ScoopExternal7Zip -Times 1 -Exactly
+    }
+}
 
-        It 'tells scoop to extract with the winget 7z so it does not reinstall main/7zip' {
-            Mock -ModuleName MarkMichaelis.ScoopBucket Get-CommandSourcePath { 'C:\Program Files\7-Zip\7z.exe' }
-            & $script:sevenZipDeclaration.ConfigScript
-            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -Times 1 -Exactly -ParameterFilter {
-                ($args -join ' ') -eq 'config use_external_7zip true'
-            }
+Describe 'Set-ScoopExternal7Zip (#518, #524)' -Tag 'Light','Module' {
+    BeforeEach {
+        # `scoop` inside the module is the module's wrapper; mock it there or
+        # the real scoop config runs.
+        Mock -ModuleName MarkMichaelis.ScoopBucket scoop { }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-EngineRootMap {
+            @{ winget = @('C:\Program Files\WinGet'); scoop = @('C:\ProgramData\scoop') }
         }
+    }
 
-        # use_external_7zip makes scoop abort every 7z extraction when no 7z is
-        # on PATH -- worse than letting it install its own helper.
-        It 'leaves scoop on its own 7zip when no 7z resolves on PATH' {
-            Mock -ModuleName MarkMichaelis.ScoopBucket Get-CommandSourcePath { $null }
-            & $script:sevenZipDeclaration.ConfigScript 3>$null
-            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -Times 0 -Exactly
+    It 'tells scoop to extract with a non-scoop 7z so it does not reinstall main/7zip' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-CommandSourcePath { 'C:\Program Files\7-Zip\7z.exe' }
+        (Set-ScoopExternal7Zip).Action | Should -Be 'Set'
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -Times 1 -Exactly -ParameterFilter {
+            ($args -join ' ') -eq 'config use_external_7zip true'
         }
+    }
 
-        It 'leaves scoop on its own 7zip when the only 7z on PATH is scoop''s' {
-            Mock -ModuleName MarkMichaelis.ScoopBucket Get-CommandSourcePath { 'C:\ProgramData\scoop\shims\7z.exe' }
-            & $script:sevenZipDeclaration.ConfigScript 3>$null
-            Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -Times 0 -Exactly
-        }
+    # use_external_7zip makes scoop abort every 7z extraction when no 7z is
+    # on PATH -- worse than letting it install its own helper.
+    It 'leaves scoop on its own 7zip when no 7z resolves on PATH' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-CommandSourcePath { $null }
+        (Set-ScoopExternal7Zip 3>$null).Action | Should -Be 'Skipped'
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -Times 0 -Exactly
+    }
+
+    It 'leaves scoop on its own 7zip when the only 7z on PATH is scoop''s' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-CommandSourcePath { 'C:\ProgramData\scoop\shims\7z.exe' }
+        (Set-ScoopExternal7Zip 3>$null).Action | Should -Be 'Skipped'
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -Times 0 -Exactly
+    }
+
+    It 'writes nothing under -WhatIf' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-CommandSourcePath { 'C:\Program Files\7-Zip\7z.exe' }
+        (Set-ScoopExternal7Zip -WhatIf).Action | Should -Be 'Skipped'
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -Times 0 -Exactly
     }
 }
 
