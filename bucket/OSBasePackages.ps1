@@ -58,6 +58,13 @@ Register-ArgumentCompleter -Native -CommandName wt -ScriptBlock {
         Name        = '7-Zip'
         Installer   = 'winget'
         Id          = '7Zip.7Zip'
+        # Scoop installs its own main/7zip whenever a manifest needs 7z
+        # extraction (main/git's PortableGit, for one), and its 7z shim then
+        # shadows this package. Name it as the predecessor so the bundle
+        # removes it, and point scoop at this 7z so it is not reinstalled (#518).
+        PreviousInstaller = 'scoop'
+        PreviousId        = 'main/7zip'
+        ConfigScript      = { scoop config use_external_7zip true }
         CliCommands = @('7z')
         Completion  = 'auto'
         Notes       = '7z has no `7z completion powershell` subcommand; the PSCompletions catalog entry is third-party. Phase 2 of the native-completion migration replaces it with a hand-curated NativeCommandScript covering 7z''s small/stable CLI surface (commands a/b/d/e/h/i/l/rn/t/u/x and the common switches). See #233.'
