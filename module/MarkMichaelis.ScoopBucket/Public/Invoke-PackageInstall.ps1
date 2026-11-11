@@ -460,7 +460,7 @@ function Invoke-PackageInstall {
     # so scoop does not record a partly-installed bundle and the next update
     # retries it (#522).
     if ($deferFailures) {
-        $failed = @($states | Where-Object State -EQ 'Failed' | ForEach-Object { $_.Pkg.Name })
+        $failed = @($states | Where-Object State -EQ 'Failed' | ForEach-Object { if ($_.Pkg.Name) { $_.Pkg.Name } else { '<unknown>' } })
         if ($failed.Count -gt 0) {
             throw "${Bundle}: $($failed.Count) of $($states.Count) package(s) failed: $($failed -join ', '). The other packages were processed; see the results above."
         }

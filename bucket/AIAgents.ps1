@@ -444,31 +444,37 @@ Register-ArgumentCompleter -Native -CommandName copilot -ScriptBlock {
     }
 )
 
-Invoke-PackageInstall -Packages $Packages -Bundle 'AIAgents'
-
-# Probe-mode short-circuit: when Get-BundlePackages enumerates the bundle
-# in a child runspace it shims Invoke-PackageInstall and sets this flag.
-# The normal MCP wiring now runs as the 'MCP Server Configuration' package's
-# ConfigScript (invoked by the install driver above), so only the opt-in
-# -Reset prune and the best-effort completion sweep remain as tail work.
-if ($global:__SBPKG_IS_PROBE) { return }
-
-# Dot-source MCP-wiring helpers. AIAgents.Mcp.ps1 contains function
-# definitions only -- no top-level work -- so the file is safe to source
-# from this bundle as well as from bucket/AIAgents.Mcp.Tests.ps1.
-. (Join-Path $PSScriptRoot 'AIAgents.Mcp.ps1')
-
-if ($Reset) {
-    Reset-AIAgentsMcpConfiguration
-}
-
-# Tab-completion registration: idempotent best-effort. Skipped (with a
-# warning) when the session isn't elevated so a normal scoop reinstall
-# still succeeds for users without admin rights.
+# Invoke-PackageInstall finishes every package, then throws one summary error
+# when any failed (#522). The tail below runs from the finally so a single
+# failed package does not skip it for every package that did install.
 try {
-    Invoke-CliCompletionsSweep -Force -Confirm:$false -ErrorAction Stop | Out-Null
+    Invoke-PackageInstall -Packages $Packages -Bundle 'AIAgents'
 }
-catch {
-    Write-Warning "Skipping CLI tab-completion registration: $($_.Exception.Message)"
-}
+finally {
+    # Probe-mode short-circuit: when Get-BundlePackages enumerates the bundle
+    # in a child runspace it shims Invoke-PackageInstall and sets this flag.
+    # The normal MCP wiring now runs as the 'MCP Server Configuration' package's
+    # ConfigScript (invoked by the install driver above), so only the opt-in
+    # -Reset prune and the best-effort completion sweep remain as tail work.
+    # (A condition, not `return`: control cannot leave a finally block.)
+    if (-not $global:__SBPKG_IS_PROBE) {
+        # Dot-source MCP-wiring helpers. AIAgents.Mcp.ps1 contains function
+        # definitions only -- no top-level work -- so the file is safe to source
+        # from this bundle as well as from bucket/AIAgents.Mcp.Tests.ps1.
+        . (Join-Path $PSScriptRoot 'AIAgents.Mcp.ps1')
 
+        if ($Reset) {
+            Reset-AIAgentsMcpConfiguration
+        }
+
+        # Tab-completion registration: idempotent best-effort. Skipped (with a
+        # warning) when the session isn't elevated so a normal scoop reinstall
+        # still succeeds for users without admin rights.
+        try {
+            Invoke-CliCompletionsSweep -Force -Confirm:$false -ErrorAction Stop | Out-Null
+        }
+        catch {
+            Write-Warning "Skipping CLI tab-completion registration: $($_.Exception.Message)"
+        }
+    }
+}
