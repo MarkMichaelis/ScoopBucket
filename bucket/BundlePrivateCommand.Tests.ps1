@@ -15,14 +15,18 @@
     The bug hides from tests that harvest packages through
     Get-BundlePackageObjects: that evaluates the $Packages array INSIDE the
     module, where private functions do resolve. So this check is static: it
-    walks every bundle's AST and fails on any command naming a function the
-    module defines but does not export.
+    walks every bucket script's AST (bundles and the installer scripts under
+    the category folders, which scoop also runs as plain scripts) and fails on
+    any command naming a function the module defines but does not export.
+
+    LIMITATION: only literal command names are seen. `& $name`,
+    Invoke-Expression text and generated script strings are not checked.
 #>
 
 BeforeDiscovery {
-    $script:bundleFiles = Get-ChildItem -Path $PSScriptRoot -Filter '*.ps1' -File |
+    $script:bundleFiles = Get-ChildItem -Path $PSScriptRoot -Filter '*.ps1' -File -Recurse |
         Where-Object { $_.Name -notmatch '\.Tests\.ps1$' -and $_.Name -notmatch '^Invoke-Tests\.ps1$' } |
-        ForEach-Object { @{ Name = $_.BaseName; Path = $_.FullName } }
+        ForEach-Object { @{ Name = [IO.Path]::GetRelativePath($PSScriptRoot, $_.FullName); Path = $_.FullName } }
 }
 
 BeforeAll {
@@ -41,10 +45,17 @@ BeforeAll {
         ForEach-Object { Get-DefinedFunctionName $_.FullName }
     $script:privateFunctions = @($moduleFunctions | Where-Object { $_ -notin $exported } | Sort-Object -Unique)
 
-    # A bundle may define (or dot-source) its own helper of the same name.
-    $script:bundleFunctions = @(Get-ChildItem -Path $PSScriptRoot -Filter '*.ps1' -File |
-        Where-Object { $_.Name -notmatch '\.Tests\.ps1$' } |
-        ForEach-Object { Get-DefinedFunctionName $_.FullName } | Sort-Object -Unique)
+    # A bundle may define its own helper of the same name, in itself or in a
+    # companion it dot-sources (AIAgents.ps1 -> AIAgents.Mcp.ps1). Exempt only
+    # those, so one bundle's helper cannot hide another bundle's offender.
+    function Get-OwnFunctionName([string]$Path) {
+        $dir  = Split-Path -Parent $Path
+        $base = [IO.Path]::GetFileNameWithoutExtension($Path)
+        Get-ChildItem -Path $dir -Filter '*.ps1' -File |
+            Where-Object { $_.FullName -eq $Path -or $_.BaseName -like "$base.*" } |
+            Where-Object { $_.Name -notmatch '\.Tests\.ps1$' } |
+            ForEach-Object { Get-DefinedFunctionName $_.FullName }
+    }
 }
 
 Describe 'Bundle scripts call only exported module functions (#524)' -Tag 'Light','Bundle' {
@@ -54,11 +65,12 @@ Describe 'Bundle scripts call only exported module functions (#524)' -Tag 'Light
     }
 
     It '<Name> calls no private module function' -ForEach $script:bundleFiles {
+        $own = @(Get-OwnFunctionName $Path)
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$null)
         $offenders = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) |
             ForEach-Object {
                 $cmd = $_.GetCommandName()
-                if ($cmd -and $cmd -in $script:privateFunctions -and $cmd -notin $script:bundleFunctions) {
+                if ($cmd -and $cmd -in $script:privateFunctions -and $cmd -notin $own) {
                     "${cmd} (line $($_.Extent.StartLineNumber))"
                 }
             }

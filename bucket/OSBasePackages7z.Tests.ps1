@@ -78,10 +78,23 @@ Describe 'Set-ScoopExternal7Zip (#518, #524)' -Tag 'Light','Module' {
 
     It 'tells scoop to extract with a non-scoop 7z so it does not reinstall main/7zip' {
         Mock -ModuleName MarkMichaelis.ScoopBucket Get-CommandSourcePath { 'C:\Program Files\7-Zip\7z.exe' }
-        (Set-ScoopExternal7Zip).Action | Should -Be 'Set'
+        $result = Set-ScoopExternal7Zip
+        $result.Action | Should -Be 'Set'
+        $result.Path   | Should -Be 'C:\Program Files\7-Zip\7z.exe'
+        $result.Owner  | Should -Not -Be 'scoop'
         Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -Times 1 -Exactly -ParameterFilter {
             ($args -join ' ') -eq 'config use_external_7zip true'
         }
+    }
+
+    # Real `scoop config` prints a confirmation line; it must not join the
+    # result, or `.Action` becomes an array.
+    It 'returns only its result object when scoop prints a confirmation' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-CommandSourcePath { 'C:\Program Files\7-Zip\7z.exe' }
+        Mock -ModuleName MarkMichaelis.ScoopBucket scoop { "'use_external_7zip' has been set to 'true'" }
+        $result = @(Set-ScoopExternal7Zip)
+        $result.Count     | Should -Be 1
+        $result[0].Action | Should -Be 'Set'
     }
 
     # use_external_7zip makes scoop abort every 7z extraction when no 7z is

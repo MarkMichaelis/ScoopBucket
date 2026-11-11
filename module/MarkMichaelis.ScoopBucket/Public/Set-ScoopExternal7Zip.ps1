@@ -41,7 +41,8 @@ function Set-ScoopExternal7Zip {
         Write-Warning "7-Zip: no non-scoop 7z on PATH (found '$path'); leaving scoop's use_external_7zip unchanged."
     }
     elseif ($PSCmdlet.ShouldProcess('scoop config use_external_7zip', 'Set to true')) {
-        scoop config use_external_7zip true
+        # scoop prints a confirmation line; keep it out of the result.
+        $null = scoop config use_external_7zip true
         $action = 'Set'
     }
 
