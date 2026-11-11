@@ -25,6 +25,45 @@ BeforeAll {
         Import-Module MarkMichaelis.ScoopBucket -Force
     }
     $script:sevenZip = Get-Package -BucketPath $PSScriptRoot -Name '7-Zip'
+    $script:mod = Get-Module MarkMichaelis.ScoopBucket
+    # Get-Package's view omits the predecessor pair and ConfigScript; the
+    # install driver reads the declaration itself.
+    $script:sevenZipDeclaration = & $script:mod {
+        param($BundlePath)
+        Get-BundlePackageObjects -BundlePath $BundlePath | Where-Object Name -EQ '7-Zip'
+    } (Join-Path $PSScriptRoot 'OSBasePackages.ps1')
+}
+
+Describe 'OSBasePackages: 7-Zip replaces scoop''s own 7zip (#518)' -Tag 'Light','Bundle' {
+
+    It 'names scoop main/7zip as its predecessor' {
+        $script:sevenZipDeclaration.PreviousInstaller | Should -Be 'scoop'
+        $script:sevenZipDeclaration.PreviousId        | Should -Be 'main/7zip'
+    }
+
+    It 'migrates a scoop 7z shim that answers on PATH instead of refusing it' {
+        $conflict = & $script:mod {
+            param($Package)
+            Get-PackageEngineConflict -Package $Package `
+                -EngineRoot @{ winget = @('C:\Program Files\WinGet'); scoop = @('C:\ProgramData\scoop') } `
+                -CommandResolver { 'C:\ProgramData\scoop\shims\7z.exe' } `
+                -ScoopScopeRoot @{ Global = @('C:\ProgramData\scoop'); User = @() }
+        } $script:sevenZipDeclaration
+        $conflict.Engine           | Should -Be 'scoop'
+        $conflict.Declared         | Should -BeTrue
+        $conflict.UninstallCommand | Should -Be 'scoop uninstall -g 7zip'
+    }
+
+    It 'tells scoop to extract with the external 7z so it does not reinstall main/7zip' {
+        $script:sevenZipDeclaration.ConfigScript | Should -Not -BeNullOrEmpty
+        # The ConfigScript is bound to the module, where `scoop` is the module's
+        # wrapper function, so mock it there or the real scoop config runs.
+        Mock -ModuleName MarkMichaelis.ScoopBucket scoop { }
+        & $script:sevenZipDeclaration.ConfigScript
+        Should -Invoke -ModuleName MarkMichaelis.ScoopBucket scoop -Times 1 -Exactly -ParameterFilter {
+            ($args -join ' ') -eq 'config use_external_7zip true'
+        }
+    }
 }
 
 Describe 'OSBasePackages: 7-Zip native PowerShell completion' -Tag 'Light','Bundle' {
