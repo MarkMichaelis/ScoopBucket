@@ -141,10 +141,19 @@ function Invoke-PackageInstall {
         $states.Add([pscustomobject]@{ Pkg = $p; State = $st; Reason = $rs; Err = $err })
     }
 
+    # Bundle scripts -- what scoop runs -- call this bare, and the module's
+    # $ErrorActionPreference = 'Stop' would turn the first per-package
+    # WriteError into a terminating error, abandoning every package after it
+    # (#522). Without an explicit -ErrorAction, report each failure without
+    # stopping and raise one summary error once every package has been tried
+    # (see the end of this function). An explicit -ErrorAction keeps its
+    # standard meaning: Install-Package passes Continue; Stop stops.
+    $deferFailures = -not $PSBoundParameters.ContainsKey('ErrorAction')
+
     # Build + write the standard Failed ErrorRecord, and record the state
     # carrying that same ErrorRecord so the emitted result's .Error is
-    # populated. A failed package never stops the sweep — the caller still
-    # gets a Failed row plus a structured ErrorRecord on the error stream.
+    # populated. The caller gets a Failed row plus a structured ErrorRecord
+    # on the error stream.
     $failPackage = {
         param($p, $rs, $name)
         $pkgName = if ($name) { $name } else { $p.Name }
@@ -154,6 +163,9 @@ function Invoke-PackageInstall {
             [System.Management.Automation.ErrorCategory]::NotInstalled,
             $p)
         & $addState $p 'Failed' $rs $errRec
+        if ($deferFailures) {
+            $ErrorActionPreference = 'Continue'
+        }
         $PSCmdlet.WriteError($errRec)
     }
 
@@ -441,6 +453,16 @@ function Invoke-PackageInstall {
             Bundle    = $Bundle
             Reason    = $s.Reason
             Error     = $s.Err
+        }
+    }
+
+    # Every package has been tried and reported; now fail the run as a whole
+    # so scoop does not record a partly-installed bundle and the next update
+    # retries it (#522).
+    if ($deferFailures) {
+        $failed = @($states | Where-Object State -EQ 'Failed' | ForEach-Object { $_.Pkg.Name })
+        if ($failed.Count -gt 0) {
+            throw "${Bundle}: $($failed.Count) of $($states.Count) package(s) failed: $($failed -join ', '). The other packages were processed; see the results above."
         }
     }
 }
