@@ -307,6 +307,62 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
 "@
         }
     }
+    [Package]@{
+        Name        = 'GoDaddy CLI'
+        Installer   = 'custom'
+        Scope       = 'user'
+        CliCommands = @('gddy')
+        Completion  = 'auto'
+        Notes       = 'Official GoDaddy gddy CLI (github.com/godaddy/cli), including DNS record management. Uses the upstream Windows installer, which verifies the downloaded binary SHA-256. The upstream installer adds its user-local directory to PATH; no login or DNS changes are performed during installation. Updates use gddy update apply.'
+        ExpectedCompletions = @{ gddy = @('auth','domain','dns','--help') }
+        NativeCommandScript = {
+            @"
+Register-ArgumentCompleter -Native -CommandName gddy -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @(
+        'auth','domain','dns','hosting','email','shopping','api','platform',
+        'pat','env','update','completion','search','guide','tree',
+        '--help','--version','--json','--human','--dry-run'
+    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+        }
+        CustomInstallScript = {
+            $installDir = Join-Path $env:LOCALAPPDATA 'Programs\gddy'
+            $exe = Join-Path $installDir 'gddy.exe'
+            if (-not (Test-Path -LiteralPath $exe)) {
+                $installer = Join-Path $env:TEMP ('gddy-install-' + [guid]::NewGuid().ToString('N') + '.ps1')
+                try {
+                    Invoke-WebRequest -Uri 'https://github.com/godaddy/cli/releases/latest/download/install.ps1' -OutFile $installer -ErrorAction Stop
+                    & $installer -Prefix $installDir
+                    if (-not (Test-Path -LiteralPath $exe)) {
+                        throw "GoDaddy CLI installer did not create $exe"
+                    }
+                }
+                finally {
+                    Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
+                }
+            }
+            # The upstream installer persists PATH for the user; this refreshes
+            # the current process when an existing installation is detected.
+            if (($env:Path -split ';') -notcontains $installDir) {
+                $env:Path += ";$installDir"
+            }
+        }
+        VerifyScript = {
+            Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'Programs\gddy\gddy.exe')
+        }
+        PostUpdateScript = {
+            $exe = Join-Path $env:LOCALAPPDATA 'Programs\gddy\gddy.exe'
+            if (-not (Test-Path -LiteralPath $exe)) {
+                throw "GoDaddy CLI is missing: $exe"
+            }
+            & $exe update apply
+            if ($LASTEXITCODE -ne 0) { throw "gddy update apply failed with exit code $LASTEXITCODE" }
+        }
+    }
 )
 
 Invoke-PackageInstall -Packages $Packages -Bundle 'DeveloperBasePackages'
