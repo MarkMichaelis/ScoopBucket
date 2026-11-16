@@ -838,16 +838,24 @@ function Set-GoDaddyMcpClaudePermission {
 
     $tools = Get-GoDaddyMcpToolName
     $allow = @($tools.Read | ForEach-Object { "mcp__godaddy__$_" })
-    $ask = @($tools.Write | ForEach-Object { "mcp__godaddy__$_" }) + @(
-        'Bash(gddy dns add:*)', 'Bash(gddy dns set:*)', 'Bash(gddy dns delete:*)',
-        'Bash(gddy domain nameserver:*)', 'Bash(gddy api call:*)'
-    )
+    # Raw gddy writes, for both shell tools, in the plain form and a form that
+    # also catches a full path (& 'C:\...\gddy.exe' dns set ...). Claude Code
+    # documents these rules as covering the usual invocation, not as a hard
+    # boundary -- the MCP server's approval flow is the primary safeguard.
+    $ask = @($tools.Write | ForEach-Object { "mcp__godaddy__$_" })
+    foreach ($verb in 'dns add', 'dns set', 'dns delete', 'domain nameserver', 'api call') {
+        $ask += "Bash(gddy ${verb}:*)", "Bash(*gddy* $verb *)", "PowerShell(gddy $verb *)", "PowerShell(*gddy* $verb *)"
+    }
 
     $settings = [ordered]@{}
+    $raw = $null
     if (Test-Path -LiteralPath $SettingsPath) {
         $raw = Get-Content -LiteralPath $SettingsPath -Raw
         if (-not [string]::IsNullOrWhiteSpace($raw)) {
-            try { $settings = $raw | ConvertFrom-Json -AsHashtable -Depth 100 }
+            # -DateKind String (pwsh 7.5+) keeps date-like strings verbatim.
+            $parse = @{ AsHashtable = $true; Depth = 100 }
+            if ((Get-Command ConvertFrom-Json).Parameters.ContainsKey('DateKind')) { $parse.DateKind = 'String' }
+            try { $settings = $raw | ConvertFrom-Json @parse }
             catch {
                 Write-Warning "Claude Code settings at $SettingsPath are not valid JSON; GoDaddy permission rules not added."
                 return $false
@@ -867,7 +875,15 @@ function Set-GoDaddyMcpClaudePermission {
     if ($changed) {
         $dir = Split-Path -Parent $SettingsPath
         if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        $settings | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $SettingsPath -Encoding UTF8
+        # Keep the pre-GoDaddy original once, then replace the file in one
+        # rename so Claude Code never reads a half-written settings file.
+        $backup = "$SettingsPath.pre-godaddy.bak"
+        if ($null -ne $raw -and -not (Test-Path -LiteralPath $backup)) {
+            [System.IO.File]::WriteAllText($backup, $raw, [System.Text.UTF8Encoding]::new($false))
+        }
+        $temp = "$SettingsPath.$([guid]::NewGuid().ToString('N')).tmp"
+        [System.IO.File]::WriteAllText($temp, ($settings | ConvertTo-Json -Depth 100), [System.Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temp -Destination $SettingsPath -Force
     }
     return $changed
 }

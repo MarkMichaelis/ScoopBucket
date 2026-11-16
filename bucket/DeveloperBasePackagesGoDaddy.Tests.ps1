@@ -133,6 +133,38 @@ Describe 'DeveloperBasePackages: GoDaddy CLI install and uninstall behavior (#52
         { & $script:Package.CustomInstallScript $script:Package } | Should -Throw '*did not create*'
     }
 
+    It 'removes only the gddy folder from the user PATH, keeping %VARS% and REG_EXPAND_SZ' {
+        $gddyDir = Split-Path $script:Exe
+        $global:__RawPath = "%USERPROFILE%\bin;$gddyDir;C:\Tools"
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-Item -ParameterFilter { $LiteralPath -eq 'HKCU:\Environment' } {
+            $o = [pscustomobject]@{}
+            $o | Add-Member -MemberType ScriptMethod -Name GetValue -Value { param($n, $d, $opt) $global:__RawPath }
+            $o | Add-Member -MemberType ScriptMethod -Name GetValueKind -Value { param($n) [Microsoft.Win32.RegistryValueKind]::ExpandString }
+            $o
+        }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Set-ItemProperty { }
+        try {
+            & $script:Package.CustomUninstallScript $script:Package
+            Should -Invoke Set-ItemProperty -ModuleName MarkMichaelis.ScoopBucket -Times 1 -Exactly -ParameterFilter {
+                $LiteralPath -eq 'HKCU:\Environment' -and $Name -eq 'Path' -and $Value -eq '%USERPROFILE%\bin;C:\Tools' -and
+                $Type -eq [Microsoft.Win32.RegistryValueKind]::ExpandString
+            }
+        }
+        finally { Remove-Variable -Name __RawPath -Scope Global -ErrorAction SilentlyContinue }
+    }
+
+    It 'leaves the user PATH alone when it has no gddy entry' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-Item -ParameterFilter { $LiteralPath -eq 'HKCU:\Environment' } {
+            $o = [pscustomobject]@{}
+            $o | Add-Member -MemberType ScriptMethod -Name GetValue -Value { param($n, $d, $opt) '%USERPROFILE%\bin;C:\Tools' }
+            $o | Add-Member -MemberType ScriptMethod -Name GetValueKind -Value { param($n) [Microsoft.Win32.RegistryValueKind]::ExpandString }
+            $o
+        }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Set-ItemProperty { }
+        & $script:Package.CustomUninstallScript $script:Package
+        Should -Invoke Set-ItemProperty -ModuleName MarkMichaelis.ScoopBucket -Times 0 -Exactly
+    }
+
     It 'removes the binary folder and the shim on uninstall, and is safe to repeat' {
         & $script:Package.CustomInstallScript $script:Package
         & $script:Package.CustomUninstallScript $script:Package

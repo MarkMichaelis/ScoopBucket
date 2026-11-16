@@ -363,11 +363,18 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
             if (Test-Path -LiteralPath $installDir) { Remove-Item -LiteralPath $installDir -Recurse -Force }
             # Undo the PATH entry GoDaddy's one-liner adds when it was used
             # directly (this package never adds one). Only the exact folder.
-            $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+            # Edited raw in the registry so other entries keep their %VARS%
+            # and the value stays REG_EXPAND_SZ.
+            $envKey = Get-Item -LiteralPath 'HKCU:\Environment'
+            $userPath = $envKey.GetValue('Path', $null, 'DoNotExpandEnvironmentNames')
             if ($userPath) {
                 $entries = @($userPath -split ';' | Where-Object { $_ })
-                $kept = @($entries | Where-Object { $_.TrimEnd('\') -ine $installDir.TrimEnd('\') })
-                if ($kept.Count -ne $entries.Count) { [Environment]::SetEnvironmentVariable('Path', ($kept -join ';'), 'User') }
+                $kept = @($entries | Where-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ine $installDir.TrimEnd('\') })
+                if ($kept.Count -ne $entries.Count) {
+                    $kind = $envKey.GetValueKind('Path')
+                    if ($kind -ne [Microsoft.Win32.RegistryValueKind]::String) { $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString }
+                    Set-ItemProperty -LiteralPath 'HKCU:\Environment' -Name 'Path' -Value ($kept -join ';') -Type $kind
+                }
             }
         }
     }

@@ -130,19 +130,44 @@ MX, SRV, SVCB, TLSA, TXT, plus NS and SOA read-only.
    - Only then does it repeat the call with `dryRun=false` and the token.
 3. **The token binds the exact request to the exact records it affects.** If
    the arguments differ, or the records changed after the plan, the apply is
-   refused with `STATE_CHANGED` and nothing runs.
-4. **Your client asks too.** Claude Code `ask` rules and Codex `prompt` mode
-   prompt for every write-tool call, including dry runs, since those rules
-   match tool names, not arguments. An `ask` rule outranks any later "always
-   allow", and still prompts in auto mode.
+   refused with `STATE_CHANGED` and nothing runs. The token proves the plan
+   is unchanged, **not** that a person approved it. An agent could dry-run and
+   apply back to back.
+4. **Your client asks.** The human approval gate is the client's per-call
+   prompt:
+   - **Claude Code** `ask` rules and **Codex** `approval_mode = "prompt"` cover
+     every write-tool call. Dry runs prompt too, because those rules match
+     tool names, not arguments.
+   - An `ask` rule outranks any later "always allow", and still prompts in
+     auto mode.
+   - **Other clients** (Claude Desktop, Gemini CLI, Copilot CLI) get no
+     per-tool rule from this bucket. Set their tool approval to ask before
+     relying on them for changes; otherwise only the agent's own adherence to
+     the server instructions stands between a plan and its execution.
+   - Raw `gddy dns add/set/delete`, `gddy domain nameserver` and `gddy api call`
+     in Claude Code's **Bash and PowerShell** tools also prompt, including
+     `*gddy*` path forms. Claude Code documents these rules as covering the
+     usual invocation, not as a hard boundary, which is why DNS changes are
+     meant to go through the MCP server.
 5. **One record at a time.** Updates and deletes target one record by
-   `recordId` or current value; several matches return `AMBIGUOUS_MATCH`. A set
-   holding only that record is changed with `gddy dns set` / `dns delete`. In a
-   multi-record set, the server never runs `dns set`:
+   `recordId` or current value; several matches return `AMBIGUOUS_MATCH`, and
+   giving neither is a validation error. No other record is listed, rewritten
+   or deleted:
    - **Update:** add the new record first, then delete only the old one by
      recordId (`gddy api call deleteDNSRecord`).
-   - **Delete:** remove only that record by recordId.
-   - **Either way:** sibling records keep their values, TTLs and priorities.
+   - **Delete:** delete only that record by recordId, even when it is the only
+     one.
+   - `gddy dns set` (which replaces a whole type+name set) is used only where
+     the narrow path cannot work and the set holds just that record: a CNAME
+     or ALIAS, or a TTL/priority-only change.
+   - A **TTL- or priority-only change to one record of a multi-record set** is
+     refused with `PROVIDER_LIMITATION`. GoDaddy identifies records by name,
+     type and value, so the change can't be made without rewriting the
+     siblings or briefly removing the record. The agent can propose a delete
+     followed by a create, approved separately, telling you about the gap.
+   - Sibling records always keep their values, TTLs and priorities.
+   - During a dry run, the raw API DELETE is never sent, even with
+     `--dry-run`. That step is described from the plan.
 6. **Refused outright:**
    - exact duplicates;
    - the same value with different settings (use update);
@@ -160,7 +185,16 @@ MX, SRV, SVCB, TLSA, TXT, plus NS and SOA read-only.
    arguments, so a value starting with `-` can never become a flag.
 9. **No surprise browser.** The server checks `gddy auth status` before any
    account call. If `gddy` still starts its browser login, the server kills it
-   and returns `AUTH_REQUIRED`.
+   and returns `AUTH_REQUIRED`. It watches stderr only, so a record value can't
+   trigger this.
+10. **Data stays data.**
+    - Record values are parsed without type coercion. A TXT value like
+      `2024-01-15T10:00:00Z` stays exactly that string and is never re-written
+      as a date.
+    - `gddy`'s update banners, which address AI assistants directly, are
+      stripped from error messages, and the messages are capped in length.
+    - The server instructions tell agents that record values are data, not
+      instructions.
 
 **Rollback.** Every plan carries `rollback.steps`, the tool calls that undo it,
 plus `rollback.previousRecords`. Rollback steps go through the same dry-run and
@@ -186,9 +220,11 @@ never point into a bucket checkout or a git worktree.
             "mcp__godaddy__godaddy_verify_dns"],
   "ask":   ["mcp__godaddy__godaddy_create_dns_record", "mcp__godaddy__godaddy_update_dns_record",
             "mcp__godaddy__godaddy_delete_dns_record",
-            "Bash(gddy dns add:*)", "Bash(gddy dns set:*)", "Bash(gddy dns delete:*)",
-            "Bash(gddy domain nameserver:*)", "Bash(gddy api call:*)"] }
+            "Bash(gddy dns set:*)", "Bash(*gddy* dns set *)", "PowerShell(gddy dns set *)", "PowerShell(*gddy* dns set *)",
+            "... the same four forms for dns add, dns delete, domain nameserver, api call"] }
 ```
+
+The first change saves the original as `settings.json.pre-godaddy.bak`.
 
 Check with `claude mcp get godaddy` (shows `√ Connected`).
 
@@ -251,5 +287,5 @@ so automated tests never create, change, or delete live DNS.
 | `PERMISSION_DENIED` on a write | `gddy auth login --scope domains.dns:update`, or a PAT with that scope |
 | `external_nameservers` from verify | The domain's DNS is hosted elsewhere (e.g. Cloudflare). Edit records there |
 | `STATE_CHANGED` | Records changed after the plan was approved, or the arguments differ. Re-plan and re-approve |
-| `PROVIDER_LIMITATION` | GoDaddy returned no `recordId` for a multi-record set. Make that change in the GoDaddy DNS page |
+| `PROVIDER_LIMITATION` | A TTL/priority-only change to one record of a multi-record set, or GoDaddy returned no `recordId`. Use the GoDaddy DNS page, or a separately approved delete then create |
 | Server missing from an agent | `Update-Package 'MCP Server Configuration'` (needs `gddy` installed first) |

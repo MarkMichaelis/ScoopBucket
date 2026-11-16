@@ -585,8 +585,20 @@ GITHUB_PERSONAL_ACCESS_TOKEN = "leaked"
             $s.permissions.allow | Should -Contain 'mcp__godaddy__godaddy_list_dns_records'
             $s.permissions.allow | Should -Not -Contain 'mcp__godaddy__godaddy_update_dns_record'
             $s.permissions.ask | Should -Contain 'mcp__godaddy__godaddy_update_dns_record'
-            $s.permissions.ask | Should -Contain 'Bash(gddy dns set:*)'
+            foreach ($rule in 'Bash(gddy dns set:*)', 'Bash(*gddy* dns delete *)', 'PowerShell(gddy dns set *)', 'PowerShell(*gddy* api call *)') {
+                $s.permissions.ask | Should -Contain $rule -Because 'raw gddy writes must prompt from either shell tool'
+            }
             @($s.permissions.allow | Where-Object { $_ -eq 'mcp__godaddy__godaddy_verify_dns' }).Count | Should -Be 1
+        }
+
+        It 'keeps a one-time backup of the original and leaves date-like values untouched' {
+            $settings = Join-Path $script:TmpDir 'settings.json'
+            $original = '{ "note": "2024-01-15T10:00:00Z", "permissions": { "allow": [] } }'
+            $original | Set-Content $settings -NoNewline
+            Set-GoDaddyMcpClaudePermission -SettingsPath $settings | Out-Null
+            Get-Content "$settings.pre-godaddy.bak" -Raw | Should -Be $original
+            (Get-Content $settings -Raw) | Should -Match '"note": "2024-01-15T10:00:00Z"'
+            @(Get-ChildItem $script:TmpDir -Filter '*.tmp') | Should -BeNullOrEmpty
         }
 
         It 'creates Claude Code settings when none exist, and leaves invalid JSON untouched' {
