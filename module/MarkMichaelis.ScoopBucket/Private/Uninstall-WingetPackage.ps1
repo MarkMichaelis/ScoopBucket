@@ -1,8 +1,8 @@
 # Winget engine: uninstalls a single Package via `winget uninstall`.
 #
-# Inverse of Install-WingetPackage. The presence probe is identical
-# (`winget list --id <Id>`) but inverted: exit 0 ⇒ installed ⇒ uninstall;
-# non-zero ⇒ NotInstalled short-circuit.
+# Inverse of Install-WingetPackage. The presence probe is the same
+# (Test-WingetPackageInstalled; #516) but inverted: found ⇒ uninstall;
+# not found ⇒ NotInstalled short-circuit.
 
 function Uninstall-WingetPackage {
     [CmdletBinding()]
@@ -19,13 +19,9 @@ function Uninstall-WingetPackage {
 
     if (-not $WhatIf) {
         try {
-            $listArgs = @('list', '--id', $id, '--accept-source-agreements')
-            if ($Package.Source -eq 'msstore') {
-                $listArgs += @('--source', 'msstore')
-            }
-            $null = & winget @listArgs 2>$null
-            if ($LASTEXITCODE -ne 0) {
-                return @{ State = 'NotInstalled'; Reason = "winget list --id $id returned $LASTEXITCODE." }
+            $probe = Test-WingetPackageInstalled -Package $Package
+            if (-not $probe.Installed) {
+                return @{ State = 'NotInstalled'; Reason = "$($probe.Command) returned $($probe.ExitCode)." }
             }
         } catch {
             Write-Verbose "Uninstall-WingetPackage: presence probe failed: $($_.Exception.Message)"

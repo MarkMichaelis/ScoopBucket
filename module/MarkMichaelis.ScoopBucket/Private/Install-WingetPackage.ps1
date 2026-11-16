@@ -9,7 +9,7 @@
 #                            --accept-package-agreements --accept-source-agreements`
 #   - Source=''         => `winget install --id <Id> --scope machine`
 #                          (or --scope user when Package.Scope='user')
-#   - Skips when AlreadyInstalled (winget list --id <Id> exit 0).
+#   - Skips when AlreadyInstalled (Test-WingetPackageInstalled; #516).
 #   - Returns a hashtable @{ State='Installed'|'AlreadyInstalled'|'Failed'; Reason=<string> }.
 
 function Install-WingetPackage {
@@ -25,16 +25,12 @@ function Install-WingetPackage {
         return @{ State = 'Failed'; Reason = "winget: Id is empty for '$($Package.Name)'." }
     }
 
-    # AlreadyInstalled probe: `winget list --id <id>` exits 0 when found.
+    # AlreadyInstalled probe (exact match first, for Store ids; see #516).
     if (-not $WhatIf) {
         try {
-            $listArgs = @('list', '--id', $id, '--accept-source-agreements')
-            if ($Package.Source -eq 'msstore') {
-                $listArgs += @('--source', 'msstore')
-            }
-            $null = & winget @listArgs 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                return @{ State = 'AlreadyInstalled'; Reason = "winget list --id $id returned 0." }
+            $probe = Test-WingetPackageInstalled -Package $Package
+            if ($probe.Installed) {
+                return @{ State = 'AlreadyInstalled'; Reason = "$($probe.Command) returned 0." }
             }
         } catch {
             Write-Verbose "Install-WingetPackage: AlreadyInstalled probe failed: $($_.Exception.Message)"
