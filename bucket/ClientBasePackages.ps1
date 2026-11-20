@@ -15,6 +15,7 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 #                    in each Package's Notes; notion/exiftool await an owner ruling
 #   #8/#46            Pushbullet: no maintained installer; CISkip
 #   #9/#11/#394       Snagit / Todoist / Kindle via Microsoft Store (winget --source msstore)
+#   #530             Send to Kindle: winget manifest URL is dead (403); custom install from Amazon's endpoint
 #   #13/#46           DbxCli delisted from choco; install via local bucket manifest
 #   #27               foxitreader choco package times out; use winget
 #   #73               bw / gcloud have no PSCompletions catalog entry — ship our own native completer
@@ -188,6 +189,42 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
     [Package]@{ Name = 'Amazon Kindle';    Installer = 'winget'; Id = '9P8JQ0JJSTLL'; Source = 'msstore'
                 HoldUpgrade = 'DRM-coupled to Epubor (bucket/client/Epubor.json): a newer Kindle build routinely breaks Epubor until it ships support. Confirm Epubor lists the target Kindle version as supported, then clear HoldUpgrade for that upgrade. Only stops THIS tool -- Store auto-update can still move it (#394).'
                 Notes = 'Legacy Kindle for PC (Amazon.Kindle, winget default source) was discontinued 2026-06-30; the Store app is the only supported distribution (#394). Version is upstream-coupled to Epubor (bucket/client/Epubor.json) and cannot be pinned: msstore exposes a single "Unknown" version, winget pin does not stop Store auto-update, and Store update suppression is machine-wide only. Expect occasional DRM breakage until Epubor catches up to a new Kindle build.' }
+    [Package]@{
+        Name        = 'Send to Kindle'
+        Installer   = 'custom'
+        Notes       = 'Amazon Send to Kindle for PC (https://www.amazon.com/sendtokindle/pc): adds "Send to Kindle" to the Explorer right-click menu and the print dialog. Not on winget usable: Amazon.SendToKindle (1.1.1.260) pins InstallerUrl https://s3.amazonaws.com/sendtokindle/SendToKindleForPC-installer.exe, which now answers 403 AccessDenied (#530). Amazon''s download button instead GETs https://www.amazon.com/sendtokindle/download/pc for a JSON { downloadUrl } presigned S3 link -- the file it serves is byte-identical to the winget manifest''s SHA256. Not in the Microsoft Store. The script follows that same endpoint, refuses anything not Authenticode-signed by Amazon, and runs the NSIS installer with /S (machine scope; it bundles its own VC++ x86 redist).'
+        UpdateMode  = 'Reinstall'  # re-runs the script, which no-ops when VerifyScript is true (Parsec precedent); the app self-updates.
+        CustomInstallScript = {
+            param($Package)
+            if ($Package.VerifyScript -and (& $Package.VerifyScript $Package)) { return }
+            $meta = Invoke-RestMethod -Uri 'https://www.amazon.com/sendtokindle/download/pc'
+            if (-not $meta.downloadUrl) { throw 'Send to Kindle: Amazon download endpoint returned no downloadUrl.' }
+            $dir = Join-Path $env:TEMP "SendToKindle-$([guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Path $dir | Out-Null
+            try {
+                $exe = Join-Path $dir 'SendToKindleForPC-installer.exe'
+                Invoke-WebRequest -Uri $meta.downloadUrl -OutFile $exe
+                $sig = Get-AuthenticodeSignature -FilePath $exe
+                if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -cnotmatch '(^|, )O=Amazon\.com Services LLC(,|$)') {
+                    throw "Send to Kindle: installer signature is '$($sig.Status)' by '$($sig.SignerCertificate.Subject)'; refusing to run it."
+                }
+                $proc = Start-Process -FilePath $exe -ArgumentList '/S' -Wait -PassThru
+                if ($proc.ExitCode -eq 3010) { Write-Warning 'Send to Kindle: installed; a reboot is required to finish (exit 3010).' }
+                elseif ($proc.ExitCode -ne 0) { throw "Send to Kindle installer exited with code $($proc.ExitCode)." }
+            } finally {
+                Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction Ignore
+            }
+        }
+        VerifyScript = {
+            [bool](Get-ItemProperty -Path @(
+                    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+                    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+                    'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+                ) -ErrorAction SilentlyContinue |
+                Where-Object { $_.DisplayName -match 'Send ?to ?Kindle' -or $_.UninstallString -match 'SendToKindle' } |
+                Select-Object -First 1)
+        }
+    }
     [Package]@{ Name = 'ChatGPT (Store)';  Installer = 'winget'; Id = '9PLM9XGG6VKS'; Source = 'msstore'
                 Notes = 'Current ChatGPT app (package OpenAI.Codex). Replaces ChatGPT Classic (9NT1R1C2HH7J), retiring 2027-01-30 (#511); canonical declaration is bucket/ai/ChatGPT.ps1.' }
     [Package]@{ Name = 'VPN Unlimited';    Installer = 'winget'; Id = '9NRQBLR605RG'; Source = 'msstore' }
