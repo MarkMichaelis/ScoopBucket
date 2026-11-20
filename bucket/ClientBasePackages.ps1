@@ -193,7 +193,7 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
         Name        = 'Send to Kindle'
         Installer   = 'custom'
         Notes       = 'Amazon Send to Kindle for PC (https://www.amazon.com/sendtokindle/pc): adds "Send to Kindle" to the Explorer right-click menu and the print dialog. Not on winget usable: Amazon.SendToKindle (1.1.1.260) pins InstallerUrl https://s3.amazonaws.com/sendtokindle/SendToKindleForPC-installer.exe, which now answers 403 AccessDenied (#530). Amazon''s download button instead GETs https://www.amazon.com/sendtokindle/download/pc for a JSON { downloadUrl } presigned S3 link -- the file it serves is byte-identical to the winget manifest''s SHA256. Not in the Microsoft Store. The script follows that same endpoint, refuses anything not Authenticode-signed by Amazon, and runs the NSIS installer with /S (machine scope; it bundles its own VC++ x86 redist).'
-        UpdateMode  = 'Reinstall'  # re-run the idempotent download-latest installer; VerifyScript gates it.
+        UpdateMode  = 'Reinstall'  # re-runs the script, which no-ops when VerifyScript is true (Parsec precedent); the app self-updates.
         CustomInstallScript = {
             param($Package)
             if ($Package.VerifyScript -and (& $Package.VerifyScript $Package)) { return }
@@ -205,11 +205,12 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
                 $exe = Join-Path $dir 'SendToKindleForPC-installer.exe'
                 Invoke-WebRequest -Uri $meta.downloadUrl -OutFile $exe
                 $sig = Get-AuthenticodeSignature -FilePath $exe
-                if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch '\bO=Amazon\.com\b') {
+                if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -cnotmatch '(^|, )O=Amazon\.com Services LLC(,|$)') {
                     throw "Send to Kindle: installer signature is '$($sig.Status)' by '$($sig.SignerCertificate.Subject)'; refusing to run it."
                 }
                 $proc = Start-Process -FilePath $exe -ArgumentList '/S' -Wait -PassThru
-                if ($proc.ExitCode -ne 0) { throw "Send to Kindle installer exited with code $($proc.ExitCode)." }
+                if ($proc.ExitCode -eq 3010) { Write-Warning 'Send to Kindle: installed; a reboot is required to finish (exit 3010).' }
+                elseif ($proc.ExitCode -ne 0) { throw "Send to Kindle installer exited with code $($proc.ExitCode)." }
             } finally {
                 Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction Ignore
             }
