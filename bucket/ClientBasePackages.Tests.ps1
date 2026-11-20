@@ -119,3 +119,32 @@ Describe 'ClientBasePackages: Signal user-scope declaration (#433)' -Tag 'Light'
         $signal.Notes | Should -Match '#433'
     }
 }
+
+Describe 'ClientBasePackages: Send to Kindle for PC (#530)' -Tag 'Light','Bundle' {
+
+    # winget's Amazon.SendToKindle manifest pins InstallerUrl to
+    # https://s3.amazonaws.com/sendtokindle/SendToKindleForPC-installer.exe,
+    # which now answers 403 AccessDenied, so a winget install cannot succeed.
+    # Amazon's own download button resolves a presigned S3 URL from
+    # https://www.amazon.com/sendtokindle/download/pc; the entry installs from
+    # there via a custom script gated by VerifyScript (Parsec #388 precedent).
+
+    It 'declares Send to Kindle as a custom install with a VerifyScript' {
+        $stk = @($script:pkgs | Where-Object Name -EQ 'Send to Kindle')
+        $stk.Count                     | Should -Be 1
+        $stk[0].Installer              | Should -Be 'custom'
+        $stk[0].HasCustomInstallScript | Should -BeTrue
+        $stk[0].HasVerifyScript        | Should -BeTrue
+        $stk[0].Bundle                 | Should -Be 'ClientBasePackages'
+    }
+
+    It 'does not use the dead winget Amazon.SendToKindle manifest' {
+        @($script:pkgs | Where-Object Id -EQ 'Amazon.SendToKindle').Count | Should -Be 0
+    }
+
+    It 'records why the winget package is bypassed' {
+        $stk = @($script:pkgs | Where-Object Name -EQ 'Send to Kindle')[0]
+        $stk.Notes | Should -Match '#530'
+        $stk.Notes | Should -Match 'Amazon.SendToKindle'
+    }
+}
