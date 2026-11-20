@@ -719,6 +719,16 @@ Refresh either with `Update-Package 'Windows Terminal'` or
 > by editing `IncludePatterns` / `ExcludePatterns` in that config if you
 > want a more conservative surface.
 
+> **`godaddy` MCP server -- GoDaddy domains and DNS.** When the
+> `GoDaddy CLI` package (`gddy`, DeveloperBasePackages) is installed, the MCP
+> wiring also registers a local stdio server that wraps the signed-in `gddy`.
+> Reads (list domains, list/inspect records, verify live DNS) run freely.
+> Record changes are dry-run plans that need your approval, are bound to the
+> records they were planned against, and touch exactly one record. Claude
+> Code `ask` rules and Codex `approval_mode = "prompt"` make every write tool
+> prompt. Setup, the decision record, and example requests are in
+> [`docs/GoDaddyDns.md`](docs/GoDaddyDns.md).
+
 A `ConfigScript` is:
 
 - **Always run.** Invoked on every install (for both freshly `Installed`

@@ -307,6 +307,77 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
 "@
         }
     }
+    [Package]@{
+        Name        = 'GoDaddy CLI'
+        Installer   = 'custom'
+        Scope       = 'user'
+        CliCommands = @('gddy')
+        Completion  = 'native'
+        NativeCompletionKind = 'native'
+        NativeCommandScript = { gddy completion powershell }
+        ExpectedCompletions = @{ gddy = @('auth','dns','domain','update') }
+        Notes       = 'GoDaddy''s official, agent-first CLI (github.com/godaddy/cli): domains, DNS records (dns list/add/set/delete), hosting, and raw API calls. Neither winget nor scoop carries it, so this runs GoDaddy''s documented Windows installer (releases/latest/download/install.ps1), which downloads the release zip, verifies its SHA-256 against the release checksums file, and copies gddy.exe to %LOCALAPPDATA%\Programs\gddy. -SkipPathUpdate stops that installer from appending its folder to the user PATH; a scoop shim exposes gddy instead (README: shim over PATH). Updates: gddy update apply (same checksum-verified download, replaces the binary in place). Completion is the binary''s own clap completer (gddy completion powershell). Sign-in is separate and interactive: gddy auth login (browser OAuth; the token is stored in Windows Credential Manager) or a PAT via gddy pat add / GDDY_PAT. Uninstall leaves those credentials in place; run gddy auth logout first to clear them. The AIAgents bundle wires the GoDaddy DNS MCP server (bucket/ai/GoDaddyDnsMcp.ps1) once gddy is present (#527).'
+        CustomInstallScript = {
+            $installDir = Join-Path $env:LOCALAPPDATA 'Programs\gddy'
+            $exe = Join-Path $installDir 'gddy.exe'
+            if (-not (Test-Path -LiteralPath $exe)) {
+                # GoDaddy's documented install is `irm .../install.ps1 | iex`.
+                # Running the same script as a scriptblock lets it take
+                # parameters and needs no temp file for the execution policy
+                # to block.
+                $installer = Invoke-RestMethod -Uri 'https://github.com/godaddy/cli/releases/latest/download/install.ps1' -ErrorAction Stop
+                if ($installer -is [byte[]]) { $installer = [System.Text.Encoding]::UTF8.GetString($installer) }
+                & ([scriptblock]::Create([string]$installer)) -Prefix $installDir -SkipPathUpdate
+                if (-not (Test-Path -LiteralPath $exe)) { throw "GoDaddy CLI installer did not create $exe" }
+            }
+            # Touch the shim only when it is missing or points elsewhere, so a
+            # re-run changes nothing. *>&1 also swallows scoop's Write-Host
+            # chatter ("ERROR Local shim not found"), which reads as a failure.
+            $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $HOME 'scoop' }
+            $shimFile = Join-Path $scoopRoot 'shims\gddy.shim'
+            $shimTarget = if (Test-Path -LiteralPath $shimFile) { Get-Content -LiteralPath $shimFile -Raw } else { '' }
+            if ($shimTarget -notmatch [regex]::Escape($exe)) {
+                if (Test-Path -LiteralPath $shimFile) { & scoop shim rm gddy *>&1 | Out-Null }
+                & scoop shim add gddy $exe *>&1 | Out-Null
+            }
+            if (-not (Get-Command gddy -CommandType Application -ErrorAction SilentlyContinue)) {
+                throw 'gddy is installed but not on PATH: scoop shim add gddy failed.'
+            }
+        }
+        VerifyScript = {
+            $exe = Join-Path $env:LOCALAPPDATA 'Programs\gddy\gddy.exe'
+            (Test-Path -LiteralPath $exe) -and ("$(& $exe --version 2>$null)" -match '^gddy version \d')
+        }
+        PostUpdateScript = {
+            $exe = Join-Path $env:LOCALAPPDATA 'Programs\gddy\gddy.exe'
+            if (-not (Test-Path -LiteralPath $exe)) { throw "GoDaddy CLI is missing: $exe" }
+            $result = & $exe update apply --output json 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "gddy update apply failed (exit $LASTEXITCODE): $result" }
+            $data = ($result | Out-String | ConvertFrom-Json -ErrorAction SilentlyContinue).data
+            if ($data) { Write-Host "  gddy $($data.previousVersion) -> $($data.newVersion) ($($data.status))" }
+        }
+        CustomUninstallScript = {
+            $installDir = Join-Path $env:LOCALAPPDATA 'Programs\gddy'
+            $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $HOME 'scoop' }
+            if (Test-Path -LiteralPath (Join-Path $scoopRoot 'shims\gddy.shim')) { & scoop shim rm gddy *>&1 | Out-Null }
+            if (Test-Path -LiteralPath $installDir) { Remove-Item -LiteralPath $installDir -Recurse -Force }
+            # Undo the PATH entry GoDaddy's one-liner adds when it was used
+            # directly (this package never adds one). Only the exact folder.
+            # Edited raw in the registry so other entries keep their %VARS%
+            # and the value stays REG_EXPAND_SZ.
+            $envKey = Get-Item -LiteralPath 'HKCU:\Environment'
+            $userPath = $envKey.GetValue('Path', $null, 'DoNotExpandEnvironmentNames')
+            if ($userPath) {
+                $entries = @($userPath -split ';' | Where-Object { $_ })
+                $kept = @($entries | Where-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ine $installDir.TrimEnd('\') })
+                if ($kept.Count -ne $entries.Count) {
+                    $kind = $envKey.GetValueKind('Path')
+                    if ($kind -ne [Microsoft.Win32.RegistryValueKind]::String) { $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString }
+                    Set-ItemProperty -LiteralPath 'HKCU:\Environment' -Name 'Path' -Value ($kept -join ';') -Type $kind
+                }
+            }
+        }
+    }
 )
 
 Invoke-PackageInstall -Packages $Packages -Bundle 'DeveloperBasePackages'

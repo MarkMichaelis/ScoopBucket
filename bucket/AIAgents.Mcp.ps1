@@ -354,13 +354,20 @@ args = [$argsToml]
         }
         $section += "`r`n[mcp_servers.$($Server.Name).env]`r`n" + ($envLines -join "`r`n")
     }
+    # Per-tool approval (Codex: auto | prompt | writes | approve), e.g. so
+    # read-only tools run unattended while write tools always ask.
+    if ($Server.ContainsKey('CodexToolApproval') -and $Server.CodexToolApproval) {
+        foreach ($tool in $Server.CodexToolApproval.Keys) {
+            $section += "`r`n[mcp_servers.$($Server.Name).tools.$tool]`r`napproval_mode = `"$($Server.CodexToolApproval[$tool])`""
+        }
+    }
 
-    $sectionPattern    = "(?ms)^\[mcp_servers\.$([regex]::Escape($Server.Name))\].*?(?=^\[|\z)"
-    $envSectionPattern = "(?ms)^\[mcp_servers\.$([regex]::Escape($Server.Name))\.env\].*?(?=^\[|\z)"
+    # The server's table and every sub-table ([...env], [...tools.<t>]) are
+    # rewritten together, so a re-run never leaves a stale sub-table behind.
+    $sectionPattern = "(?ms)^\[mcp_servers\.$([regex]::Escape($Server.Name))(\.[^\]]+)?\].*?(?=^\[|\z)"
 
     if (Test-Path $Path) {
         $content = Get-Content -Path $Path -Raw
-        $content = [regex]::Replace($content, $envSectionPattern, '')
         $content = [regex]::Replace($content, $sectionPattern, '')
         $content = $content.TrimEnd() + "`r`n`r`n" + $section + "`r`n"
         Set-Content -Path $Path -Value $content -Encoding UTF8
@@ -405,12 +412,10 @@ function Remove-McpServerFromCodex {
     if (-not $Path) { $Path = Join-Path $env:USERPROFILE '.codex\config.toml' }
     if (-not (Test-Path $Path)) { return }
 
-    $sectionPattern    = "(?ms)^\[mcp_servers\.$([regex]::Escape($ServerName))\].*?(?=^\[|\z)"
-    $envSectionPattern = "(?ms)^\[mcp_servers\.$([regex]::Escape($ServerName))\.env\].*?(?=^\[|\z)"
+    $sectionPattern = "(?ms)^\[mcp_servers\.$([regex]::Escape($ServerName))(\.[^\]]+)?\].*?(?=^\[|\z)"
 
     $content    = Get-Content -Path $Path -Raw
-    $newContent = [regex]::Replace($content, $envSectionPattern, '')
-    $newContent = [regex]::Replace($newContent, $sectionPattern, '')
+    $newContent = [regex]::Replace($content, $sectionPattern, '')
     if ($newContent -ne $content) {
         Set-Content -Path $Path -Value $newContent.TrimEnd() -Encoding UTF8
         Write-Host "Codex CLI: pruned $ServerName MCP from $Path"
@@ -703,6 +708,211 @@ function Get-PoshMcpInstallFailureDetail {
     return 'unknown error'
 }
 
+# ---------------------------------------------------------------------------
+# GoDaddy DNS MCP server (#527).
+#
+# A local stdio server (ai\GoDaddyDnsMcp.ps1 + .psm1) that wraps the
+# authenticated `gddy` CLI. It is wired only when gddy is installed (the
+# 'GoDaddy CLI' package in DeveloperBasePackages). The files are copied to a
+# stable per-user folder so the agent configs never point into a bucket
+# checkout, a scoop version folder, or a git worktree.
+# ---------------------------------------------------------------------------
+
+function Get-GoDaddyMcpToolName {
+    <#
+    .SYNOPSIS
+        The server's tools, split into read-only and write tools.
+    #>
+    [CmdletBinding()]
+    param()
+    @{
+        Read  = @('godaddy_list_domains', 'godaddy_get_domain', 'godaddy_list_dns_records', 'godaddy_get_dns_record', 'godaddy_verify_dns')
+        Write = @('godaddy_create_dns_record', 'godaddy_update_dns_record', 'godaddy_delete_dns_record')
+    }
+}
+
+function Test-GoDaddyCliPresent {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+    $exe = Join-Path $env:LOCALAPPDATA 'Programs\gddy\gddy.exe'
+    return ((Test-Path -LiteralPath $exe) -or [bool](Get-Command gddy -CommandType Application -ErrorAction SilentlyContinue))
+}
+
+function Get-GoDaddyMcpInstallPath {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    Join-Path $env:LOCALAPPDATA 'ScoopBucket\GoDaddyDnsMcp'
+}
+
+function Find-GoDaddyMcpSource {
+    <#
+    .SYNOPSIS
+        Folder holding GoDaddyDnsMcp.ps1/.psm1: bucket\ai\ in the repo or a
+        bucket checkout, or the scoop app folder itself (scoop downloads the
+        manifest's url files flat).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([string]$BaseDirectory = $PSScriptRoot)
+    foreach ($dir in @((Join-Path $BaseDirectory 'ai'), $BaseDirectory)) {
+        if ((Test-Path -LiteralPath (Join-Path $dir 'GoDaddyDnsMcp.ps1')) -and (Test-Path -LiteralPath (Join-Path $dir 'GoDaddyDnsMcp.psm1'))) {
+            return (Resolve-Path -LiteralPath $dir).Path
+        }
+    }
+    return $null
+}
+
+function Install-GoDaddyMcpServerFiles {
+    <#
+    .SYNOPSIS
+        Copy the server files into the stable install folder (only when they
+        differ). Returns the path of the entry script.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$SourceDirectory,
+        [Parameter(Mandatory)][string]$DestinationDirectory
+    )
+    if (-not (Test-Path -LiteralPath $DestinationDirectory)) {
+        New-Item -ItemType Directory -Path $DestinationDirectory -Force | Out-Null
+    }
+    foreach ($file in 'GoDaddyDnsMcp.ps1', 'GoDaddyDnsMcp.psm1') {
+        $src = Join-Path $SourceDirectory $file
+        $dst = Join-Path $DestinationDirectory $file
+        if (-not (Test-Path -LiteralPath $dst) -or (Get-FileHash -LiteralPath $src).Hash -ne (Get-FileHash -LiteralPath $dst).Hash) {
+            Copy-Item -LiteralPath $src -Destination $dst -Force
+        }
+    }
+    return (Join-Path $DestinationDirectory 'GoDaddyDnsMcp.ps1')
+}
+
+function Get-GoDaddyMcpServerEntry {
+    <#
+    .SYNOPSIS
+        The `godaddy` MCP server entry for every agent config: pwsh running
+        the entry script over stdio, with Codex per-tool approval (reads run
+        unattended, writes always prompt).
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [string]$PwshPath
+    )
+    if (-not $PwshPath) {
+        $cmd = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        $PwshPath = if ($cmd) { $cmd.Source } else { 'pwsh' }
+    }
+    $tools = Get-GoDaddyMcpToolName
+    $approval = [ordered]@{}
+    foreach ($t in $tools.Read)  { $approval[$t] = 'approve' }
+    foreach ($t in $tools.Write) { $approval[$t] = 'prompt' }
+    @{
+        Name              = 'godaddy'
+        Command           = $PwshPath
+        Arguments         = @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $ScriptPath)
+        CodexToolApproval = $approval
+    }
+}
+
+function Set-GoDaddyMcpClaudePermission {
+    <#
+    .SYNOPSIS
+        Merge Claude Code permission rules for the godaddy server into
+        ~/.claude/settings.json: allow the read tools, and force a prompt
+        ("ask") for the write tools and for raw gddy DNS writes in Bash.
+    .DESCRIPTION
+        Read-merge-write: only missing rules are appended and every other key
+        is kept. An "ask" rule prompts even in auto mode and outranks any
+        "allow" (deny > ask > allow), so "don't ask again" cannot silently
+        remove the approval step for DNS changes.
+    .OUTPUTS
+        $true when the file changed.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([string]$SettingsPath = (Join-Path $env:USERPROFILE '.claude\settings.json'))
+
+    $tools = Get-GoDaddyMcpToolName
+    $allow = @($tools.Read | ForEach-Object { "mcp__godaddy__$_" })
+    # Raw gddy writes, for both shell tools, in the plain form and a form that
+    # also catches a full path (& 'C:\...\gddy.exe' dns set ...). Claude Code
+    # documents these rules as covering the usual invocation, not as a hard
+    # boundary -- the MCP server's approval flow is the primary safeguard.
+    $ask = @($tools.Write | ForEach-Object { "mcp__godaddy__$_" })
+    foreach ($verb in 'dns add', 'dns set', 'dns delete', 'domain nameserver', 'api call') {
+        $ask += "Bash(gddy ${verb}:*)", "Bash(*gddy* $verb *)", "PowerShell(gddy $verb *)", "PowerShell(*gddy* $verb *)"
+    }
+
+    $settings = [ordered]@{}
+    $raw = $null
+    if (Test-Path -LiteralPath $SettingsPath) {
+        $raw = Get-Content -LiteralPath $SettingsPath -Raw
+        if (-not [string]::IsNullOrWhiteSpace($raw)) {
+            # -DateKind String (pwsh 7.5+) keeps date-like strings verbatim.
+            $parse = @{ AsHashtable = $true; Depth = 100 }
+            if ((Get-Command ConvertFrom-Json).Parameters.ContainsKey('DateKind')) { $parse.DateKind = 'String' }
+            try { $settings = $raw | ConvertFrom-Json @parse }
+            catch {
+                Write-Warning "Claude Code settings at $SettingsPath are not valid JSON; GoDaddy permission rules not added."
+                return $false
+            }
+        }
+    }
+    if ($settings['permissions'] -isnot [System.Collections.IDictionary]) { $settings['permissions'] = [ordered]@{} }
+    $changed = $false
+    foreach ($pair in @(@{ Key = 'allow'; Rules = $allow }, @{ Key = 'ask'; Rules = $ask })) {
+        $existing = @($settings['permissions'][$pair.Key] | Where-Object { $_ })
+        $missing = @($pair.Rules | Where-Object { $existing -notcontains $_ })
+        if ($missing.Count) {
+            $settings['permissions'][$pair.Key] = @($existing) + $missing
+            $changed = $true
+        }
+    }
+    if ($changed) {
+        $dir = Split-Path -Parent $SettingsPath
+        if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        # Keep the pre-GoDaddy original once, then replace the file in one
+        # rename so Claude Code never reads a half-written settings file.
+        $backup = "$SettingsPath.pre-godaddy.bak"
+        if ($null -ne $raw -and -not (Test-Path -LiteralPath $backup)) {
+            [System.IO.File]::WriteAllText($backup, $raw, [System.Text.UTF8Encoding]::new($false))
+        }
+        $temp = "$SettingsPath.$([guid]::NewGuid().ToString('N')).tmp"
+        [System.IO.File]::WriteAllText($temp, ($settings | ConvertTo-Json -Depth 100), [System.Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temp -Destination $SettingsPath -Force
+    }
+    return $changed
+}
+
+function Install-GoDaddyMcpServer {
+    <#
+    .SYNOPSIS
+        Deploy the GoDaddy DNS MCP server files and return its server entry,
+        or $null (with a note) when gddy is not installed.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$BaseDirectory = $PSScriptRoot,
+        [string]$DestinationDirectory = (Get-GoDaddyMcpInstallPath)
+    )
+    if (-not (Test-GoDaddyCliPresent)) {
+        Write-Host "GoDaddy MCP: gddy is not installed; skipping. Install the 'GoDaddy CLI' package (DeveloperBasePackages), then run Update-Package 'MCP Server Configuration'."
+        return $null
+    }
+    $source = Find-GoDaddyMcpSource -BaseDirectory $BaseDirectory
+    if (-not $source) {
+        Write-Warning "GoDaddy MCP: server files (GoDaddyDnsMcp.ps1/.psm1) not found next to $BaseDirectory; skipping."
+        return $null
+    }
+    $script = Install-GoDaddyMcpServerFiles -SourceDirectory $source -DestinationDirectory $DestinationDirectory
+    Write-Host "GoDaddy MCP: server files at $DestinationDirectory"
+    return (Get-GoDaddyMcpServerEntry -ScriptPath $script)
+}
+
 function Install-AIAgentsMcpConfiguration {
     <#
     .SYNOPSIS
@@ -832,6 +1042,15 @@ function Install-AIAgentsMcpConfiguration {
         $poshConfigPath = Write-PoshMcpFullAccessConfig -Path (Get-PoshMcpConfigPath)
         Write-Host "PoshMcp: wrote full-access PowerShell config to $poshConfigPath (IncludePatterns '*')."
         $mcpServers += Get-PoshMcpServerEntry -ConfigPath $poshConfigPath
+    }
+
+    # GoDaddy DNS through the local gddy CLI (#527); skipped without gddy.
+    $goDaddyServer = Install-GoDaddyMcpServer
+    if ($goDaddyServer) {
+        $mcpServers += $goDaddyServer
+        if (Set-GoDaddyMcpClaudePermission) {
+            Write-Host 'GoDaddy MCP: added Claude Code permission rules (reads allowed; DNS writes always ask).'
+        }
     }
 
     $jsonAgents = Get-AIAgentsMcpJsonAgent
