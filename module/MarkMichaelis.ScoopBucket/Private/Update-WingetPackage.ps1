@@ -1,7 +1,7 @@
 # Winget engine: updates a single Package via `winget upgrade`.
 #
 # Mirrors Install-WingetPackage. Behaviour:
-#   - Presence probe (`winget list --id <Id>`); exit non-zero ⇒ NotInstalled.
+#   - Presence probe (Test-WingetPackageInstalled; #516); not found ⇒ NotInstalled.
 #   - `winget upgrade --id <Id> --silent --accept-package-agreements --accept-source-agreements`
 #     plus --scope mapping (global/machine→machine, user→user) and any
 #     WingetExtraArgs the bundle declared.
@@ -31,11 +31,9 @@ function Update-WingetPackage {
 
     if (-not $WhatIf) {
         try {
-            $listArgs = @('list', '--id', $id, '--accept-source-agreements')
-            if ($Package.Source -eq 'msstore') { $listArgs += @('--source', 'msstore') }
-            $null = & winget @listArgs 2>$null
-            if ($LASTEXITCODE -ne 0) {
-                return @{ State = 'NotInstalled'; Reason = "winget list --id $id returned $LASTEXITCODE." }
+            $probe = Test-WingetPackageInstalled -Package $Package
+            if (-not $probe.Installed) {
+                return @{ State = 'NotInstalled'; Reason = "$($probe.Command) returned $($probe.ExitCode)." }
             }
         } catch {
             Write-Verbose "Update-WingetPackage: presence probe failed: $($_.Exception.Message)"
