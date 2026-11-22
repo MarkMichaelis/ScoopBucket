@@ -18,8 +18,10 @@ function Update-PackageCompletion {
         'pscompletions', 'native', or 'auto' (with or without a
         NativeCommandScript), confirms each CliCommand resolves via
         Get-Command, and calls Register-PackageCompletion when no block
-        exists in the profile. Existing sentinel blocks are preserved
-        unless -Force is passed.
+        exists in the profile, or when the block dot-sources a completion
+        file that is missing on this machine (#532 -- the profile roams,
+        %ProgramData% does not). Other existing sentinel blocks are
+        preserved unless -Force is passed.
 
         Native-mode repairs use the NativeCommandOutputs hashtable that
         Get-BundlePackages pre-captures in its child runspace — so the
@@ -100,6 +102,7 @@ function Update-PackageCompletion {
     }
 
     $results = New-Object System.Collections.Generic.List[object]
+    $sidecarMissingNote = 'Completion file was missing on this machine; regenerated.'
 
     foreach ($b in $bundles) {
         foreach ($p in $b.Packages) {
@@ -146,9 +149,11 @@ function Update-PackageCompletion {
                     continue
                 }
 
-                $blockPattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($cli))`:BEGIN \w+"
-                $alreadyHas   = [regex]::IsMatch($existingContent, $blockPattern)
-                if ($alreadyHas -and -not $Force) {
+                # A block that dot-sources a missing sidecar is not healthy
+                # (#532): repair it even without -Force.
+                $blockState = Get-PackageCompletionBlockState -Content $existingContent -Cli $cli
+                $repairNote = if ($blockState -eq 'SidecarMissing') { $sidecarMissingNote } else { $null }
+                if ($blockState -eq 'Intact' -and -not $Force) {
                     $results.Add([pscustomobject]@{
                         Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
                         Mode = $displayMode; Action = 'Preserved'; Source = 'Existing'
@@ -239,7 +244,7 @@ function Update-PackageCompletion {
                         Mode = $displayMode
                         Action = $(if ($r.Source -eq 'Skipped') { 'Skipped' } else { 'Registered' })
                         Source = $r.Source
-                        Reason = $r.Reason
+                        Reason = $(if ($r.Reason) { $r.Reason } else { $repairNote })
                     })
                 } catch {
                     $results.Add([pscustomobject]@{
@@ -290,8 +295,9 @@ function Update-PackageCompletion {
             continue
         }
 
-        $blockPattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($def.Cli))`:BEGIN \w+"
-        if ([regex]::IsMatch($existingContent, $blockPattern) -and -not $Force) {
+        $blockState = Get-PackageCompletionBlockState -Content $existingContent -Cli $def.Cli
+        $repairNote = if ($blockState -eq 'SidecarMissing') { $sidecarMissingNote } else { $null }
+        if ($blockState -eq 'Intact' -and -not $Force) {
             $results.Add([pscustomobject]@{
                 Cli = $def.Cli; Package = $def.Script; Bundle = 'procedural'
                 Mode = 'native'; Action = 'Preserved'; Source = 'Existing'
@@ -322,7 +328,7 @@ function Update-PackageCompletion {
                 Mode = 'native'
                 Action = $(if ($r.Source -eq 'Skipped') { 'Skipped' } else { 'Registered' })
                 Source = $r.Source
-                Reason = $r.Reason
+                Reason = $(if ($r.Reason) { $r.Reason } else { $repairNote })
             })
         } catch {
             $results.Add([pscustomobject]@{
