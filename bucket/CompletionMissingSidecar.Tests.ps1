@@ -25,6 +25,11 @@ BeforeAll {
 
     # Load $ProfilePath in a fresh pwsh, then run every PowerShell.OnIdle
     # subscriber's Action (OnIdle never fires in a non-interactive child).
+    # Running the Action's text with & (rather than raising the event, as
+    # Test-PackageCompletionWorks does, #539) keeps its warnings on the
+    # warning stream, but dot-sources each sidecar into a throwaway scope.
+    # That is fine here only because these synthetic sidecars define no
+    # helper functions; one that does would need the real event.
     # Returns the warnings raised during profile load and the drain, plus the
     # completion matches for "$Probe" when one is given. Each name in
     # -Commands is defined as a function first so the blocks' Get-Command

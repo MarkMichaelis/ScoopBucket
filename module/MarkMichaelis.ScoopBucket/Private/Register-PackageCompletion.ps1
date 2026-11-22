@@ -774,7 +774,12 @@ function Test-PackageCompletionWorks {
         registered completer: the engine's file-name fallback (ProviderItem /
         ProviderContainer results) is excluded, so a CLI whose completer is
         missing or broken is not Verified just because the current
-        directory has files in it (#539).
+        directory has files in it (#539). The flip side: a completer that
+        only ever offers file paths reads as not Verified too.
+
+        When not Verified, Reason also carries any warning the deferred
+        registration raised (for example a missing completion file, #532)
+        and the count of blocks still queued if the drain did not finish.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -806,9 +811,13 @@ function Test-PackageCompletionWorks {
     # The probe script: dot-source the profile, then ask the completion
     # engine to complete `$Cli ` (trailing space triggers argument
     # completion). Emit JSON so the parent process can deserialize.
+    # Both literals are single-quoted, so double every quote character
+    # PowerShell accepts there (ASCII and curly, as the loader does).
+    $profileLiteral = $ProfilePath -replace "($script:CompletionQuoteChar)", '$1$1'
+    $lineLiteral = "$Cli " -replace "($script:CompletionQuoteChar)", '$1$1'
     $probe = @"
 `$ErrorActionPreference='SilentlyContinue'
-. '$ProfilePath' 2>`$null
+. '$profileLiteral' 2>`$null
 # The profile blocks written by Register-PackageCompletion defer their
 # Register-ArgumentCompleter calls to a single PowerShell.OnIdle
 # subscriber that drains a shared queue (#220). OnIdle does not
@@ -817,37 +826,57 @@ function Test-PackageCompletionWorks {
 # interactive shell would. Re-running the Action's text with & instead
 # would dot-source every sidecar into a throwaway scope, losing the
 # helper functions Cobra-generated completers (gh, rclone) call on
-# every Tab (#539).
-`$null = New-Event -SourceIdentifier PowerShell.OnIdle
-for (`$i = 0; `$i -lt 250 -and `$Global:__ScoopBucketCompletionQueue -and `$Global:__ScoopBucketCompletionQueue.Count; `$i++) {
+# every Tab (#539). One raise does not run every subscriber, and older
+# profiles register one per block, so raise until none is left or the
+# count stops falling (a permanent subscriber of someone else's).
+`$stalled = 0; `$previous = -1; `$pending = 0
+for (`$i = 0; `$i -lt 250; `$i++) {
+    `$subs = @(Get-EventSubscriber -SourceIdentifier PowerShell.OnIdle -ErrorAction SilentlyContinue).Count
+    `$pending = if (`$Global:__ScoopBucketCompletionQueue) { `$Global:__ScoopBucketCompletionQueue.Count } else { 0 }
+    if (`$pending -eq 0) {
+        if (`$subs -eq 0) { break }
+        if (`$subs -eq `$previous) { `$stalled++; if (`$stalled -ge 5) { break } } else { `$stalled = 0 }
+    }
+    `$previous = `$subs
+    `$null = New-Event -SourceIdentifier PowerShell.OnIdle
     Start-Sleep -Milliseconds 20
 }
-`$line = '$Cli '
+`$line = '$lineLiteral'
 `$cc = [System.Management.Automation.CommandCompletion]::CompleteInput(`$line, `$line.Length, `$null)
 # With no completer answering, the engine falls back to file names in the
 # current directory (#539). Those are not evidence of a working completer.
 `$all = @(`$cc.CompletionMatches)
 `$answered = @(`$all | Where-Object { `$_.ResultType -notin 'ProviderItem', 'ProviderContainer' })
 `$results = @(`$answered | Select-Object -First 25 -ExpandProperty CompletionText)
-@{ Count = `$answered.Count; FallbackCount = `$all.Count - `$answered.Count; Matches = `$results } | ConvertTo-Json -Compress
+@{ Count = `$answered.Count; FallbackCount = `$all.Count - `$answered.Count; Pending = `$pending; Matches = `$results } | ConvertTo-Json -Compress
 "@
-    $probeFile = Join-Path $env:TEMP "ScoopBucket-completion-probe-$Cli-$PID.ps1"
+    $probeFile = Join-Path $env:TEMP "ScoopBucket-completion-probe-$PID-$([guid]::NewGuid().ToString('N')).ps1"
     try {
         Set-Content -Path $probeFile -Value $probe -Encoding UTF8
-        $json = & $pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probeFile 2>$null
+        # Warnings from the deferred registration (a missing or failing
+        # completion file, #532) reach the child's stdout ahead of the JSON.
+        $out = @(& $pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probeFile 2>$null | ForEach-Object { "$_" })
+        $warnings = @($out | Where-Object { $_ -like 'WARNING:*' } | ForEach-Object { $_.Substring(8).Trim() })
+        $warned = if ($warnings) { " Registration warned: $($warnings -join ' | ')" } else { '' }
+        $json = $out | Where-Object { $_.StartsWith('{') } | Select-Object -Last 1
         if (-not $json) {
             return [pscustomobject]@{
                 Cli = $Cli; Verified = $false; MatchCount = 0; FirstMatches = @()
-                Reason = 'Probe produced no output.'
+                Reason = "Probe produced no output.$warned"
             }
         }
         $obj = $json | ConvertFrom-Json -ErrorAction Stop
         $count = [int]$obj.Count
         $fallback = [int]$obj.FallbackCount
+        $pending = [int]$obj.Pending
         $matches = @($obj.Matches)
         $reason = if ($count -ge 1) { $null }
             elseif ($fallback -ge 1) { "No completer answered for '$Cli'; the engine fell back to $fallback file name(s)." }
             else { 'Completion engine returned 0 matches.' }
+        if ($reason) {
+            if ($pending -gt 0) { $reason += " Deferred registration did not finish: $pending block(s) still queued." }
+            $reason += $warned
+        }
         return [pscustomobject]@{
             Cli = $Cli
             Verified = ($count -ge 1)

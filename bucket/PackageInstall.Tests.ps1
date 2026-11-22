@@ -630,5 +630,45 @@ Register-ArgumentCompleter -Native -CommandName pwsh -ScriptBlock {
             $r.Verified     | Should -BeTrue -Because "the helper must survive the drain. Reason: $($r.Reason)"
             $r.FirstMatches | Should -Contain 'alphaopt'
         }
+
+        It 'runs every OnIdle subscriber, as legacy profiles with one subscriber per block need' {
+            # Before the shared queue (#220), each block registered its own
+            # one-shot OnIdle subscriber. One raised event does not run them all.
+            $p = Join-Path $TestDrive 'many-subscribers.ps1'
+            $subs = foreach ($n in 1..5) {
+                $body = if ($n -eq 5) {
+                    "Register-ArgumentCompleter -Native -CommandName pwsh -ScriptBlock { [System.Management.Automation.CompletionResult]::new('alphaopt', 'alphaopt', 'ParameterValue', 'alphaopt') }"
+                } else { "`$null = $n" }
+                "`$null = Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -MaxTriggerCount 1 -Action { $body }"
+            }
+            Set-Content -Path $p -Encoding UTF8 -Value ($subs -join "`n")
+            Push-Location $script:probeDir
+            try { $r = & $script:ProbeFn -Cli 'pwsh' -ProfilePath $p } finally { Pop-Location }
+            $r.Verified | Should -BeTrue -Because "the fifth subscriber registers the completer. Reason: $($r.Reason)"
+        }
+
+        It 'reports a warning raised while registering instead of failing to read the probe' {
+            # A block whose completion file is missing warns from the OnIdle
+            # Action (#532); the warning reaches the child's stdout.
+            $p = Join-Path $TestDrive 'warning-profile.ps1'
+            Set-Content -Path $p -Encoding UTF8 -Value @'
+$null = Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -MaxTriggerCount 1 -Action { Write-Warning 'probe-sidecar-missing-warning' }
+'@
+            Push-Location $script:probeDir
+            try { $r = & $script:ProbeFn -Cli 'pwsh' -ProfilePath $p } finally { Pop-Location }
+            $r.Verified | Should -BeFalse
+            $r.Reason   | Should -Match 'probe-sidecar-missing-warning'
+            $r.Reason   | Should -Not -Match 'Probe error'
+        }
+
+        It 'loads a profile whose path contains an apostrophe' {
+            $dir = Join-Path $TestDrive "o'brien"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $p = Join-Path $dir 'profile.ps1'
+            Set-Content -Path $p -Encoding UTF8 -Value "Register-ArgumentCompleter -Native -CommandName pwsh -ScriptBlock { [System.Management.Automation.CompletionResult]::new('alphaopt', 'alphaopt', 'ParameterValue', 'alphaopt') }"
+            Push-Location $script:probeDir
+            try { $r = & $script:ProbeFn -Cli 'pwsh' -ProfilePath $p } finally { Pop-Location }
+            $r.Verified | Should -BeTrue -Because "Reason: $($r.Reason)"
+        }
     }
 }
