@@ -23,6 +23,12 @@ function Update-PackageCompletion {
         %ProgramData% does not). Other existing sentinel blocks are
         preserved unless -Force is passed.
 
+        It then removes stale copies from $PROFILE.AllUsersAllHosts: blocks
+        written there before #397 that the per-user profile now supersedes
+        (#540). A machine block with no per-user counterpart is kept. Writing
+        $PSHOME\profile.ps1 needs elevation; an unelevated run removes
+        nothing and warns once with the count and the path.
+
         Native-mode repairs use the NativeCommandOutputs hashtable that
         Get-BundlePackages pre-captures in its child runspace — so the
         repair walks need no access to the original `<cli> completion
@@ -55,9 +61,10 @@ function Update-PackageCompletion {
     .OUTPUTS
         PSCustomObject[] — one record per (Cli, Package) candidate,
         with Cli, Package, Bundle, Mode, Action (Registered | Preserved
-        | Skipped | WhatIf), Source (Native | Existing | Skipped |
-        WhatIf — 'Existing' accompanies Action='Preserved', 'WhatIf'
-        accompanies a -WhatIf preview row; PSCompletions was removed in
+        | Removed | Skipped | WhatIf), Source (Native | Existing | Skipped |
+        WhatIf | Superseded — 'Existing' accompanies Action='Preserved', 'WhatIf'
+        accompanies a -WhatIf preview row, 'Superseded' marks a stale
+        AllUsersAllHosts copy (#540); PSCompletions was removed in
         #241), and Reason fields. WhatIf preview rows carry an empty
         Reason — the Action column already says 'WhatIf' — and do NOT
         emit the built-in "What if:" host line (the returned summary
@@ -339,6 +346,18 @@ function Update-PackageCompletion {
         }
     }
 
+    # Blocks written before #397 to $PROFILE.AllUsersAllHosts load first and
+    # duplicate the per-user ones (#540). Remove each copy the per-user
+    # profile now supersedes. Never touches the real machine profile when
+    # -ProfilePath redirects the per-user one to a sandbox.
+    $legacyProfile = Resolve-SupersededCompletionProfilePath -OverridePath $ProfilePath
+    if ($legacyProfile) {
+        $currentUserContent = if ($profileTarget) { Read-PackageCompletionProfileContent -Path $profileTarget } else { '' }
+        foreach ($row in @(Remove-SupersededCompletionBlock -CurrentUserContent $currentUserContent -LegacyProfilePath $legacyProfile)) {
+            if ($row) { $results.Add($row) }
+        }
+    }
+
     $arr = $results.ToArray()
 
     # Tag every row with a type name so the format view can render a tidy,
@@ -369,7 +388,7 @@ function Update-PackageCompletion {
     # the profile) and Skipped (CLI absent / no native source) are the quiet
     # majority; summarize their counts on a host-only line that, unlike the
     # removed #276 tally, never duplicates a visible row.
-    $changed = @('Registered', 'WhatIf')
+    $changed = @('Registered', 'Removed', 'WhatIf')
     $shown = New-Object System.Collections.Generic.List[object]
     $suppressed = @{}
     foreach ($row in $arr) {

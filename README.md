@@ -707,6 +707,12 @@ Behavior:
   the shell prints a warning naming the CLI, the path and the repair
   command (`Update-PackageCompletion`, or `-Force` for a load error).
   A block for a CLI that is not installed stays silent.
+- Stale machine-profile copies are cleaned up (#540). Blocks written
+  before #397 live in `$PROFILE.AllUsersAllHosts` (`$PSHOME\profile.ps1`),
+  which loads first. Each run removes every such block whose CLI also has
+  a block in your profile, and keeps any that has none. That file needs
+  an elevated shell to write; an unelevated run changes nothing and warns
+  once with the count and the path. A second run finds nothing to do.
 - `-Force` is opt-in for ad-hoc invocations (defaults to gap-fill
   only); the bundle installers pass `-Force` explicitly so reinstalls
   always refresh blocks.
