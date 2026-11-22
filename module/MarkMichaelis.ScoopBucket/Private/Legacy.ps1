@@ -893,11 +893,7 @@ function Register-CliCompletion {
     if ($resolved.Source -eq 'Native' -and $resolved.NativePayload) {
         $sidecarDir  = Get-PackageCompletionSidecarDirectory -ProfilePath $target -OverrideDirectory $SidecarDirectory
         $sidecarPath = Write-PackageCompletionSidecar -Cli $Cli -Payload $resolved.NativePayload -Directory $sidecarDir
-        # Escape any embedded apostrophes for the single-quoted dot-source
-        # path (PowerShell single-quote strings escape `'` as `''`). Real
-        # install paths can contain apostrophes (e.g. "C:\Users\O'Brien").
-        $escapedPath = $sidecarPath -replace "'", "''"
-        $blockCode = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n    . '$escapedPath'`r`n}"
+        $blockCode = Format-CompletionSidecarLoader -Cli $Cli -SidecarPath $sidecarPath
     }
     $newContent = Set-CompletionProfileBlock -Content $content -Cli $Cli -Block $blockCode -Force:$true
     $tmp = "$target.tmp"
