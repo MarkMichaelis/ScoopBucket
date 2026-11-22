@@ -469,7 +469,10 @@ function Get-AIAgentsMcpJsonAgent {
     @(
         @{ Label = 'Claude Desktop';     Path = (Join-Path $env:APPDATA     'Claude\claude_desktop_config.json') }
         @{ Label = 'Claude Code CLI';    Path = (Join-Path $env:USERPROFILE '.claude.json') }
-        @{ Label = 'Gemini CLI';         Path = (Join-Path $env:USERPROFILE '.gemini\settings.json') }
+        # Antigravity CLI, the Antigravity 2.0 app and the IDE share this
+        # global file (antigravity.google/docs/mcp). It replaces Gemini CLI's
+        # ~/.gemini/settings.json, which is no longer written (#535).
+        @{ Label = 'Antigravity';        Path = (Join-Path $env:USERPROFILE '.gemini\config\mcp_config.json') }
         @{ Label = 'GitHub Copilot CLI'; Path = (Join-Path $env:USERPROFILE '.copilot\mcp-config.json') }
     )
 }

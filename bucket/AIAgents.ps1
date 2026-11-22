@@ -159,8 +159,22 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
         Name      = 'Gemini'
         Installer = 'scoop'
         Id        = 'MarkMichaelis/Gemini'
-        Companions = @('Gemini CLI')
-        CISkip    = 'Browser-watch installer requires interactive Download click; see #25/#26.'
+        # Google's terminal agent is Antigravity CLI now that Gemini CLI no
+        # longer serves individual accounts (#535).
+        Companions = @('Antigravity CLI')
+        CISkip    = 'Wraps winget Google.GeminiDesktop, a user-scope nullsoft installer (#534) not yet validated on a headless Server runner.'
+    }
+    # Antigravity 2.0, Google's desktop agent app (antigravity.google). Not the
+    # Antigravity IDE (Google.AntigravityIDE, a VS Code fork): owner decision,
+    # #535. The winget manifest declares a nullsoft installer with Scope: user
+    # and no machine variant, so Scope='user' is required; without it winget
+    # walks back to a stale machine-applicable version (#433).
+    [Package]@{
+        Name      = 'Antigravity'
+        Installer = 'winget'
+        Id        = 'Google.Antigravity'
+        Scope     = 'user'
+        Notes     = 'Antigravity 2.0 desktop agent app, winget Google.Antigravity (publisher Google). User-scope nullsoft only. Shares ~/.gemini/config/mcp_config.json with Antigravity CLI, which the MCP Server Configuration entry below writes.'
     }
     [Package]@{
         Name      = 'Microsoft Copilot'
@@ -368,23 +382,31 @@ Register-ArgumentCompleter -Native -CommandName codex -ScriptBlock {
 "@
         }
     }
+    # Antigravity CLI replaces Gemini CLI, which Google stopped serving to
+    # individual accounts on 2026-06-18 (#535). Gemini CLI is no longer
+    # declared; an existing install is left for the owner to remove
+    # (choco uninstall gemini-cli; scoop uninstall GeminiCli -g).
     [Package]@{
-        Name        = 'Gemini CLI'
-        Installer   = 'scoop'
-        Id          = 'MarkMichaelis/GeminiCli'
-        CliCommands = @('gemini')
-        DependsOn   = @('Node.js')
+        Name        = 'Antigravity CLI'
+        Installer   = 'winget'
+        Id          = 'Google.AntigravityCLI'
+        CliCommands = @('agy')
         Completion  = 'auto'
-        Notes       = 'gemini has no completion subcommand and no PSCompletions entry. Hand-curated top-level command/flag list.'
-        ExpectedCompletions = @{ gemini = @('--help','--version','--model') }
+        Notes       = 'Antigravity CLI (agy), Google''s terminal coding agent (antigravity.google/docs/cli). winget per README rule 1: Google.AntigravityCLI is a portable install whose manifest declares the command alias agy and no Scope, so the machine-scope install links agy into C:\Program Files\WinGet\Links (same shape as grok). agy has no completion subcommand and no PSCompletions entry; hand-curated top-level subcommand/flag list. The MCP Server Configuration entry below writes the bucket''s MCP servers into ~/.gemini/config/mcp_config.json, which the CLI shares with the Antigravity app and IDE.'
+        # Drawn from `agy --help` of the real 1.4.12 binary.
+        ExpectedCompletions = @{ agy = @('--help','--model','mcp','models') }
         NativeCommandScript = {
             @"
-Register-ArgumentCompleter -Native -CommandName gemini -ScriptBlock {
+Register-ArgumentCompleter -Native -CommandName agy -ScriptBlock {
     param(`$wordToComplete, `$commandAst, `$cursorPosition)
     @(
-        '--help','--version','--model','--prompt','--sandbox','--debug','--all-files',
-        '--yolo','--checkpointing','--telemetry','--telemetry-target','--allowed-mcp-server-names',
-        '--extensions','--list-extensions','mcp','--show-memory-usage'
+        'agent','agents','changelog','help','install','mcp','mic-serve','models','plugin','plugins',
+        'remote-control','update',
+        '--help','--version','--add-dir','--agent','-c','--continue','--conversation',
+        '--dangerously-skip-permissions','--disable-slash-commands','--effort','-i','--input-format',
+        '--json-schema','--log-file','--mode','--model','--new-project','--output-format','-p','--print',
+        '--print-timeout','--project','--prompt','--prompt-interactive','--remote-control','--sandbox',
+        '--settings'
     ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
         [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
     }
