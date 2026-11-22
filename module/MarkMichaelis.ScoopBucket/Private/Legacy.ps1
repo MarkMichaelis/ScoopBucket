@@ -704,7 +704,7 @@ function Set-CompletionProfileBlock {
     $ver = $script:CompletionSentinelVersion
     $begin = "# ScoopBucket:CliCompletion:$Cli`:BEGIN $ver"
     $end = "# ScoopBucket:CliCompletion:$Cli`:END"
-    $pattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:BEGIN \w+.*?^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:END\r?\n?"
+    $pattern = Get-CompletionBlockPattern -Cli $Cli
     $newBlock = "$begin`r`n$Block`r`n$end`r`n"
     $match = [regex]::Match($Content, $pattern)
     if ($match.Success) {
