@@ -440,6 +440,33 @@ exit /b 1
             (Get-Content -Path $script:JsonPath -Raw) | Should -Not -Match 'leaked'
         }
 
+        It 'keeps user-managed keys on an existing entry while refreshing command and args (#535)' {
+            # Antigravity's app toggles `disabled` and tool filters in this
+            # shared file; a re-run must not silently re-enable a server.
+            $initial = @{
+                mcpServers = @{
+                    github = @{
+                        command        = 'old'
+                        args           = @('stale')
+                        disabled       = $true
+                        disabledTools  = @('create_issue')
+                        timeoutSeconds = 30
+                    }
+                }
+            }
+            $initial | ConvertTo-Json -Depth 10 | Set-Content -Path $script:JsonPath -Encoding UTF8
+
+            $server = @{ Name = 'github'; Command = 'npx'; Arguments = @('-y','@modelcontextprotocol/server-github') }
+            Add-McpServerToJsonConfig -Path $script:JsonPath -AgentLabel 'Test' -Server $server
+
+            $entry = (Get-Content -Path $script:JsonPath -Raw | ConvertFrom-Json).mcpServers.github
+            $entry.command          | Should -Be 'npx'
+            @($entry.args)          | Should -Be @('-y','@modelcontextprotocol/server-github')
+            $entry.disabled         | Should -BeTrue
+            @($entry.disabledTools) | Should -Be @('create_issue')
+            $entry.timeoutSeconds   | Should -Be 30
+        }
+
         It 'still emits env when Server has a populated Env hashtable (other servers, sanity check)' {
             $server = @{
                 Name = 'with-env'; Command = 'foo'; Arguments = @()
