@@ -50,6 +50,18 @@ Describe 'Gemini: the Heavy-test hint verifies the Gemini app, not the Google ap
     # Google app's google.exe, so it reported the wrong app either way.
     BeforeAll {
         $script:hint = (& (Join-Path $script:bucketRoot 'ManifestTestHints.ps1'))['Gemini']
+
+        # Pester can only mock a command that resolves, so stub winget where
+        # it is not installed. Restore $LASTEXITCODE so the mocked exit codes
+        # do not leak into later tests.
+        $script:savedExitCode = $global:LASTEXITCODE
+        $script:stubbedWinget = -not (Get-Command winget -ErrorAction SilentlyContinue)
+        if ($script:stubbedWinget) { function global:winget { } }
+    }
+
+    AfterAll {
+        if ($script:stubbedWinget) { Remove-Item Function:\winget -ErrorAction SilentlyContinue }
+        $global:LASTEXITCODE = $script:savedExitCode
     }
 
     It 'is a Custom check' {
