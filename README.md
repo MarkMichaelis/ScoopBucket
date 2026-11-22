@@ -712,7 +712,9 @@ Behavior:
   which loads first. Each run removes every such block whose CLI also has
   a block in your profile, and keeps any that has none. That file needs
   an elevated shell to write; an unelevated run changes nothing and warns
-  once with the count and the path. A second run finds nothing to do.
+  once with the count and the path, on every run until one elevated run
+  cleans it up. A second run finds nothing to do. The file is rewritten
+  in place (its ACL is kept), and only if it is UTF-8 text.
 - `-Force` is opt-in for ad-hoc invocations (defaults to gap-fill
   only); the bundle installers pass `-Force` explicitly so reinstalls
   always refresh blocks.

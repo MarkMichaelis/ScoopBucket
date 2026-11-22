@@ -54,11 +54,29 @@ function Remove-SupersededCompletionBlock {
 
     if (-not (Test-Path -LiteralPath $LegacyProfilePath)) { return }
 
-    $content = Read-PackageCompletionProfileContent -Path $LegacyProfilePath
+    # Decode strictly so a file that is not UTF-8 is never rewritten as if it
+    # were (that would bake replacement characters into a machine-wide
+    # file), and remember the BOM so the rewrite keeps it.
+    $bytes = [System.IO.File]::ReadAllBytes($LegacyProfilePath)
+    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    $offset = if ($hasBom) { 3 } else { 0 }
+    $isUtf8 = $true
+    try {
+        $content = [System.Text.UTF8Encoding]::new($false, $true).GetString($bytes, $offset, $bytes.Length - $offset)
+    } catch [System.Text.DecoderFallbackException] {
+        $isUtf8 = $false
+        $content = [System.Text.Encoding]::UTF8.GetString($bytes, $offset, $bytes.Length - $offset)
+    }
+
+    # A per-user block counts only when it is complete (BEGIN through its
+    # own END): a truncated one may not work, and the machine copy may be
+    # the only registration that does.
     $beginPattern = '(?m)^# ScoopBucket:CliCompletion:(?<cli>[^:\r\n]+):BEGIN\b'
-    $userClis = [System.Collections.Generic.HashSet[string]]::new(
-        [string[]]@([regex]::Matches($CurrentUserContent, $beginPattern) | ForEach-Object { $_.Groups['cli'].Value }),
-        [StringComparer]::OrdinalIgnoreCase)
+    $userClis = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($m in [regex]::Matches($CurrentUserContent, $beginPattern)) {
+        $name = $m.Groups['cli'].Value
+        if ([regex]::IsMatch($CurrentUserContent, (Get-CompletionBlockPattern -Cli $name))) { [void]$userClis.Add($name) }
+    }
     $candidates = @([regex]::Matches($content, $beginPattern) |
         ForEach-Object { $_.Groups['cli'].Value } |
         Where-Object { $userClis.Contains($_) } |
@@ -87,6 +105,12 @@ function Remove-SupersededCompletionBlock {
         }
     }
 
+    if (-not $isUtf8) {
+        Write-Warning ("ScoopBucket: '{0}' holds {1} completion block(s) that duplicate blocks in your profile, but it is not UTF-8 text, so it was left untouched rather than risk corrupting it. Remove its '# ScoopBucket:CliCompletion:' blocks for {2} by hand." -f $LegacyProfilePath, $removed.Count, ($removed -join ', '))
+        foreach ($cli in $removed) { & $row $cli 'Skipped' "'$LegacyProfilePath' is not UTF-8 text; left untouched." }
+        return
+    }
+
     # -WhatIf preview without ShouldProcess's host line, as
     # Update-PackageCompletion does (#287): the rows are the record.
     if ($WhatIfPreference) {
@@ -99,12 +123,13 @@ function Remove-SupersededCompletionBlock {
         return
     }
 
-    $tmp = "$LegacyProfilePath.tmp"
+    # Write in place. Replacing the file (temp + move) would hand this
+    # machine-wide file the folder's inherited ACL and a new owner. Opening
+    # it for write fails before truncating when the shell is not elevated.
     try {
-        [System.IO.File]::WriteAllText($tmp, $newContent, [System.Text.UTF8Encoding]::new($false))
-        Move-Item -LiteralPath $tmp -Destination $LegacyProfilePath -Force -ErrorAction Stop
+        $encoding = if ($hasBom) { 'utf8BOM' } else { 'utf8NoBOM' }
+        Set-Content -LiteralPath $LegacyProfilePath -Value $newContent -NoNewline -Encoding $encoding -ErrorAction Stop
     } catch {
-        Remove-Item -LiteralPath $tmp -ErrorAction Ignore
         Write-Warning ("ScoopBucket: {0} completion block(s) in '{1}' duplicate blocks in your profile and could not be removed ({2}). Re-run Update-PackageCompletion from an elevated shell to remove them." -f $removed.Count, $LegacyProfilePath, $_.Exception.GetBaseException().Message)
         foreach ($cli in $removed) { & $row $cli 'Skipped' "Could not write '$LegacyProfilePath'; needs an elevated shell." }
         return

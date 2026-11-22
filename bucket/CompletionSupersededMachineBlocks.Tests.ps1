@@ -89,10 +89,66 @@ Describe 'Remove-SupersededCompletionBlock' -Tag 'Light','Completion' {
         (Get-FileHash $machine).Hash | Should -Be $hash
     }
 
+    It 'keeps user code that sits between a block that lost its END and a later copy of that block' {
+        $truncated = "# ScoopBucket:CliCompletion:alpha:BEGIN v1`r`nif (Get-Command alpha) { . 'x' }`r`n"
+        $machine = script:New-MachineProfile -Content ($truncated + "Set-Alias ll Get-ChildItem # user-line-keep`r`n" + (script:Block alpha))
+        script:Invoke-Removal -CurrentUserContent (script:Block alpha 'v4') -MachinePath $machine | Out-Null
+        Get-Content -Raw $machine | Should -Match 'user-line-keep' -Because 'a removal must never span from one block''s BEGIN to another block''s END'
+    }
+
+    It 'keeps the machine copy when the current-user block for that CLI is incomplete' {
+        $machine = script:New-MachineProfile -Content (script:Block alpha)
+        $hash = (Get-FileHash $machine).Hash
+        $incomplete = "# ScoopBucket:CliCompletion:alpha:BEGIN v4`r`n# (END line lost)`r`n"
+        @(script:Invoke-Removal -CurrentUserContent $incomplete -MachinePath $machine) | Should -BeNullOrEmpty
+        (Get-FileHash $machine).Hash | Should -Be $hash -Because 'the machine copy may be the only working registration'
+    }
+
+    It 'leaves a machine profile that is not UTF-8 untouched, and says so' {
+        $path = Join-Path $TestDrive 'machine-cp1252.ps1'
+        $text = "# caf" + [char]0xE9 + " note`r`n" + (script:Block alpha)
+        [System.IO.File]::WriteAllText($path, $text, [System.Text.Encoding]::GetEncoding(1252))
+        $hash = (Get-FileHash $path).Hash
+
+        $out = @(script:Invoke-Removal -CurrentUserContent (script:Block alpha 'v4') -MachinePath $path 3>&1)
+
+        (Get-FileHash $path).Hash | Should -Be $hash -Because 'rewriting non-UTF-8 text as UTF-8 would corrupt it'
+        $warnings = @($out | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
+        $warnings.Count | Should -Be 1
+        $warnings[0].Message | Should -Match 'UTF-8'
+    }
+
+    It 'keeps a UTF-8 byte order mark' {
+        $path = Join-Path $TestDrive 'machine-bom.ps1'
+        [System.IO.File]::WriteAllText($path, ("# head`r`n" + (script:Block alpha)), [System.Text.UTF8Encoding]::new($true))
+        script:Invoke-Removal -CurrentUserContent (script:Block alpha 'v4') -MachinePath $path | Out-Null
+        $bytes = [System.IO.File]::ReadAllBytes($path)
+        ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) | Should -BeTrue
+        Get-Content -Raw $path | Should -Not -Match 'CliCompletion:alpha:'
+    }
+
+    It 'rewrites the machine profile in place, so an explicit ACL entry on it survives' {
+        # Replacing the file (temp + move) would give it the folder's
+        # inherited ACL and a new owner. (Creation time is no witness:
+        # NTFS tunneling hands a re-created name its old creation time.)
+        $machine = script:New-MachineProfile -Content ("# head`r`n" + (script:Block alpha))
+        $everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')
+        $acl = Get-Acl -LiteralPath $machine
+        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($everyone, 'Read', 'Allow'))
+        Set-Acl -LiteralPath $machine -AclObject $acl
+
+        script:Invoke-Removal -CurrentUserContent (script:Block alpha 'v4') -MachinePath $machine | Out-Null
+
+        Get-Content -Raw $machine | Should -Not -Match 'CliCompletion:alpha:'
+        $explicit = @((Get-Acl -LiteralPath $machine).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) |
+            Where-Object { $_.IdentityReference -eq $everyone })
+        $explicit.Count | Should -BeGreaterThan 0 -Because 'the file''s own ACL must not be replaced by the folder''s'
+    }
+
     It 'warns once, naming the file and elevation, and writes nothing when the machine profile is not writable' {
         $machine = script:New-MachineProfile -Content ((script:Block alpha) + (script:Block beta))
         $hash = (Get-FileHash $machine).Hash
-        Mock -ModuleName MarkMichaelis.ScoopBucket Move-Item { throw [System.UnauthorizedAccessException]::new('Access to the path is denied.') }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Set-Content { throw [System.UnauthorizedAccessException]::new('Access to the path is denied.') }
 
         $out = @(script:Invoke-Removal -CurrentUserContent ((script:Block alpha 'v4') + (script:Block beta 'v4')) -MachinePath $machine 3>&1)
 
@@ -104,13 +160,34 @@ Describe 'Remove-SupersededCompletionBlock' -Tag 'Light','Completion' {
         $warnings[0].Message | Should -Match '\b2\b' -Because 'the warning gives the count of blocks left behind'
         @($rows | ForEach-Object Action | Select-Object -Unique) | Should -Be @('Skipped')
         (Get-FileHash $machine).Hash | Should -Be $hash
-        @(Get-ChildItem -Path (Split-Path $machine) -Filter "$(Split-Path $machine -Leaf)*.tmp") | Should -BeNullOrEmpty -Because 'the temporary file must not be left behind'
     }
 
     It 'does nothing when there is no machine profile' {
         $missing = Join-Path $TestDrive 'no-such-machine-profile.ps1'
         @(script:Invoke-Removal -CurrentUserContent (script:Block alpha 'v4') -MachinePath $missing) | Should -BeNullOrEmpty
         Test-Path $missing | Should -BeFalse
+    }
+}
+
+Describe 'Completion block matching never spans another block' -Tag 'Light','Completion' {
+    # The same lazy BEGIN..END pattern also drove the per-user profile
+    # rewrites, so a block whose END was lost let a later END for the same
+    # CLI pull everything in between into the match (#540 review).
+
+    It 'Set-PackageCompletionProfileBlock replaces only the complete block, keeping code after a truncated one' {
+        $content = "# ScoopBucket:CliCompletion:alpha:BEGIN v4`r`nold-partial`r`n" +
+            "Set-Alias ll Get-ChildItem # user-line-keep`r`n" + (script:Block alpha 'v4')
+        $new = & $script:mod { param($c) Set-PackageCompletionProfileBlock -Content $c -Cli 'alpha' -Block 'new-body' } $content
+        $new | Should -Match 'user-line-keep'
+        $new | Should -Match 'new-body'
+    }
+
+    It 'Set-CompletionProfileBlock (legacy) replaces only the complete block, keeping code after a truncated one' {
+        $content = "# ScoopBucket:CliCompletion:alpha:BEGIN v1`r`nold-partial`r`n" +
+            "Set-Alias ll Get-ChildItem # user-line-keep`r`n" + (script:Block alpha 'v1')
+        $new = & $script:mod { param($c) Set-CompletionProfileBlock -Content $c -Cli 'alpha' -Block 'new-body' -Force } $content
+        $new | Should -Match 'user-line-keep'
+        $new | Should -Match 'new-body'
     }
 }
 

@@ -464,6 +464,25 @@ function Read-PackageCompletionProfileContent {
     return ''
 }
 
+function Get-CompletionBlockPattern {
+    <#
+    .SYNOPSIS
+        Regex for one complete completion block for $Cli: its BEGIN line
+        through its own END line.
+    .DESCRIPTION
+        The body may not contain any block's BEGIN line. A lazy BEGIN..END
+        match alone let a block whose END was lost run on to a later END for
+        the same CLI, so replacing or removing it deleted everything in
+        between, the user's own code included (#540). With this rule a
+        truncated block simply does not match.
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Cli)
+    $e = [regex]::Escape($Cli)
+    "(?ms)^\# ScoopBucket:CliCompletion:$e`:BEGIN \w+(?:(?!^\# ScoopBucket:CliCompletion:[^:\r\n]+:BEGIN ).)*?^\# ScoopBucket:CliCompletion:$e`:END\r?\n?"
+}
+
 function Remove-PackageCompletionProfileBlock {
     <#
     .SYNOPSIS
@@ -478,7 +497,7 @@ function Remove-PackageCompletionProfileBlock {
         [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
         [Parameter(Mandatory)][string]$Cli
     )
-    $pattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:BEGIN \w+.*?^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:END\r?\n?"
+    $pattern = Get-CompletionBlockPattern -Cli $Cli
     $match = [regex]::Match($Content, $pattern)
     if (-not $match.Success) {
         return [pscustomobject]@{ Changed = $false; Content = $Content }
@@ -581,7 +600,7 @@ function Set-PackageCompletionProfileBlock {
     $ver = $script:CompletionSentinelVersion
     $begin = "# ScoopBucket:CliCompletion:$Cli`:BEGIN $ver"
     $end   = "# ScoopBucket:CliCompletion:$Cli`:END"
-    $pattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:BEGIN \w+.*?^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:END\r?\n?"
+    $pattern = Get-CompletionBlockPattern -Cli $Cli
     $newBlock = "$begin`r`n$Block`r`n$end`r`n"
     $match = [regex]::Match($Content, $pattern)
     if ($match.Success) {
