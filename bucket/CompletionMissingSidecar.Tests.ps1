@@ -169,6 +169,60 @@ Describe 'Deferred completion block reports a broken sidecar' -Tag 'Light','Comp
     }
 }
 
+Describe 'Get-PackageCompletionBlockState' -Tag 'Light','Completion' {
+
+    BeforeAll {
+        $script:present = Join-Path $TestDrive 'present.ps1'
+        Set-Content -Path $script:present -Value '' -NoNewline
+        $script:absent = Join-Path $TestDrive 'absent.ps1'
+        function script:Get-State {
+            param([string]$Content, [string]$Cli)
+            & $script:mod { param($c, $n) Get-PackageCompletionBlockState -Content $c -Cli $n } $Content $Cli
+        }
+        function script:New-Block {
+            param([string]$Cli, [string]$Path, [switch]$NoEnd)
+            $loader = & $script:mod { param($c, $p) Format-CompletionSidecarLoader -Cli $c -SidecarPath $p } $Cli $Path
+            $text = "# ScoopBucket:CliCompletion:$Cli`:BEGIN v4`r`n$loader`r`n"
+            if (-not $NoEnd) { $text += "# ScoopBucket:CliCompletion:$Cli`:END`r`n" }
+            $text
+        }
+    }
+
+    It 'treats a block whose END sentinel was lost as present, not Absent' {
+        # Absent would make gap-fill append a second block for the CLI.
+        $content = (script:New-Block -Cli 'demotrunc' -Path $script:present -NoEnd)
+        script:Get-State -Content $content -Cli 'demotrunc' | Should -Be 'Intact'
+    }
+
+    It 'does not attribute the next block''s sidecar to a block missing its END' {
+        $content = (script:New-Block -Cli 'demotrunc' -Path $script:present -NoEnd) +
+                   (script:New-Block -Cli 'demonext' -Path $script:absent)
+        script:Get-State -Content $content -Cli 'demotrunc' | Should -Be 'Intact'
+        script:Get-State -Content $content -Cli 'demonext' | Should -Be 'SidecarMissing'
+    }
+
+    It 'reports SidecarMissing when any of several blocks for one CLI points at a missing file' {
+        $content = (script:New-Block -Cli 'demodup' -Path $script:present) +
+                   (script:New-Block -Cli 'demodup' -Path $script:absent)
+        script:Get-State -Content $content -Cli 'demodup' | Should -Be 'SidecarMissing'
+    }
+
+    It 'handles a path containing a curly apostrophe (PowerShell treats it as a quote)' {
+        $dir = Join-Path $TestDrive ("O" + [char]0x2019 + "Brien")
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $path = Join-Path $dir 'curly.ps1'
+        Set-Content -Path $path -Value '' -NoNewline
+        $content = script:New-Block -Cli 'democurly' -Path $path
+
+        $errs = $null
+        $null = [System.Management.Automation.Language.Parser]::ParseInput($content, [ref]$null, [ref]$errs)
+        $errs | Should -BeNullOrEmpty -Because "a curly apostrophe must be escaped like an ASCII one; got: $($errs -join '; ')"
+        script:Get-State -Content $content -Cli 'democurly' | Should -Be 'Intact'
+        Remove-Item -LiteralPath $path -Force
+        script:Get-State -Content $content -Cli 'democurly' | Should -Be 'SidecarMissing'
+    }
+}
+
 Describe 'Legacy Register-CliCompletion block reports a missing sidecar' -Tag 'Light','Completion' {
 
     It 'warns at profile load when the sidecar is missing' {
