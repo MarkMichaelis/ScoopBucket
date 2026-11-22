@@ -20,6 +20,10 @@
 
 $script:CompletionSentinelVersion = 'v4'
 
+# Characters PowerShell accepts as a single quote: ASCII plus the curly
+# variants. Inside a single-quoted string any of them must be doubled.
+$script:CompletionQuoteChar = "['`u{2018}`u{2019}`u{201A}`u{201B}]"
+
 # Default sidecar root for cached native completer payloads (v3+, #216).
 # Each registered CLI gets <Dir>\<cli>.ps1 holding the raw payload --
 # `.ps1` lets the payload's leading `using namespace ...` parse legally,
@@ -183,8 +187,9 @@ function Format-CompletionSidecarLoader {
         repair command. When the CLI itself is absent the block stays a
         silent no-op, as before.
 
-        Every value is emitted as a single-quoted literal ('' escapes '), so
-        an apostrophe or `$` in the path stays inert.
+        Every value is emitted as a single-quoted literal, so an apostrophe
+        or `$` in the path stays inert. PowerShell treats the curly
+        apostrophes as quote characters too, so they are doubled as well.
     #>
     [OutputType([string])]
     [CmdletBinding()]
@@ -192,7 +197,7 @@ function Format-CompletionSidecarLoader {
         [Parameter(Mandatory)][string]$Cli,
         [Parameter(Mandatory)][string]$SidecarPath
     )
-    $literal = { param($s) "'" + ($s -replace "'", "''") + "'" }
+    $literal = { param($s) "'" + ($s -replace "($script:CompletionQuoteChar)", '$1$1') + "'" }
     $path    = & $literal $SidecarPath
     $missing = & $literal "ScoopBucket: tab completion for '$Cli' is not loaded because '$SidecarPath' is missing on this machine. Run Update-PackageCompletion to regenerate it."
     $failed  = & $literal "ScoopBucket: tab completion for '$Cli' failed to load from '$SidecarPath': "
@@ -219,6 +224,11 @@ function Get-PackageCompletionBlockState {
         but cannot load, which is what the loader's warning tells the user to
         run (#532). A block that references no sidecar (older inline
         payloads) counts as Intact.
+
+        Presence keys on the BEGIN sentinel alone, as it did before: a block
+        whose END was lost (a sync conflict, a hand edit) still counts as
+        present and runs to the next block's BEGIN. Every block for the CLI
+        is checked, so a duplicate pointing at a missing file is caught.
     #>
     [OutputType([string])]
     [CmdletBinding()]
@@ -227,13 +237,18 @@ function Get-PackageCompletionBlockState {
         [Parameter(Mandatory)][string]$Cli
     )
     $e = [regex]::Escape($Cli)
-    $block = [regex]::Match($Content, "(?ms)^\# ScoopBucket:CliCompletion:$e`:BEGIN \w+.*?^\# ScoopBucket:CliCompletion:$e`:END")
-    if (-not $block.Success) { return 'Absent' }
+    $blocks = [regex]::Matches($Content,
+        "(?ms)^\# ScoopBucket:CliCompletion:$e`:BEGIN \w+.*?(?=^\# ScoopBucket:CliCompletion:$e`:END|^\# ScoopBucket:CliCompletion:[^:\r\n]+:BEGIN |\z)")
+    if ($blocks.Count -eq 0) { return 'Absent' }
     # The dot-source operator sits at the start of a line or right after `{`;
     # anchoring on that keeps the warning text's quoted path from matching.
-    foreach ($m in [regex]::Matches($block.Value, "(?m)(?:^|\{)\s*\.\s+'((?:[^']|'')+)'")) {
-        $path = $m.Groups[1].Value -replace "''", "'"
-        if (-not (Test-Path -LiteralPath $path)) { return 'SidecarMissing' }
+    # Delimiters are always ASCII quotes; doubled quote characters inside are
+    # escapes (see Format-CompletionSidecarLoader).
+    foreach ($block in $blocks) {
+        foreach ($m in [regex]::Matches($block.Value, "(?m)(?:^|\{)\s*\.\s+'((?:[^']|'')+)'")) {
+            $path = $m.Groups[1].Value -replace "($script:CompletionQuoteChar)\1", '$1'
+            if (-not (Test-Path -LiteralPath $path)) { return 'SidecarMissing' }
+        }
     }
     return 'Intact'
 }
