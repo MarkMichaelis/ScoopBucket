@@ -160,7 +160,7 @@ and reporting, so the script does not re-implement them.
 `Get-Command <tool>`, warns and returns when the tool is absent, then self-invokes
 its `Invoke-<Name>` function on the last line.
 
-**Bespoke shape** (`ClaudeExcel.ps1`, `Gemini.ps1`, `Chocolatey.ps1`,
+**Bespoke shape** (`ClaudeExcel.ps1`, `Chocolatey.ps1`,
 `McAfeeUninstall.ps1`): a single purpose-built `Install-<Name>` /
 `Uninstall-<Name>` function, self-invoked on the last line. No `$Packages` array,
 no tool guard. Common for installers that drive a vendor bootstrapper or an
