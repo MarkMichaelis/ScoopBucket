@@ -306,7 +306,26 @@ function Add-McpServerToJsonConfig {
         $entry | Add-Member -NotePropertyName env -NotePropertyValue $envObj
     }
 
-    if ($config.mcpServers.PSObject.Properties[$Server.Name]) {
+    $existing = $config.mcpServers.PSObject.Properties[$Server.Name]
+    if ($existing -and $existing.Value -is [pscustomobject]) {
+        # Refresh only the keys this bucket owns (command, args, env) and keep
+        # the rest. Agents keep user state on the entry -- Antigravity's app
+        # toggles `disabled` and tool filters in its shared mcp_config.json --
+        # and replacing the whole entry would silently undo it on every run
+        # (#535). env stays owned: dropping it when Server has none is how a
+        # previously written token is migrated out.
+        $current = $existing.Value
+        foreach ($key in 'command','args') {
+            $current | Add-Member -NotePropertyName $key -NotePropertyValue $entry.$key -Force
+        }
+        if ($entry.PSObject.Properties['env']) {
+            $current | Add-Member -NotePropertyName env -NotePropertyValue $entry.env -Force
+        }
+        elseif ($current.PSObject.Properties['env']) {
+            $current.PSObject.Properties.Remove('env')
+        }
+    }
+    elseif ($existing) {
         $config.mcpServers.($Server.Name) = $entry
     }
     else {
