@@ -126,6 +126,10 @@ function Remove-SupersededCompletionBlock {
     # Write in place. Replacing the file (temp + move) would hand this
     # machine-wide file the folder's inherited ACL and a new owner. Opening
     # it for write fails before truncating when the shell is not elevated.
+    # The trade-off is atomicity: a failure part-way through an elevated
+    # write (disk full, process killed) could leave the file truncated.
+    # For a file this small that is judged less likely, and less harmful,
+    # than silently changing who may edit it.
     try {
         $encoding = if ($hasBom) { 'utf8BOM' } else { 'utf8NoBOM' }
         Set-Content -LiteralPath $LegacyProfilePath -Value $newContent -NoNewline -Encoding $encoding -ErrorAction Stop
