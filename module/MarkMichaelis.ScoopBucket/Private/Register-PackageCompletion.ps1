@@ -769,7 +769,12 @@ function Test-PackageCompletionWorks {
         The profile to load before probing. Defaults to the same profile
         registration writes to (CurrentUserAllHosts, #397).
     .OUTPUTS
-        PSCustomObject with Cli, Verified (bool), MatchCount, FirstMatches.
+        PSCustomObject with Cli, Verified (bool), MatchCount, FirstMatches,
+        Reason. MatchCount and FirstMatches cover only suggestions from a
+        registered completer: the engine's file-name fallback (ProviderItem /
+        ProviderContainer results) is excluded, so a CLI whose completer is
+        missing or broken is not Verified just because the current
+        directory has files in it (#539).
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -807,19 +812,24 @@ function Test-PackageCompletionWorks {
 # The profile blocks written by Register-PackageCompletion defer their
 # Register-ArgumentCompleter calls to a single PowerShell.OnIdle
 # subscriber that drains a shared queue (#220). OnIdle does not
-# auto-fire in non-interactive `pwsh -File` runs, so manually invoke
-# the subscriber's Action -- it will drain the queue and register every
-# pending CLI in one pass.
-foreach (`$sub in @(Get-EventSubscriber -SourceIdentifier 'PowerShell.OnIdle' -ErrorAction SilentlyContinue)) {
-    try {
-        `$cmd = `$sub.Action.Command
-        if (`$cmd) { & ([scriptblock]::Create(`$cmd)) 2>`$null | Out-Null }
-    } catch { }
+# auto-fire in non-interactive `pwsh -File` runs, so raise the event
+# ourselves and let the engine run the subscriber, exactly as an
+# interactive shell would. Re-running the Action's text with & instead
+# would dot-source every sidecar into a throwaway scope, losing the
+# helper functions Cobra-generated completers (gh, rclone) call on
+# every Tab (#539).
+`$null = New-Event -SourceIdentifier PowerShell.OnIdle
+for (`$i = 0; `$i -lt 250 -and `$Global:__ScoopBucketCompletionQueue -and `$Global:__ScoopBucketCompletionQueue.Count; `$i++) {
+    Start-Sleep -Milliseconds 20
 }
 `$line = '$Cli '
 `$cc = [System.Management.Automation.CommandCompletion]::CompleteInput(`$line, `$line.Length, `$null)
-`$results = @(`$cc.CompletionMatches | Select-Object -First 25 -ExpandProperty CompletionText)
-@{ Count = `$cc.CompletionMatches.Count; Matches = `$results } | ConvertTo-Json -Compress
+# With no completer answering, the engine falls back to file names in the
+# current directory (#539). Those are not evidence of a working completer.
+`$all = @(`$cc.CompletionMatches)
+`$answered = @(`$all | Where-Object { `$_.ResultType -notin 'ProviderItem', 'ProviderContainer' })
+`$results = @(`$answered | Select-Object -First 25 -ExpandProperty CompletionText)
+@{ Count = `$answered.Count; FallbackCount = `$all.Count - `$answered.Count; Matches = `$results } | ConvertTo-Json -Compress
 "@
     $probeFile = Join-Path $env:TEMP "ScoopBucket-completion-probe-$Cli-$PID.ps1"
     try {
@@ -833,13 +843,17 @@ foreach (`$sub in @(Get-EventSubscriber -SourceIdentifier 'PowerShell.OnIdle' -E
         }
         $obj = $json | ConvertFrom-Json -ErrorAction Stop
         $count = [int]$obj.Count
+        $fallback = [int]$obj.FallbackCount
         $matches = @($obj.Matches)
+        $reason = if ($count -ge 1) { $null }
+            elseif ($fallback -ge 1) { "No completer answered for '$Cli'; the engine fell back to $fallback file name(s)." }
+            else { 'Completion engine returned 0 matches.' }
         return [pscustomobject]@{
             Cli = $Cli
             Verified = ($count -ge 1)
             MatchCount = $count
             FirstMatches = $matches
-            Reason = if ($count -ge 1) { $null } else { 'Completion engine returned 0 matches.' }
+            Reason = $reason
         }
     } catch {
         return [pscustomobject]@{
