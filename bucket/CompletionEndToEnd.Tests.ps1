@@ -99,8 +99,18 @@ foreach (`$p in @($profileList)) { if (Test-Path -LiteralPath `$p) { . `$p } }
 # engine run the subscriber as an interactive shell would. Re-running the
 # Action's text with & would dot-source each sidecar into a throwaway scope
 # and lose the helper functions Cobra-generated completers call (#539).
-`$null = New-Event -SourceIdentifier PowerShell.OnIdle
-for (`$i = 0; `$i -lt 250 -and `$Global:__ScoopBucketCompletionQueue -and `$Global:__ScoopBucketCompletionQueue.Count; `$i++) {
+# One raise does not run every subscriber, so raise until none is left or
+# the count stops falling (mirrors Test-PackageCompletionWorks).
+`$stalled = 0; `$previous = -1
+for (`$i = 0; `$i -lt 250; `$i++) {
+    `$subs = @(Get-EventSubscriber -SourceIdentifier PowerShell.OnIdle -ErrorAction SilentlyContinue).Count
+    `$pending = if (`$Global:__ScoopBucketCompletionQueue) { `$Global:__ScoopBucketCompletionQueue.Count } else { 0 }
+    if (`$pending -eq 0) {
+        if (`$subs -eq 0) { break }
+        if (`$subs -eq `$previous) { `$stalled++; if (`$stalled -ge 5) { break } } else { `$stalled = 0 }
+    }
+    `$previous = `$subs
+    `$null = New-Event -SourceIdentifier PowerShell.OnIdle
     Start-Sleep -Milliseconds 20
 }
 `$line = '$Cli '
@@ -112,8 +122,10 @@ for (`$i = 0; `$i -lt 250 -and `$Global:__ScoopBucketCompletionQueue -and `$Glob
         $probeFile = Join-Path $TestDrive ("e2e-" + [guid]::NewGuid().ToString('N') + '.ps1')
         Set-Content -Path $probeFile -Value $script -Encoding UTF8
         $raw = @(& pwsh -NoProfile -NoLogo -NonInteractive -File $probeFile 2>&1)
-        $childErrors = @($raw | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
-        $completions = @($raw | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] -and "$_" } | ForEach-Object { "$_" })
+        # Warnings from the deferred registration (#532) arrive on stdout as
+        # "WARNING: ..." lines; report them, never count them as completions.
+        $childErrors = @($raw | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] -or "$_" -like 'WARNING:*' } | ForEach-Object { "$_" })
+        $completions = @($raw | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] -and "$_" -and "$_" -notlike 'WARNING:*' } | ForEach-Object { "$_" })
 
         foreach ($e in $Expected) {
             $completions | Should -Contain $e -Because "TabExpansion2 for '$Cli ' must return '$e' per the ExpectedCompletions contract; got: $($completions -join ', '); child errors: $($childErrors -join ' | ')"
