@@ -36,7 +36,6 @@
     DbxCli                     = @{ Verify = 'Cli'; Cli = 'dbxcli' }
     PowerShellCore             = @{ Verify = 'Cli'; Cli = 'pwsh' }
     ClaudeCode                 = @{ Verify = 'Cli'; Cli = 'claude' }
-    GeminiCli                  = @{ Verify = 'Cli'; Cli = 'gemini' }
     GitHubCopilotCli           = @{ Verify = 'Cli'; Cli = 'copilot' }
     Chocolatey                 = @{ Verify = 'Cli'; Cli = 'choco' }
 

@@ -87,14 +87,3 @@ Describe 'AIAgents bundle: MCP configuration is declarative' -Tag 'Light','Bundl
     }
 }
 
-Describe 'AIAgents bundle: Gemini desktop -> Gemini CLI Companions' -Tag 'Light','Bundle' {
-    BeforeAll {
-        $script:aiPkgs = @(Get-Package -BucketPath $PSScriptRoot -Bundle 'AIAgents')
-    }
-
-    It 'Gemini desktop declares Companions=@(Gemini CLI)' {
-        $desktop = @($script:aiPkgs | Where-Object Name -EQ 'Gemini')[0]
-        $desktop                       | Should -Not -BeNullOrEmpty
-        @($desktop.Companions)         | Should -Contain 'Gemini CLI'
-    }
-}
