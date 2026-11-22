@@ -44,7 +44,8 @@ Describe 'DeveloperBasePackages dotnet native completion (issue #228)' -Tag 'Lig
 
     It 'declares an expanded ExpectedCompletions subset for tab-completion validation' {
         $expected = @($script:dotnet.ExpectedCompletions.dotnet)
-        foreach ($cmd in 'add','build','clean','pack','publish','restore','run','test') {
+        # No 'add': .NET 10 moved it under 'package' and 'reference' (#539).
+        foreach ($cmd in 'build','clean','pack','publish','restore','run','test') {
             $expected | Should -Contain $cmd
         }
     }
