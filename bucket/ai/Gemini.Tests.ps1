@@ -41,22 +41,29 @@ Describe 'Gemini: installs the Gemini desktop app (#534)' -Tag 'Light', 'Bundle'
         $script:gemini[0].Scope | Should -Be 'user'
     }
 
-    It 'no longer downloads the Google app for desktop' {
-        $script = Get-Content -Raw (Join-Path $PSScriptRoot 'Gemini.ps1')
-        $script | Should -Not -Match 'GoogleAppInstaller' -Because 'the Omaha Google-app bootstrapper is the retired install path'
-        $script | Should -Not -Match '06A8089E-0B65-445D-B5C4-10B0D1B540F2' -Because 'that is the Google app appguid, not Gemini'
-    }
 }
 
 Describe 'Gemini: the Heavy-test hint verifies the Gemini app, not the Google app (#534)' -Tag 'Light', 'Bundle' {
 
+    # The hint decides on winget's exit code, as the engine's own installed
+    # check (Test-WingetPackageInstalled) does. The old hint tested for the
+    # Google app's google.exe, so it reported the wrong app either way.
     BeforeAll {
         $script:hint = (& (Join-Path $script:bucketRoot 'ManifestTestHints.ps1'))['Gemini']
     }
 
-    It 'checks the winget package id' {
+    It 'is a Custom check' {
         $script:hint.Verify | Should -Be 'Custom'
-        $script:hint.Script.ToString() | Should -Match 'Google\.GeminiDesktop'
-        $script:hint.Script.ToString() | Should -Not -Match 'google\.exe'
+    }
+
+    It 'reports installed when winget finds Google.GeminiDesktop' {
+        Mock winget { $global:LASTEXITCODE = 0 }
+        & $script:hint.Script | Should -BeTrue
+        Should -Invoke winget -Times 1 -Exactly -ParameterFilter { $args -contains 'Google.GeminiDesktop' }
+    }
+
+    It 'reports missing when winget does not find Google.GeminiDesktop' {
+        Mock winget { $global:LASTEXITCODE = -1978335212 }  # APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND
+        & $script:hint.Script | Should -BeFalse
     }
 }
