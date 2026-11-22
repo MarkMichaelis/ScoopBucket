@@ -667,7 +667,8 @@ installed -- for example after restoring a dev machine where the
 `AllUsersAllHosts` profile wasn't backed up -- use the
 declarative-bundle walker `Update-PackageCompletion`. It scans every
 declarative `[Package]` across the bucket, finds CLIs on `PATH` with
-no sentinel block in the profile, and registers them. Native and
+no sentinel block in the profile -- or with a block whose completion
+file is missing on this machine -- and registers them. Native and
 `auto`-with-NativeCommandScript completion modes are repaired; legacy
 `pscompletions` declarations (none remain in this bucket as of #241)
 resolve to `Skipped` with a clear reason:
@@ -698,6 +699,14 @@ Behavior:
   so shell startup pays no subprocess cost — registration runs on
   the first idle tick after the prompt is drawn (#212). Two runs
   with `-Force` produce a byte-identical profile.
+- A block never fails silently (#532). The profile roams (it usually
+  lives in OneDrive) but the completion files under
+  `%ProgramData%\ScoopBucket\completions` do not, so a block can reach a
+  machine that has the CLI but not its completion file. When the CLI is
+  installed and its file is missing, or the file throws while loading,
+  the shell prints a warning naming the CLI, the path and the repair
+  command (`Update-PackageCompletion`, or `-Force` for a load error).
+  A block for a CLI that is not installed stays silent.
 - `-Force` is opt-in for ad-hoc invocations (defaults to gap-fill
   only); the bundle installers pass `-Force` explicitly so reinstalls
   always refresh blocks.

@@ -167,6 +167,77 @@ function Remove-PackageCompletionSidecar {
     return $false
 }
 
+function Format-CompletionSidecarLoader {
+    <#
+    .SYNOPSIS
+        Emit the profile code that loads one CLI's sidecar payload.
+    .DESCRIPTION
+        Shared by Register-PackageCompletion (deferred blocks) and the legacy
+        Register-CliCompletion (eager blocks) so the loader exists once.
+
+        The profile roams (OneDrive) but the sidecar does not
+        (%ProgramData%), so a block written on one machine can arrive on
+        another where the CLI is installed but the sidecar was never
+        generated (#532). The loader therefore checks the file exists, and
+        turns a missing file or a load error into a warning that names the
+        repair command. When the CLI itself is absent the block stays a
+        silent no-op, as before.
+
+        Every value is emitted as a single-quoted literal ('' escapes '), so
+        an apostrophe or `$` in the path stays inert.
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Cli,
+        [Parameter(Mandatory)][string]$SidecarPath
+    )
+    $literal = { param($s) "'" + ($s -replace "'", "''") + "'" }
+    $path    = & $literal $SidecarPath
+    $missing = & $literal "ScoopBucket: tab completion for '$Cli' is not loaded because '$SidecarPath' is missing on this machine. Run Update-PackageCompletion to regenerate it."
+    $failed  = & $literal "ScoopBucket: tab completion for '$Cli' failed to load from '$SidecarPath': "
+    $repair  = & $literal ' Run Update-PackageCompletion -Force to regenerate it.'
+    return @(
+        "if (Get-Command $Cli -ErrorAction SilentlyContinue) {"
+        "    if (Test-Path -LiteralPath $path) {"
+        "        try { . $path }"
+        "        catch { Write-Warning ($failed + `$_.Exception.Message + $repair) }"
+        "    } else {"
+        "        Write-Warning $missing"
+        "    }"
+        "}"
+    ) -join "`r`n"
+}
+
+function Get-PackageCompletionBlockState {
+    <#
+    .SYNOPSIS
+        Classify the profile block for $Cli: 'Absent', 'Intact', or
+        'SidecarMissing' (the block dot-sources a file that does not exist).
+    .DESCRIPTION
+        Lets Update-PackageCompletion's gap-fill repair a block that exists
+        but cannot load, which is what the loader's warning tells the user to
+        run (#532). A block that references no sidecar (older inline
+        payloads) counts as Intact.
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
+        [Parameter(Mandatory)][string]$Cli
+    )
+    $e = [regex]::Escape($Cli)
+    $block = [regex]::Match($Content, "(?ms)^\# ScoopBucket:CliCompletion:$e`:BEGIN \w+.*?^\# ScoopBucket:CliCompletion:$e`:END")
+    if (-not $block.Success) { return 'Absent' }
+    # The dot-source operator sits at the start of a line or right after `{`;
+    # anchoring on that keeps the warning text's quoted path from matching.
+    foreach ($m in [regex]::Matches($block.Value, "(?m)(?:^|\{)\s*\.\s+'((?:[^']|'')+)'")) {
+        $path = $m.Groups[1].Value -replace "''", "'"
+        if (-not (Test-Path -LiteralPath $path)) { return 'SidecarMissing' }
+    }
+    return 'Intact'
+}
+
 function Format-DeferredCompletionBlock {
     <#
     .SYNOPSIS
@@ -198,7 +269,9 @@ function Format-DeferredCompletionBlock {
     # the bootstrap clause is idempotent so removing any single block
     # never breaks the others. `| Out-Null` keeps the returned
     # PSEventJob off the success stream so dot-sourcing the profile
-    # stays silent.
+    # stays silent. The drain warns rather than discarding an error
+    # (#532): a warning raised inside an engine-event Action reaches the
+    # console, and a silent catch is what hid broken completions.
     return @"
 if (-not `$Global:__ScoopBucketCompletionQueue) {
     `$Global:__ScoopBucketCompletionQueue = [System.Collections.Generic.List[scriptblock]]::new()
@@ -211,7 +284,7 @@ if (-not `$Global:__ScoopBucketCompletionBootstrap) {
     `$null = Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -MaxTriggerCount 1 -Action {
         `$q = `$Global:__ScoopBucketCompletionQueue
         if (`$q) {
-            foreach (`$sb in `$q) { try { . `$sb } catch { } }
+            foreach (`$sb in `$q) { try { . `$sb } catch { Write-Warning "ScoopBucket: a tab-completion registration failed: `$(`$_.Exception.Message)" } }
             `$q.Clear()
         }
     } | Out-Null
@@ -643,13 +716,7 @@ function Register-PackageCompletion {
         # rejects an overwrite (#402).
         $sidecarFallback = Join-Path (Split-Path -Parent $target) 'completions'
         $sidecarPath = Write-PackageCompletionSidecar -Cli $Cli -Payload $resolved.NativePayload -Directory $sidecarDir -FallbackDirectory $sidecarFallback
-        # Single-quote the dot-source path and escape any embedded
-        # apostrophes (PowerShell single-quote strings escape `'` as
-        # `''`). Real-world install paths can contain apostrophes
-        # (e.g. drives mapped under "C:\Users\O'Brien\..."); without
-        # this the generated profile would be a parse error.
-        $escapedPath = $sidecarPath -replace "'", "''"
-        $innerCode = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n    . '$escapedPath'`r`n}"
+        $innerCode = Format-CompletionSidecarLoader -Cli $Cli -SidecarPath $sidecarPath
     } else {
         $innerCode = $resolved.Code
     }
