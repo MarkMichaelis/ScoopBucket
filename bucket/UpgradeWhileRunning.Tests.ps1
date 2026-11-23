@@ -159,6 +159,22 @@ Describe 'Setting in-use files aside (#547)' -Tag 'Light', 'Module' {
         Get-Content -LiteralPath $script:exe | Should -Be 'original'
     }
 
+    It 'treats an owner whose start time it may not read (an elevated run) as still in progress' {
+        New-Item -ItemType Directory -Force -Path $script:dir | Out-Null
+        $left = "$($script:exe).superseded-20260101000000000-4242"
+        Set-Content -LiteralPath $left -Value 'original'
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-Process {
+            $p = [pscustomobject]@{ Id = 4242 }
+            $p | Add-Member -MemberType ScriptProperty -Name StartTime -Value { throw [System.UnauthorizedAccessException]::new('Access is denied.') }
+            $p
+        } -ParameterFilter { $Id -eq 4242 }
+
+        $null = & $script:module { param($d) Move-InUseFileAside -Directory $d } $script:dir
+
+        $script:exe | Should -Not -Exist
+        $left | Should -Exist
+    }
+
     It 'never puts back a file that an upgrade no longer ships, and deletes it once nothing runs it' {
         # e.g. Grok Build names its exe after its version: a successful upgrade
         # writes grok-<new>.exe and no longer has grok-<old>.exe.
@@ -350,7 +366,11 @@ Describe 'Update-Package -MachineWide upgrades running portables too (#547)' -Ta
             @{ winget = @{ 'vendor.pinned' = @{ Installed = '1.0'; Available = '2.0' } } }
         }
         Mock -ModuleName MarkMichaelis.ScoopBucket Get-WingetPortableDirectory { $script:pinDir }
-        Mock -ModuleName MarkMichaelis.ScoopBucket winget { $global:LASTEXITCODE = 0 }
+        # The skipped program keeps running and writes its own log meanwhile.
+        Mock -ModuleName MarkMichaelis.ScoopBucket winget {
+            Set-Content -LiteralPath (Join-Path $script:pinDir 'pinned.log') -Value 'still running'
+            $global:LASTEXITCODE = 0
+        }
 
         $null = & $script:module { Update-AllWingetPackages }
 
