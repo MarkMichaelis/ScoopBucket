@@ -202,6 +202,22 @@ class Package {
     # (Microsoft Store auto-update, a vendor's own updater) from doing so.
     [string]   $HoldUpgrade = ''
 
+    # Is this package part of the default set -- what a machine gets when its
+    # owner accepts the defaults? On unless the declaration says
+    # `Default = $false`, so only the exceptions are marked. The flag lives on
+    # the declaration rather than in a separate list so that removing a
+    # package also removes it from every default set.
+    #
+    # Honored by `Install-Package -Name '*'` (#454): a default package is
+    # installed or upgraded; an optional one is upgraded only when it is
+    # already installed, and otherwise left out. Naming a package or its
+    # bundle explicitly installs it whatever this says.
+    #
+    # A package that only links to another declarative bundle (Installer
+    # 'scoop', Id '<bucket>/<that bundle>') carries no default of its own; the
+    # linked bundle's packages do (DefaultPackages.Tests.ps1).
+    [bool]     $Default = $true
+
     # Cross-field invariants the type system can't express. Returns the
     # first violation as a string, or $null when the declaration is valid.
     #

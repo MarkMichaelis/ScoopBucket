@@ -18,14 +18,8 @@ function Install-ChocoPackage {
     }
 
     if (-not $WhatIf) {
-        try {
-            $listOut = & choco list $id --local-only --no-progress 2>$null
-            if ($listOut | Where-Object { $_ -match "^\s*$([regex]::Escape($id))\s" }) {
-                return @{ State = 'AlreadyInstalled'; Reason = "choco list $id returned a row." }
-            }
-        } catch {
-            Write-Verbose "Install-ChocoPackage: AlreadyInstalled probe failed: $($_.Exception.Message)"
-        }
+        $presence = Get-PackagePresence -Package $Package
+        if ($presence.Present) { return @{ State = 'AlreadyInstalled'; Reason = $presence.Reason } }
     }
 
     $installArgs = @('install', '-y', $id)

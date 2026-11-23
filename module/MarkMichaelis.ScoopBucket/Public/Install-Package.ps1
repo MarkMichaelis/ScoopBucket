@@ -27,7 +27,15 @@ function Install-Package {
 
     .PARAMETER Name
         One or more package names (matched case-insensitively against
-        Package.Name).
+        Package.Name), bundle names, or bare manifest names.
+
+        The literal '*' (quote it) converges the machine (#454): it installs
+        or upgrades every default package of every declarative bundle, and
+        upgrades a package marked `Default = $false` only when it is already
+        installed -- an absent one is reported Skipped with the command that
+        installs it. Config-only bare manifests are never included. A package
+        or bundle also named explicitly is installed regardless of its
+        default.
 
     .PARAMETER DryRun
         Preview only — plan every action without invoking engines.
@@ -54,6 +62,11 @@ function Install-Package {
 
     .EXAMPLE
         Install-Package -Name 'BitwardenCli' -DryRun
+
+    .EXAMPLE
+        Install-Package -Name '*' -DryRun
+        # Preview converging this machine: every default package installed or
+        # upgraded, optional packages upgraded only where already installed.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     [OutputType([PackageResult])]
@@ -112,8 +125,14 @@ function Install-Package {
     $byBundle      = @{}
     $fullBundles   = New-Object System.Collections.Generic.List[object]
     $manifestNames = New-Object System.Collections.Generic.List[string]
+    $starSeen      = $false
 
     foreach ($needed in $Name) {
+        # '*' converges the machine (#454); expanded below, once every explicit
+        # name is classified, so an explicitly named package is never also
+        # reported as skipped.
+        if ($needed -eq '*') { $starSeen = $true; continue }
+
         # (a) Exact Package.Name match wins over bundle / manifest
         # matches — most precise intent, and what the historical contract
         # already implied.
@@ -167,6 +186,34 @@ function Install-Package {
         throw "Install-Package: no bundle declares a package named '$needed' and no '$needed.json' manifest was found in the bucket."
     }
 
+    # --- '*': every default package, plus optional ones already installed ---
+    # Bundles named explicitly install in full, so '*' leaves them alone.
+    # Config-only bare manifests are never swept in (see Resolve-DefaultInstallSet).
+    $skippedOptional = @()
+    if ($starSeen) {
+        if ($bundleIndex.Count -eq 0) {
+            throw "Install-Package: '*' found no declarative bundle to converge in '$effectiveBucket'."
+        }
+        $requested = @{}
+        foreach ($entry in $byBundle.Values) { $requested[$entry.BundlePath] = @($entry.Names) }
+        $plan = Resolve-DefaultInstallSet -Bundle @($bundleIndex.Values) -Requested $requested `
+            -FullBundlePath @($fullBundles | ForEach-Object { $_.BundlePath })
+        foreach ($b in $bundleIndex.Values) {
+            if (-not $plan.Names.ContainsKey($b.BundlePath)) { continue }
+            if (-not $byBundle.ContainsKey($b.BundlePath)) {
+                $byBundle[$b.BundlePath] = @{
+                    BundlePath = $b.BundlePath
+                    Bundle     = $b.Bundle
+                    Names      = [System.Collections.Generic.List[string]]::new()
+                }
+            }
+            foreach ($n in $plan.Names[$b.BundlePath]) {
+                if ($byBundle[$b.BundlePath].Names -notcontains $n) { $byBundle[$b.BundlePath].Names.Add($n) }
+            }
+        }
+        $skippedOptional = @($plan.Skipped)
+    }
+
     # Track per-bundle errors across both dispatch loops so the sweep
     # cannot be aborted by a caller that runs with $ErrorActionPreference='Stop'
     # (which would otherwise upgrade Invoke-PackageInstall's non-terminating
@@ -178,11 +225,22 @@ function Install-Package {
     # filter to changed rows and render a single table. See #283.
     $results = New-Object System.Collections.Generic.List[object]
 
+    # A bundle '*' could not plan is reported like a dispatch that died: a
+    # Failed row plus its ErrorRecord, while the other bundles still converge.
+    if ($starSeen) {
+        foreach ($failure in @($plan.Failed)) {
+            $pkgErrors.Add($failure.Error)
+            $PSCmdlet.WriteError($failure.Error)
+            $results.Add($failure)
+        }
+    }
+
     # --- Dispatch (a): Package.Name flow with -Name filter -----------------
     # In-process: reconstruct real [Package] objects from the bundle and call
     # the driver directly (same model Update-Package uses), so results flow
     # back as live PackageResult objects rendered once by the format view.
-    foreach ($entry in $byBundle.Values) {
+    # Bundle-name order keeps a '*' sweep's transcript stable run to run.
+    foreach ($entry in @($byBundle.Values | Sort-Object { $_.Bundle })) {
         $pkgObjects = @(Get-BundlePackageObjects -BundlePath $entry.BundlePath)
         # -ErrorAction/-ErrorVariable only tame the driver's NON-terminating
         # PackageInstallFailed records. A *terminating* error raised inside the
@@ -485,6 +543,9 @@ function Install-Package {
     if ($failed.Count -gt 0) {
         Write-Warning "Install-Package: $($failed.Count) package install(s) failed; the sweep continued past each failure. See errors above for details."
     }
+
+    # Optional packages '*' left out: Skipped rows, counted in the summary line.
+    foreach ($row in $skippedOptional) { $results.Add($row) }
 
     # Emit the collected results through the summary view: changed rows only by
     # default (with a one-line host summary of the rest), or every row under

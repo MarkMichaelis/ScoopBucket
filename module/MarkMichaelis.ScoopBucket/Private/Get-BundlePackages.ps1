@@ -116,6 +116,7 @@ function global:Invoke-PackageInstall {
             WingetExtraArgs = @(`$p.WingetExtraArgs)
             UpdateTimeoutMinutes = [int]`$p.UpdateTimeoutMinutes
             UpdateMode  = `$p.UpdateMode
+            Default     = [bool]`$p.Default
             HasPostInstallScript   = [bool]`$p.PostInstallScript
             HasPostUpdateScript    = [bool]`$p.PostUpdateScript
             HasCustomInstallScript = [bool]`$p.CustomInstallScript

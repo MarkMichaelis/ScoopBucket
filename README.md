@@ -223,7 +223,40 @@ Install-Package -Name 'BitwardenCli'   # auto-pulls Bitwarden via DependsOn (clo
 Install-Package -Name beyon<Tab>       # Tab-completes to 'Beyond Compare'
 Install-Package -Name 'ripgrep' -DryRun   # preview, no real install
 Update-Package  -Name 'ripgrep' -DryRun   # preview, no real update
+Install-Package -Name '*'                 # converge this machine (see below)
 ```
+
+#### Converging a machine: `Install-Package -Name '*'` and `Default`
+
+`Install-Package -Name '*'` (quote the `*`) brings a machine to the bucket's
+default set in one command, from any starting state:
+
+- Every **default** package of every declarative bundle is installed, or
+  upgraded with its `ConfigScript` and completions re-applied.
+- A package declared with `Default = $false` is **optional**: `*` upgrades it
+  when it is already installed, and otherwise leaves it out with a `Skipped`
+  row naming the command that installs it. An optional package that a default
+  one needs (`DependsOn` / `Companions`) is installed anyway.
+- Config-only manifests (`GitConfigure`, `SetPowerConfiguration`,
+  `EnableRemoteDesktop`, `McAfeeUninstall`, `PowerToysSettingsBackup`, ...) are
+  never included; run them by name.
+- A package or bundle named explicitly alongside `*` installs regardless of
+  its default.
+
+Whether a package is a default is declared on the package itself, so removing
+a package removes it from the default set with nothing else to edit:
+
+```powershell
+[Package]@{
+    Name    = 'Avalonia Developer Tools'
+    # ...
+    Default = $false   # optional: '*' upgrades it where installed, never adds it
+}
+```
+
+`Default` is on unless set. `Get-Package` shows it. A package that only links
+to another bundle (`Installer = 'scoop'`, `Id = 'MarkMichaelis/<bundle>'`)
+carries no default of its own; set it on that bundle's packages.
 
 **Preview is one opt-in mechanism.** `Install-Package` and
 `Update-Package` build on PowerShell's standard
