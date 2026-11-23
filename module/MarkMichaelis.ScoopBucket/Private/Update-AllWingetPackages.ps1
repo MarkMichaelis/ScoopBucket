@@ -26,10 +26,14 @@ function Update-AllWingetPackages {
     # Running portable programs would fail their upgrade (and lose their command
     # alias); set their locked executables aside first, as Update-WingetPackage
     # does per package (#547). Only packages winget lists as upgradable are
-    # touched, so a program with nothing to upgrade is never disturbed and a
-    # successful sweep means every set-aside package was upgraded.
+    # touched, so a program with nothing to upgrade is never disturbed. Exit 0
+    # does not prove each of them was upgraded (--all skips pinned packages);
+    # Complete-InUseFileAside judges that per package folder.
     $index = Get-PackageUpdateIndex -Installers 'winget'
     $wingetMap = if ($index -and $index['winget']) { $index['winget'] } else { @{} }
+    if ($wingetMap.Count -eq 0) {
+        Write-Verbose 'Update-AllWingetPackages: no winget upgrade index (winget list failed or listed nothing); running programs are not set aside this sweep.'
+    }
     $upgradable = @($wingetMap.Keys | Where-Object {
             $entry = $wingetMap[$_]
             $entry.Available -and $entry.Available -ne $entry.Installed

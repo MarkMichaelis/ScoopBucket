@@ -15,7 +15,10 @@
 #   - nothing was upgraded (no upgrade, or it failed) -> put it back;
 #   - upgraded, and a replacement exists -> delete the set-aside copy;
 #   - upgraded, and the new version no longer ships that file (e.g. Grok Build's
-#     versioned grok-<ver>.exe) -> delete it, never put it back.
+#     versioned grok-<ver>.exe) -> delete it, never put it back. "Upgraded" is
+#     judged per package folder: only when new files landed there during this run.
+#     `winget upgrade --all` exits 0 while skipping pinned packages, so its exit
+#     code alone cannot say which set-aside files were replaced.
 # A set-aside copy that a process still runs cannot be deleted yet; it stays for a
 # later run, renamed '<name>.obsolete-...' when it must never be restored.
 # Every Move-InUseFileAside call first settles leftovers from earlier runs: that
@@ -75,12 +78,41 @@ function Test-FileInUse {
 
 function Test-SetAsideOwnerRunning {
     # True when another, still-running process set the file aside (it will settle
-    # it itself). This process's own earlier calls have finished, so they do not count.
+    # it itself). This process's own earlier calls have finished, so they do not
+    # count, and a process that started after the stamp only reuses a dead run's id.
     [OutputType([bool])]
-    param([AllowNull()][Nullable[int]]$Owner)
+    param(
+        [AllowNull()][Nullable[int]]$Owner,
+        [AllowNull()][string]$Stamp
+    )
 
     if (-not $Owner -or $Owner -eq $PID) { return $false }
-    return [bool](Get-Process -Id $Owner -ErrorAction SilentlyContinue)
+    $process = Get-Process -Id $Owner -ErrorAction SilentlyContinue
+    if (-not $process) { return $false }
+    if (-not $Stamp) { return $true }
+    try {
+        $setAt = [datetime]::ParseExact($Stamp, 'yyyyMMddHHmmssfff', [Globalization.CultureInfo]::InvariantCulture)
+        return ($process.StartTime -le $setAt)
+    } catch {
+        return $false
+    }
+}
+
+function Test-NewFileSince {
+    # True when a file other than a set-aside copy was created or written in
+    # $Directory at or after $Since -- the sign that an upgrade landed there.
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][string]$Directory,
+        [AllowNull()][Nullable[datetime]]$Since
+    )
+
+    if (-not $Since) { return $true }
+    foreach ($file in @(Get-ChildItem -LiteralPath $Directory -File -Recurse -Force -ErrorAction SilentlyContinue)) {
+        if ($file.Name -match $script:SetAsidePattern) { continue }
+        if ($file.CreationTime -ge $Since -or $file.LastWriteTime -ge $Since) { return $true }
+    }
+    return $false
 }
 
 function Resolve-SetAsideFile {
@@ -91,18 +123,22 @@ function Resolve-SetAsideFile {
     param(
         [Parameter(Mandatory)][string]$Original,
         [Parameter(Mandatory)][string]$Renamed,
-        # The engine upgraded the package: never put a missing original back.
+        # The engine reports an upgrade: a missing original was dropped by the new
+        # version -- provided something new landed in its folder after $SetAt.
         [switch]$Upgraded,
+        [Nullable[datetime]]$SetAt,
         # Already marked as no longer shipped: delete only.
         [switch]$Obsolete,
-        [Nullable[int]]$Owner
+        [Nullable[int]]$Owner,
+        [string]$Stamp
     )
 
     if (-not [System.IO.File]::Exists($Renamed)) { return 'Deleted' }
     $replaced = [System.IO.File]::Exists($Original)
+    $dropped = (-not $replaced) -and $Upgraded -and (Test-NewFileSince -Directory ([System.IO.Path]::GetDirectoryName($Original)) -Since $SetAt)
 
-    if (-not $replaced -and -not $Upgraded -and -not $Obsolete) {
-        if (Test-SetAsideOwnerRunning $Owner) { return 'Kept' }
+    if (-not $replaced -and -not $dropped -and -not $Obsolete) {
+        if (Test-SetAsideOwnerRunning -Owner $Owner -Stamp $Stamp) { return 'Kept' }
         try {
             [System.IO.File]::Move($Renamed, $Original)
             return 'Restored'
@@ -143,6 +179,7 @@ function Get-SetAsideFile {
                 Renamed  = $file.FullName
                 Obsolete = ($Matches.kind -eq 'obsolete')
                 Owner    = if ($Matches.owner) { [int]$Matches.owner } else { $null }
+                Stamp    = $Matches.stamp
             }
         }
     }
@@ -174,16 +211,17 @@ function Move-InUseFileAside {
     if ($dirs.Count -eq 0) { return }
 
     foreach ($left in @(Get-SetAsideFile -Directory $dirs)) {
-        $null = Resolve-SetAsideFile -Original $left.Original -Renamed $left.Renamed -Obsolete:$left.Obsolete -Owner $left.Owner
+        $null = Resolve-SetAsideFile -Original $left.Original -Renamed $left.Renamed -Obsolete:$left.Obsolete -Owner $left.Owner -Stamp $left.Stamp
     }
 
-    $stamp = (Get-Date).ToString('yyyyMMddHHmmssfff')
+    $setAt = Get-Date
+    $stamp = $setAt.ToString('yyyyMMddHHmmssfff')
     foreach ($file in @(Get-InUseFile -Directory $dirs)) {
         $renamed = "$($file.FullName).superseded-$stamp-$PID"
         try {
             [System.IO.File]::Move($file.FullName, $renamed)
             Write-Verbose "Set aside in-use '$($file.FullName)' as '$renamed'."
-            [pscustomobject]@{ Original = $file.FullName; Renamed = $renamed }
+            [pscustomobject]@{ Original = $file.FullName; Renamed = $renamed; SetAt = $setAt }
         } catch {
             Write-Warning "Could not set aside in-use file '$($file.FullName)': $($_.Exception.Message)"
         }
@@ -208,7 +246,8 @@ function Complete-InUseFileAside {
     $restored = 0
     $kept = 0
     foreach ($pair in $pairs) {
-        switch (Resolve-SetAsideFile -Original $pair.Original -Renamed $pair.Renamed -Upgraded:$Upgraded) {
+        $setAt = if ($pair.PSObject.Properties['SetAt']) { $pair.SetAt } else { $null }
+        switch (Resolve-SetAsideFile -Original $pair.Original -Renamed $pair.Renamed -Upgraded:$Upgraded -SetAt $setAt) {
             'Restored' { $restored++ }
             'Kept'     { $kept++ }
         }
