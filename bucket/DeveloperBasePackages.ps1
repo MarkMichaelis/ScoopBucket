@@ -368,11 +368,14 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
         ConfigScript = {
             if (-not (Get-Command gddy -CommandType Application -ErrorAction SilentlyContinue)) { return }
             $current = (gddy config get credentials.store --output json 2>$null | Out-String | ConvertFrom-Json -ErrorAction SilentlyContinue).data
-            if ($current -and $current.source -eq 'default') {
-                gddy config set credentials.store file --output json *>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) { throw "gddy config set credentials.store file failed (exit $LASTEXITCODE)" }
-                Write-Host '  gddy: credentials.store = file (Windows Credential Manager cannot hold its OAuth token)'
-            }
+            if (-not $current -or $current.source -ne 'default') { return }
+            # Never strand a sign-in the default store already holds (e.g. a
+            # Credential Manager login from a gddy build that fits there).
+            $status = @((gddy auth status --output json 2>$null | Out-String | ConvertFrom-Json -ErrorAction SilentlyContinue).data)
+            if ($status | Where-Object { $_ -and ((-not $_.expired) -or $_.refreshable) }) { return }
+            gddy config set credentials.store file --output json *>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "gddy config set credentials.store file failed (exit $LASTEXITCODE)" }
+            Write-Host '  gddy: credentials.store = file (Windows Credential Manager cannot hold its OAuth token)'
         }
         CustomUninstallScript = {
             $installDir = Join-Path $env:LOCALAPPDATA 'Programs\gddy'

@@ -133,16 +133,32 @@ Describe 'DeveloperBasePackages: GoDaddy CLI install and uninstall behavior (#52
         { & $script:Package.CustomInstallScript $script:Package } | Should -Throw '*did not create*'
     }
 
-    It 'points gddy at its file credential store when the setting is still the default' {
+    It 'points gddy at its file credential store when the setting is the default and holds no sign-in' {
         $global:__GddyCalls = @()
         Mock -ModuleName MarkMichaelis.ScoopBucket gddy {
             $global:__GddyCalls += , ($args -join ' ')
             if ($args[0] -eq 'config' -and $args[1] -eq 'get') { '{"data":{"key":"credentials.store","value":"auto","source":"default"}}' }
+            if ($args[0] -eq 'auth' -and $args[1] -eq 'status') { '{"data":[{"env":"prod","expired":true,"refreshable":false}]}' }
             $global:LASTEXITCODE = 0
         }
         try {
             & $script:Package.ConfigScript $script:Package 6>$null
             $global:__GddyCalls | Should -Contain 'config set credentials.store file --output json'
+        }
+        finally { Remove-Variable -Name __GddyCalls -Scope Global -ErrorAction SilentlyContinue }
+    }
+
+    It 'keeps the default store when it already holds a working sign-in (never strands it)' {
+        $global:__GddyCalls = @()
+        Mock -ModuleName MarkMichaelis.ScoopBucket gddy {
+            $global:__GddyCalls += , ($args -join ' ')
+            if ($args[0] -eq 'config' -and $args[1] -eq 'get') { '{"data":{"key":"credentials.store","value":"auto","source":"default"}}' }
+            if ($args[0] -eq 'auth' -and $args[1] -eq 'status') { '{"data":[{"env":"prod","expired":false,"refreshable":true}]}' }
+            $global:LASTEXITCODE = 0
+        }
+        try {
+            & $script:Package.ConfigScript $script:Package 6>$null
+            @($global:__GddyCalls | Where-Object { $_ -like 'config set*' }) | Should -BeNullOrEmpty
         }
         finally { Remove-Variable -Name __GddyCalls -Scope Global -ErrorAction SilentlyContinue }
     }

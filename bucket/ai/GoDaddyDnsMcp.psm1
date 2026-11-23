@@ -407,8 +407,12 @@ function Invoke-Gddy {
 
     $json = ConvertFrom-GddyJson $r.StdOut
     # gddy writes its {"error": ...} envelope to stderr (stdout stays empty).
+    # stderr is consulted only when the call failed, so a successful command
+    # is never reported as failed because of something on stderr.
     $errorEnvelope = $null
-    foreach ($candidate in @($json, (ConvertFrom-GddyJson $r.StdErr))) {
+    $candidates = @($json)
+    if ($r.ExitCode -ne 0 -or -not ($json -and $json.Contains('data'))) { $candidates += ConvertFrom-GddyJson $r.StdErr }
+    foreach ($candidate in $candidates) {
         if ($candidate -and $candidate.Contains('error') -and $candidate['error'] -is [System.Collections.IDictionary]) { $errorEnvelope = $candidate; break }
     }
     if ($r.ExitCode -ne 0 -or $errorEnvelope) {
@@ -484,14 +488,19 @@ function Get-GoDaddyAuthState {
 
     $status = & $readStatus @()
     $credentialStore = $null
-    if (-not $patSource -and -not (& $isUsable $status)) {
+    if (-not $patSource -and -not (& $isUsable $status) -and (Test-GoDaddyDefaultCredentialStore)) {
         # On Windows, gddy's OAuth token (~3.5 KB) exceeds Credential Manager's
         # 2560-byte limit, so `gddy auth login` saves it to gddy's file store --
         # but the default 'auto' store only reads Credential Manager, and every
         # later command acts signed out and opens a browser. Look in the file
         # store too, and if the token is there, use that store for every call.
-        $fileStatus = & $readStatus @('--credential-store', 'file')
-        if (& $isUsable $fileStatus) { $status = $fileStatus; $credentialStore = 'file' }
+        # Only while the store is gddy's default: a store the user chose is
+        # respected. A failed probe just means "not signed in".
+        try {
+            $fileStatus = & $readStatus @('--credential-store', 'file')
+            if (& $isUsable $fileStatus) { $status = $fileStatus; $credentialStore = 'file' }
+        }
+        catch { Write-Verbose "file credential store probe failed: $($_.Exception.Message)" }
     }
     $oauthUsable = & $isUsable $status
     $identity = $null; $expiresAt = $null; $refreshable = $false; $scopes = @()
@@ -513,6 +522,22 @@ function Get-GoDaddyAuthState {
         refreshable     = $refreshable
         scopes          = $scopes
     }
+}
+
+function Test-GoDaddyDefaultCredentialStore {
+    <#
+    .SYNOPSIS
+        $true when gddy's credentials.store is still its default ('auto'),
+        i.e. nobody chose a store deliberately.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+    try {
+        $setting = (Invoke-Gddy -Arguments @('config', 'get', 'credentials.store') -NoAuthCheck)['data']
+        return ($setting -is [System.Collections.IDictionary] -and "$($setting['source'])" -eq 'default')
+    }
+    catch { return $false }
 }
 
 function Assert-GoDaddyAuthenticated {
@@ -944,9 +969,16 @@ function Get-GoDaddyPublicEmailRecords {
     param([Parameter(Mandatory)][string]$Domain)
     $endpoint = @($script:PublicResolvers.Values)[0]
     $records = @()
-    foreach ($q in @(@{ Type = 'MX'; Name = '@' }, @{ Type = 'TXT'; Name = '@' }, @{ Type = 'TXT'; Name = '_dmarc' })) {
+    # Checks whose lookup failed: their result is unknown, not "absent".
+    $unknown = @()
+    foreach ($q in @(@{ Type = 'MX'; Name = '@'; Check = 'mx' }, @{ Type = 'TXT'; Name = '@'; Check = 'spf' }, @{ Type = 'TXT'; Name = '_dmarc'; Check = 'dmarc' })) {
         $fqdn = if ($q.Name -eq '@') { $Domain } else { "$($q.Name).$Domain" }
-        try { $r = Resolve-GoDaddyPublicDns -Endpoint $endpoint -Fqdn $fqdn -Type $q.Type } catch { continue }
+        try { $r = Resolve-GoDaddyPublicDns -Endpoint $endpoint -Fqdn $fqdn -Type $q.Type }
+        catch { $unknown += [ordered]@{ check = $q.Check; query = "$($q.Type) $fqdn"; reason = $_.Exception.Message }; continue }
+        if ($r.status -notin 'NOERROR', 'NO_ANSWER', 'NXDOMAIN') {
+            $unknown += [ordered]@{ check = $q.Check; query = "$($q.Type) $fqdn"; reason = $r.status }
+            continue
+        }
         foreach ($v in @($r.values)) {
             if ($q.Type -eq 'MX' -and $v -match '^(\d+)\s+(.+)$') {
                 $records += [ordered]@{ type = 'MX'; name = '@'; data = $Matches[2]; priority = [int]$Matches[1]; ttl = $r.ttl }
@@ -956,7 +988,7 @@ function Get-GoDaddyPublicEmailRecords {
             }
         }
     }
-    return , $records
+    [pscustomobject]@{ Records = $records; Unknown = $unknown }
 }
 
 function Select-GoDaddyRecordSet {
@@ -2019,6 +2051,7 @@ function Invoke-GoDaddyVerifyDnsTool {
         if ($d -is [System.Collections.IDictionary] -and $d['nameServers']) { $nameServers = @($d['nameServers'] | ForEach-Object { "$_".ToLowerInvariant().TrimEnd('.') }) }
     }
     catch { Write-Verbose "domain get failed: $($_.Exception.Message)" }
+    if (-not $nameServers.Count -and $external) { $nameServers = @($external.nameServers) }
     $usesGoDaddy = [bool]($nameServers.Count -and -not ($nameServers | Where-Object { $_ -notmatch 'domaincontrol\.com$' }))
 
     $sameSet = {
@@ -2087,11 +2120,15 @@ function Invoke-GoDaddyVerifyDnsTool {
     if ($type -in 'TXT', 'MX' -or $name -eq '_dmarc' -or $name -match '_domainkey') {
         if ($external) {
             # No zone to read: run the same checks on what public DNS returns.
-            $report = Get-GoDaddyEmailAuthReport -Zone (Get-GoDaddyPublicEmailRecords -Domain $domain) -Domain $domain
-            $report.findings = @($report.findings | Where-Object { $_.check -ne 'dkim' }) + @([ordered]@{
-                severity = 'info'; check = 'dkim'
-                message  = 'DKIM selectors cannot be listed from public DNS. Check <selector>._domainkey (TXT or CNAME) with godaddy_verify_dns, using the selector your mail provider signs with.'
-            })
+            $publicEmail = Get-GoDaddyPublicEmailRecords -Domain $domain
+            $report = Get-GoDaddyEmailAuthReport -Zone @($publicEmail.Records) -Domain $domain
+            $unknownChecks = @($publicEmail.Unknown | ForEach-Object { $_.check })
+            $report.findings = @($report.findings | Where-Object { $_.check -ne 'dkim' -and $unknownChecks -notcontains $_.check }) +
+                @($publicEmail.Unknown | ForEach-Object { [ordered]@{ severity = 'info'; check = $_.check; message = "Could not query $($_.query) from public DNS ($($_.reason)), so this check is unknown -- not a missing record." } }) +
+                @([ordered]@{
+                    severity = 'info'; check = 'dkim'
+                    message  = 'DKIM selectors cannot be listed from public DNS. Check <selector>._domainkey (TXT or CNAME) with godaddy_verify_dns, using the selector your mail provider signs with.'
+                })
             $report.dkim = @()
             $report.source = "public DNS ($($external.provider) hosts the records)"
             $result.emailAuthentication = $report

@@ -65,6 +65,7 @@ BeforeAll {
         $dry = $a -contains '--dry-run'
         switch ("$($a[0]) $($a[1])") {
             'env get'     { return New-FakeResult @{ env = 'prod'; apiUrl = 'https://api.godaddy.com' } }
+            'config get'  { return New-FakeResult @{ key = 'credentials.store'; value = 'auto'; source = 'default' } }
             'pat list'    { return New-FakeResult @() }
             'auth status' { return New-FakeResult @(@{ env = 'prod'; expired = (-not $script:Fake.Authenticated); refreshable = $script:Fake.Authenticated; identity = 'user'; expires_at = ''; provider = 'godaddy'; scopes = @() }) }
             'domain list' { return New-FakeResult @(@{ domain = 'enabl.org'; status = 'ACTIVE'; autoRenew = $true }) }
@@ -306,6 +307,23 @@ Describe 'GoDaddy DNS MCP: authentication' -Tag 'Light', 'GoDaddy' {
         ($call -join ' ') | Should -Match '--credential-store file'
     }
 
+    It 'respects a credential store the user chose: no file-store fallback, AUTH_REQUIRED' {
+        Reset-FakeGddy -Zone (Get-StandardZone) -Authenticated $false
+        $script:Fake.Override = {
+            param($a)
+            if ($a[0] -eq 'config' -and $a[1] -eq 'get') { return New-FakeResult @{ key = 'credentials.store'; value = 'keyring'; source = 'config' } }
+            if ($a[0] -eq 'auth' -and $a[1] -eq 'status' -and $a -contains 'file') { return New-FakeResult @(@{ env = 'prod'; expired = $false; refreshable = $true }) }
+        }
+        (Invoke-Tool 'godaddy_list_dns_records' @{ domain = 'enabl.org' }).Data.error.code | Should -Be 'AUTH_REQUIRED'
+        @($script:Fake.Calls | Where-Object { ($_ -join ' ') -match '--credential-store file' -and $_[0] -eq 'dns' }) | Should -BeNullOrEmpty
+    }
+
+    It 'treats a failing file-store probe as signed out (AUTH_REQUIRED), not a CLI error' {
+        Reset-FakeGddy -Zone (Get-StandardZone) -Authenticated $false
+        $script:Fake.Override = { param($a) if ($a[0] -eq 'auth' -and $a[1] -eq 'status' -and $a -contains 'file') { New-FakeResult -ExitCode 2 -ErrorMessage 'file store not found' } }
+        (Invoke-Tool 'godaddy_list_dns_records' @{ domain = 'enabl.org' }).Data.error.code | Should -Be 'AUTH_REQUIRED'
+    }
+
     It 'reports AUTH_REQUIRED when gddy starts the browser login anyway' {
         Reset-FakeGddy -Zone (Get-StandardZone)
         $script:Fake.Override = { param($a) if ($a[0] -eq 'dns') { [pscustomobject]@{ ExitCode = -1; StdOut = 'Opening browser for authentication...'; StdErr = ''; TimedOut = $false; AuthPromptDetected = $true } } }
@@ -356,6 +374,13 @@ Describe 'GoDaddy DNS MCP: CLI failures and output parsing' -Tag 'Light', 'GoDad
         $script:Fake.Override = { param($a) if ($a[0] -eq 'dns') { [pscustomobject]@{ ExitCode = 4; StdOut = ''; StdErr = '{ "error": { "code": "ERROR", "message": "listing DNS records failed (HTTP 500): upstream unavailable" } }'; TimedOut = $false; AuthPromptDetected = $false } } }
         $r = Invoke-Tool 'godaddy_list_dns_records' @{ domain = 'enabl.org' }
         $r.Data.error.message | Should -Be 'gddy failed: listing DNS records failed (HTTP 500): upstream unavailable'
+    }
+
+    It 'does not fail a successful call because stderr carries something error-shaped' {
+        $script:Fake.Override = { param($a) if ($a[0] -eq 'dns' -and $a[1] -eq 'list') { [pscustomobject]@{ ExitCode = 0; StdOut = (ConvertTo-Json -InputObject @{ data = @() } -Depth 5); StdErr = '{"error":{"message":"telemetry upload failed"}}'; TimedOut = $false; AuthPromptDetected = $false } } }
+        $r = Invoke-Tool 'godaddy_list_dns_records' @{ domain = 'enabl.org' }
+        $r.IsError | Should -BeFalse
+        $r.Data.count | Should -Be 0
     }
 
     It 'names the DNS host when the domain is registered here but its DNS is hosted elsewhere' {
@@ -826,6 +851,37 @@ Describe 'GoDaddy DNS MCP: live DNS verification' -Tag 'Light', 'GoDaddy' {
         $r.Data.emailAuthentication.source | Should -Match 'public DNS'
         @($r.Data.emailAuthentication.findings | Where-Object { $_.check -eq 'spf' -and $_.severity -eq 'ok' }) | Should -HaveCount 1
         @($r.Data.emailAuthentication.findings | Where-Object { $_.check -eq 'mx' -and $_.severity -eq 'ok' }) | Should -HaveCount 1
+    }
+
+    It 'reports a failed public lookup as unknown, not as a missing record' {
+        Reset-FakeGddy -Zone @() -NameServers @('cameron.ns.cloudflare.com')
+        $script:Fake.Override = { param($a) if ($a[0] -eq 'dns' -and $a[1] -eq 'list') { [pscustomobject]@{ ExitCode = 4; StdOut = ''; StdErr = '{"error":{"message":"HTTP 404 Not Found: zone not found"}}'; TimedOut = $false; AuthPromptDetected = $false } } }
+        Mock -ModuleName GoDaddyDnsMcp Resolve-GoDaddyAuthoritativeDns { [ordered]@{ status = 'NOERROR'; values = @() } }
+        Mock -ModuleName GoDaddyDnsMcp Resolve-GoDaddyPublicDns {
+            if ($Fqdn -like '_dmarc.*') { throw 'network unreachable' }
+            if ($Type -eq 'MX') { return [ordered]@{ status = 'RCODE 2'; values = @(); ttl = $null } }
+            [ordered]@{ status = 'NOERROR'; values = @('v=spf1 -all'); ttl = 300 }
+        }
+        $findings = (Invoke-Tool 'godaddy_verify_dns' @{ domain = 'enabl.org'; type = 'TXT' }).Data.emailAuthentication.findings
+        foreach ($check in 'mx', 'dmarc') {
+            $f = @($findings | Where-Object check -EQ $check)
+            $f | Should -HaveCount 1
+            $f[0].severity | Should -Be 'info'
+            $f[0].message | Should -Match 'unknown'
+        }
+    }
+
+    It 'still reports external_nameservers when the second nameserver lookup fails' {
+        Reset-FakeGddy -Zone @() -NameServers @('cameron.ns.cloudflare.com')
+        $script:Fake.DomainGets = 0
+        $script:Fake.Override = {
+            param($a)
+            if ($a[0] -eq 'dns' -and $a[1] -eq 'list') { return [pscustomobject]@{ ExitCode = 4; StdOut = ''; StdErr = '{"error":{"message":"HTTP 404 Not Found: zone not found"}}'; TimedOut = $false; AuthPromptDetected = $false } }
+            if ($a[0] -eq 'domain' -and $a[1] -eq 'get') { $script:Fake.DomainGets++; if ($script:Fake.DomainGets -gt 1) { return New-FakeResult -ExitCode 2 -ErrorMessage '503 Service Unavailable' } }
+        }
+        Mock -ModuleName GoDaddyDnsMcp Resolve-GoDaddyAuthoritativeDns { [ordered]@{ status = 'NOERROR'; values = @('192.0.2.1') } }
+        Mock -ModuleName GoDaddyDnsMcp Resolve-GoDaddyPublicDns { [ordered]@{ status = 'NOERROR'; values = @('192.0.2.1'); ttl = 300 } }
+        (Invoke-Tool 'godaddy_verify_dns' @{ domain = 'enabl.org'; type = 'A' }).Data.status | Should -Be 'external_nameservers'
     }
 
     It 'compares TXT values exactly and includes the SPF/DMARC/DKIM report' {
