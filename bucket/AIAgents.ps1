@@ -329,8 +329,11 @@ foreach (`$pair in @(
         # wraps this winget call, so declaring the wrapper made Update-Package ask
         # scoop -- which re-runs the wrapper only when this bucket bumps its version,
         # never when Anthropic ships one -- and made the #464 gate refuse the real
-        # winget install as a foreign copy. PreviousInstaller lets Install-Package
-        # retire the wrapper's scoop record on machines that have it.
+        # winget install as a foreign copy. PreviousInstaller records the wrapper:
+        # it takes effect when Uninstall-Package removes the CLI (the wrapper puts
+        # nothing on PATH, so the install-time gate never needs it). That uninstall
+        # runs at this entry's user scope, so a wrapper installed with -g keeps an
+        # empty scoop record -- harmless, since the wrapper itself installs nothing.
         Installer   = 'winget'
         Id          = 'Anthropic.ClaudeCode'
         Scope       = 'user'

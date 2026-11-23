@@ -38,7 +38,7 @@ BeforeAll {
     }
 
     function Get-SetAside([string]$Directory) {
-        @(Get-ChildItem -LiteralPath $Directory -File -Recurse -Force | Where-Object Name -match '\.superseded-\d+$')
+        @(Get-ChildItem -LiteralPath $Directory -File -Recurse -Force | Where-Object Name -match '\.(superseded|obsolete)-\d+(-\d+)?$')
     }
 
     function Stop-AllRunningCopies {
@@ -132,6 +132,74 @@ Describe 'Setting in-use files aside (#547)' -Tag 'Light', 'Module' {
         Get-Content -LiteralPath $script:exe | Should -Be 'original'
         Get-SetAside $script:dir | Should -BeNullOrEmpty
     }
+
+    It 'leaves a set-aside file alone while the run that set it aside is still in progress' {
+        # Another Update-Package run (e.g. a scheduled one) is mid-upgrade: its
+        # original is missing on purpose. Restoring it would undo that run's work.
+        $owner = Start-RunningCopy (Join-Path $TestDrive "owner-$([guid]::NewGuid().ToString('N')).exe")
+        New-Item -ItemType Directory -Force -Path $script:dir | Out-Null
+        $left = "$($script:exe).superseded-20260101000000000-$($owner.Id)"
+        Set-Content -LiteralPath $left -Value 'original'
+
+        $null = & $script:module { param($d) Move-InUseFileAside -Directory $d } $script:dir
+
+        $script:exe | Should -Not -Exist
+        $left | Should -Exist
+    }
+
+    It 'never puts back a file that an upgrade no longer ships, and deletes it once nothing runs it' {
+        # e.g. Grok Build names its exe after its version: a successful upgrade
+        # writes grok-<new>.exe and no longer has grok-<old>.exe.
+        $p = Start-RunningCopy $script:exe
+        $moved = @(& $script:module { param($d) Move-InUseFileAside -Directory $d } $script:dir)
+
+        $null = & $script:module { param($m) Complete-InUseFileAside -Moved $m -Upgraded } $moved
+        $script:exe | Should -Not -Exist
+        $p.HasExited | Should -BeFalse
+
+        Stop-RunningCopy $p
+        $null = & $script:module { param($d) Move-InUseFileAside -Directory $d } $script:dir
+
+        $script:exe | Should -Not -Exist
+        Get-SetAside $script:dir | Should -BeNullOrEmpty
+    }
+
+    It 'ignores files that only look like set-aside copies' {
+        New-Item -ItemType Directory -Force -Path $script:dir | Out-Null
+        $lookalike = Join-Path $script:dir 'notes.txt.superseded-20260101000000000'
+        Set-Content -LiteralPath $lookalike -Value 'vendor file'
+
+        $null = & $script:module { param($d) Move-InUseFileAside -Directory $d } $script:dir
+
+        $lookalike | Should -Exist
+        Join-Path $script:dir 'notes.txt' | Should -Not -Exist
+    }
+
+    It 'handles folders whose names contain wildcard characters' {
+        $dir = Join-Path $TestDrive "pkg[1]-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $exe = Join-Path $dir 'tool.exe'
+        Set-Content -LiteralPath $exe -Value 'v1'
+        # A handle that allows rename but not write stands in for a loaded image.
+        $hold = [System.IO.File]::Open($exe, 'Open', 'Read', [System.IO.FileShare]'Read, Delete')
+        try {
+            $moved = @(& $script:module { param($d) Move-InUseFileAside -Directory $d } $dir)
+            $moved.Count | Should -Be 1
+            [System.IO.File]::Exists($exe) | Should -BeFalse
+            [System.IO.File]::Exists($moved[0].Renamed) | Should -BeTrue
+        } finally { $hold.Dispose() }
+    }
+
+    It 'says which file it could not check when it is not allowed to open it' {
+        New-Item -ItemType Directory -Force -Path $script:dir | Out-Null
+        Set-Content -LiteralPath $script:exe -Value 'v1'
+        (Get-Item -LiteralPath $script:exe).Attributes = 'ReadOnly'
+        try {
+            $verbose = & $script:module { param($p) Test-FileInUse -Path $p -Verbose 4>&1 } $script:exe |
+                Where-Object { $_ -is [System.Management.Automation.VerboseRecord] }
+            ($verbose | ForEach-Object Message) -join "`n" | Should -Match ([regex]::Escape($script:exe))
+        } finally { (Get-Item -LiteralPath $script:exe).Attributes = 'Normal' }
+    }
 }
 
 Describe 'Update-WingetPackage upgrades a portable package while it runs (#547)' -Tag 'Light', 'Module' {
@@ -193,32 +261,58 @@ Describe 'Update-WingetPackage upgrades a portable package while it runs (#547)'
         $script:exe | Should -Exist
         Get-SetAside $script:dir | Should -BeNullOrEmpty
     }
+
+    It 'does not put back a file the upgraded version no longer ships' {
+        $null = Start-RunningCopy $script:exe
+        Mock -ModuleName MarkMichaelis.ScoopBucket winget {
+            if ($args[0] -eq 'list') { $global:LASTEXITCODE = 0; return 'row' }
+            Set-Content -LiteralPath (Join-Path $script:dir 'tool-2.0.exe') -Value 'new version'
+            $global:LASTEXITCODE = 0
+        }
+
+        $r = & $script:engine -Package $script:pkg -TimeoutMinutes 0
+
+        $r.State | Should -Be 'Updated'
+        $script:exe | Should -Not -Exist -Because 'the new version replaced tool.exe with tool-2.0.exe'
+    }
 }
 
 Describe 'Update-Package -MachineWide upgrades running portables too (#547)' -Tag 'Light', 'Module' {
 
     AfterEach { Stop-AllRunningCopies }
 
-    It 'frees locked portable executables around winget upgrade --all' {
-        $script:dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
-        $script:exe = Join-Path $script:dir 'tool.exe'
-        $script:originalPresentAtUpgrade = $null
-        $null = Start-RunningCopy $script:exe
-        Mock -ModuleName MarkMichaelis.ScoopBucket Get-WingetPortableDirectory { $script:dir }
+    It 'frees the locked executables of packages with an upgrade, and leaves the rest running untouched' {
+        $script:upDir   = Join-Path $TestDrive "up-$([guid]::NewGuid().ToString('N'))"
+        $script:keepDir = Join-Path $TestDrive "keep-$([guid]::NewGuid().ToString('N'))"
+        $script:upExe   = Join-Path $script:upDir 'tool.exe'
+        $script:keepExe = Join-Path $script:keepDir 'other.exe'
+        $script:seen = $null
+        $null = Start-RunningCopy $script:upExe
+        $null = Start-RunningCopy $script:keepExe
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-PackageUpdateIndex {
+            @{ winget = @{
+                'vendor.tool' = @{ Installed = '1.0'; Available = '2.0' }
+                'other.app'   = @{ Installed = '3.0'; Available = '' }
+            } }
+        }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-WingetPortableDirectory {
+            switch ($Id) { 'vendor.tool' { $script:upDir } 'other.app' { $script:keepDir } }
+        }
         Mock -ModuleName MarkMichaelis.ScoopBucket winget {
-            $script:originalPresentAtUpgrade = Test-Path -LiteralPath $script:exe
-            Set-Content -LiteralPath $script:exe -Value 'new version'
+            $script:seen = @{ Up = (Test-Path -LiteralPath $script:upExe); Keep = (Test-Path -LiteralPath $script:keepExe) }
+            Set-Content -LiteralPath $script:upExe -Value 'new version'
             $global:LASTEXITCODE = 0
         }
 
         $r = & $script:module { Update-AllWingetPackages }
 
-        $script:originalPresentAtUpgrade | Should -BeFalse
+        $script:seen.Up | Should -BeFalse -Because 'the upgradable package''s running exe must be out of winget''s way'
+        $script:seen.Keep | Should -BeTrue -Because 'a package with nothing to upgrade is not disturbed'
         $r.State | Should -Be 'Updated'
-        Get-Content -LiteralPath $script:exe | Should -Be 'new version'
+        Get-Content -LiteralPath $script:upExe | Should -Be 'new version'
+        Get-SetAside $script:keepDir | Should -BeNullOrEmpty
     }
 }
-
 Describe 'Update-Package -WhatIf previews an upgrade of a running portable (#547)' -Tag 'Light', 'Module' {
 
     AfterEach { Stop-AllRunningCopies }

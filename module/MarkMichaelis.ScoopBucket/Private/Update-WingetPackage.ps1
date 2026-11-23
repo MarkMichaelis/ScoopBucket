@@ -69,7 +69,9 @@ function Update-WingetPackage {
     try {
         $result = Invoke-WingetUpgradeCommand -Package $Package -UpgradeArgs $upgradeArgs -TimeoutMinutes $TimeoutMinutes
     } finally {
-        $settled = Complete-InUseFileAside -Moved $aside
+        # Only an upgrade that went through may leave a set-aside file un-restored
+        # (the new version stopped shipping it); anything else puts it back.
+        $settled = Complete-InUseFileAside -Moved $aside -Upgraded:($result.State -eq 'Updated')
     }
     if ($result.State -eq 'Updated' -and $settled.Moved -gt $settled.Restored) {
         $result.Reason = Get-InUseUpgradeNote -Count ($settled.Moved - $settled.Restored)

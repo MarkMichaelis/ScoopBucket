@@ -25,13 +25,22 @@ function Update-AllWingetPackages {
     Write-Verbose "  winget $($upgradeArgs -join ' ')"
     # Running portable programs would fail their upgrade (and lose their command
     # alias); set their locked executables aside first, as Update-WingetPackage
-    # does per package (#547).
-    $aside = @(Move-InUseFileAside -Directory @(Get-WingetPortableDirectory))
+    # does per package (#547). Only packages winget lists as upgradable are
+    # touched, so a program with nothing to upgrade is never disturbed and a
+    # successful sweep means every set-aside package was upgraded.
+    $index = Get-PackageUpdateIndex -Installers 'winget'
+    $wingetMap = if ($index -and $index['winget']) { $index['winget'] } else { @{} }
+    $upgradable = @($wingetMap.Keys | Where-Object {
+            $entry = $wingetMap[$_]
+            $entry.Available -and $entry.Available -ne $entry.Installed
+        })
+    $aside = @(Move-InUseFileAside -Directory @($upgradable | ForEach-Object { Get-WingetPortableDirectory -Id $_ }))
+    $exit = $null
     try {
         $out = & winget @upgradeArgs *>&1
         $exit = $LASTEXITCODE
     } finally {
-        $settled = Complete-InUseFileAside -Moved $aside
+        $settled = Complete-InUseFileAside -Moved $aside -Upgraded:($exit -eq 0)
     }
     $joined = ($out | ForEach-Object { $_.ToString() }) -join "`n"
     if ($joined) { Write-Verbose $joined }
