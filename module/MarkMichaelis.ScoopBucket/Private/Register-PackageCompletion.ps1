@@ -836,6 +836,16 @@ function Test-PackageCompletionWorks {
     $lineLiteral = "$Cli " -replace "($script:CompletionQuoteChar)", '$1$1'
     $probe = @"
 `$ErrorActionPreference='SilentlyContinue'
+# Record every warning raised while the profile loads and the deferred
+# blocks register (a missing or failing completion file, #532), wherever
+# the host would have sent it: a CI runner's host did not put an event
+# action's warning on stdout. A function outranks the cmdlet of the same
+# name, from the event action and the dot-sourced loaders alike.
+`$Global:__ScoopBucketProbeWarnings = [System.Collections.Generic.List[string]]::new()
+function global:Write-Warning {
+    param([Parameter(Position = 0, ValueFromPipeline)][string]`$Message)
+    process { `$Global:__ScoopBucketProbeWarnings.Add(`$Message) }
+}
 . '$profileLiteral' 2>`$null
 # The profile blocks written by Register-PackageCompletion defer their
 # Register-ArgumentCompleter calls to a single PowerShell.OnIdle
@@ -867,24 +877,27 @@ for (`$i = 0; `$i -lt 250; `$i++) {
 `$all = @(`$cc.CompletionMatches)
 `$answered = @(`$all | Where-Object { `$_.ResultType -notin 'ProviderItem', 'ProviderContainer' })
 `$results = @(`$answered | Select-Object -First 25 -ExpandProperty CompletionText)
-@{ Count = `$answered.Count; FallbackCount = `$all.Count - `$answered.Count; Pending = `$pending; Matches = `$results } | ConvertTo-Json -Compress
+@{ Count = `$answered.Count; FallbackCount = `$all.Count - `$answered.Count; Pending = `$pending; Matches = `$results; Warnings = @(`$Global:__ScoopBucketProbeWarnings) } | ConvertTo-Json -Compress
 "@
     $probeFile = Join-Path $env:TEMP "ScoopBucket-completion-probe-$PID-$([guid]::NewGuid().ToString('N')).ps1"
     try {
         Set-Content -Path $probeFile -Value $probe -Encoding UTF8
-        # Warnings from the deferred registration (a missing or failing
-        # completion file, #532) reach the child's stdout ahead of the JSON.
+        # The probe returns the warnings it recorded in its JSON. Any that a
+        # host still prints land on stdout as WARNING: lines; never let
+        # them pass for the JSON.
         $out = @(& $pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probeFile 2>$null | ForEach-Object { "$_" })
-        $warnings = @($out | Where-Object { $_ -like 'WARNING:*' } | ForEach-Object { $_.Substring(8).Trim() })
-        $warned = if ($warnings) { " Registration warned: $($warnings -join ' | ')" } else { '' }
+        $printed = @($out | Where-Object { $_ -like 'WARNING:*' } | ForEach-Object { $_.Substring(8).Trim() })
         $json = $out | Where-Object { $_.StartsWith('{') } | Select-Object -Last 1
         if (-not $json) {
+            $warned = if ($printed) { " Registration warned: $($printed -join ' | ')" } else { '' }
             return [pscustomobject]@{
                 Cli = $Cli; Verified = $false; MatchCount = 0; FirstMatches = @()
                 Reason = "Probe produced no output.$warned"
             }
         }
         $obj = $json | ConvertFrom-Json -ErrorAction Stop
+        $warnings = @(@($obj.Warnings) + $printed | Where-Object { $_ } | Select-Object -Unique)
+        $warned = if ($warnings) { " Registration warned: $($warnings -join ' | ')" } else { '' }
         $count = [int]$obj.Count
         $fallback = [int]$obj.FallbackCount
         $pending = [int]$obj.Pending
