@@ -661,6 +661,21 @@ $null = Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -MaxTriggerCoun
             $r.Reason   | Should -Not -Match 'Probe error'
         }
 
+        It 'reports a registration warning even when the host does not display it' {
+            # A CI runner's host did not put an event action's warning on
+            # stdout. Silencing the warning stream reproduces that: the probe
+            # must record warnings itself, not scrape what the host printed.
+            $p = Join-Path $TestDrive 'silent-warning-profile.ps1'
+            Set-Content -Path $p -Encoding UTF8 -Value @'
+$WarningPreference = 'SilentlyContinue'
+$null = Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -MaxTriggerCount 1 -Action { Write-Warning 'probe-hidden-warning' }
+'@
+            Push-Location $script:probeDir
+            try { $r = & $script:ProbeFn -Cli 'pwsh' -ProfilePath $p } finally { Pop-Location }
+            $r.Verified | Should -BeFalse
+            $r.Reason   | Should -Match 'probe-hidden-warning'
+        }
+
         It 'loads a profile whose path contains an apostrophe' {
             $dir = Join-Path $TestDrive "o'brien"
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
