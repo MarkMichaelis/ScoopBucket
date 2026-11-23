@@ -429,8 +429,15 @@ Register-ArgumentCompleter -Native -CommandName agy -ScriptBlock {
     }
     [Package]@{
         Name        = 'GitHub Copilot CLI'
-        Installer   = 'scoop'
-        Id          = 'MarkMichaelis/GitHubCopilotCli'
+        # #547: declared under winget like the DeveloperBasePackages copy, for
+        # the same reason as 'Claude Code CLI' above -- the
+        # MarkMichaelis/GitHubCopilotCli scoop manifest only wraps winget
+        # GitHub.Copilot (a portable copilot.exe), so the wrapper declaration
+        # hid new versions and made the #464 gate refuse the real install.
+        Installer   = 'winget'
+        Id          = 'GitHub.Copilot'
+        PreviousInstaller = 'scoop'
+        PreviousId  = 'MarkMichaelis/GitHubCopilotCli'
         CliCommands = @('copilot')
         DependsOn   = @('Node.js')
         Completion  = 'auto'

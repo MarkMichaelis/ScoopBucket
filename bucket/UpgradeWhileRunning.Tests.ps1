@@ -241,31 +241,34 @@ Describe 'Update-Package -WhatIf previews an upgrade of a running portable (#547
     }
 }
 
-Describe 'AIAgents declares Claude Code CLI under the engine that installs it (#547)' -Tag 'Light', 'Bundle' {
+Describe 'AIAgents declares each agent CLI under the engine that installs it (#547)' -Tag 'Light', 'Bundle' -ForEach @(
+    @{ Name = 'Claude Code CLI';    Cli = 'claude';  Id = 'Anthropic.ClaudeCode'; Wrapper = 'MarkMichaelis/ClaudeCode' }
+    @{ Name = 'GitHub Copilot CLI'; Cli = 'copilot'; Id = 'GitHub.Copilot';       Wrapper = 'MarkMichaelis/GitHubCopilotCli' }
+) {
 
     BeforeAll {
-        $script:claude = & $script:module {
-            param($bundle) Get-BundlePackageObjects -BundlePath $bundle | Where-Object Name -eq 'Claude Code CLI'
-        } (Join-Path $PSScriptRoot 'AIAgents.ps1')
+        $script:agent = & $script:module {
+            param($bundle, $name) Get-BundlePackageObjects -BundlePath $bundle | Where-Object Name -eq $name
+        } (Join-Path $PSScriptRoot 'AIAgents.ps1') $Name
         $script:roots = @{
             scoop  = @('C:\ProgramData\scoop', 'C:\Users\u\scoop')
             winget = @('C:\Program Files\WinGet', 'C:\Users\u\AppData\Local\Microsoft\WinGet')
         }
     }
 
-    It 'lets Update-Package reach the winget-installed claude instead of refusing it as a foreign copy' {
+    It '<Name>: Update-Package reaches the winget-installed <Cli> instead of refusing it as a foreign copy' {
         $conflict = & $script:module {
-            param($pkg, $roots)
+            param($pkg, $roots, $cli)
             Get-PackageEngineConflict -Package $pkg -EngineRoot $roots `
-                -CommandResolver { param($cli) 'C:\Users\u\AppData\Local\Microsoft\WinGet\Links\claude.exe' }
-        } $script:claude $script:roots
+                -CommandResolver { param($c) "C:\Users\u\AppData\Local\Microsoft\WinGet\Links\$c.exe" }
+        } $script:agent $script:roots $Cli
 
         $conflict | Should -BeNullOrEmpty
-        $script:claude.Id | Should -Be 'Anthropic.ClaudeCode'
+        $script:agent.Id | Should -Be $Id
     }
 
-    It 'names the old scoop wrapper as its predecessor so Install-Package retires it' {
-        $script:claude.PreviousInstaller | Should -Be 'scoop'
-        $script:claude.PreviousId | Should -Be 'MarkMichaelis/ClaudeCode'
+    It '<Name>: names the old scoop wrapper as its predecessor so Install-Package retires it' {
+        $script:agent.PreviousInstaller | Should -Be 'scoop'
+        $script:agent.PreviousId | Should -Be $Wrapper
     }
 }
