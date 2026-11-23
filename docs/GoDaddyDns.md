@@ -9,7 +9,7 @@ CLI, `gddy`, signed in as you on this machine. Issue: #527.
 |---|---|---|
 | `GoDaddy CLI` package | `bucket/DeveloperBasePackages.ps1` | Installs `gddy`, shims it onto PATH, registers tab completion, updates it |
 | GoDaddy DNS MCP server | `bucket/ai/GoDaddyDnsMcp.ps1` + `.psm1` | Local stdio MCP server exposing eight `godaddy_*` tools that wrap `gddy` |
-| Agent wiring | `bucket/AIAgents.Mcp.ps1` (`MCP Server Configuration`) | Registers the server with Claude Code, Codex, Claude Desktop, Gemini CLI, Copilot CLI, and sets approval rules |
+| Agent wiring | `bucket/AIAgents.Mcp.ps1` (`MCP Server Configuration`) | Registers the server with Claude Code, Codex, Claude Desktop and Copilot CLI, and sets approval rules |
 
 ## 1. Install and sign in
 
@@ -31,13 +31,25 @@ gddy domain list                                   # proves the sign-in works
   makes the same checksum-verified download and replaces the binary in place.
 - **Tab completion.** Comes from the binary (`gddy completion powershell`), so
   it always matches the installed version.
-- **Sign-in.** `gddy auth login` is browser OAuth (PKCE). The token is stored in
-  Windows Credential Manager and refreshed automatically. For headless use,
-  create a Personal Access Token with `gddy pat create`, then store it with
-  `gddy pat add` or set `GDDY_PAT` / `GDDY_PAT_PROD`. Nothing in this repo
-  stores or reads a secret. Default sign-in scopes include
-  `domains.domain:read` and `domains.dns:update`. Nameserver changes need a
-  scope this integration never asks for.
+- **Sign-in.** `gddy auth login` is browser OAuth (PKCE), refreshed
+  automatically. For headless use, create a Personal Access Token with
+  `gddy pat create`, then store it with `gddy pat add` or set `GDDY_PAT` /
+  `GDDY_PAT_PROD`. Nothing in this repo stores or reads a secret. Default
+  sign-in scopes include `domains.domain:read` and `domains.dns:update`.
+  Nameserver changes need a scope this integration never asks for.
+- **Where the token lives (Windows).** gddy's OAuth token is about 3.5 KB,
+  larger than Windows Credential Manager's 2,560-byte limit per entry. So
+  `gddy auth login` saves it to gddy's file store
+  (`%APPDATA%\gddy\credentials\`), while gddy's default `auto` store reads only
+  Credential Manager. Every later command then acts signed out and opens a
+  browser.
+  - The package therefore sets `gddy config set credentials.store file` on
+    install and update, unless you already picked a store yourself.
+  - The MCP server also checks the file store and uses it when the sign-in is
+    there.
+  - The file inherits `%APPDATA%`'s permissions, so anything that can read your
+    profile, including sandboxed agent processes granted read access to it,
+    can read the token. Revoke it with `gddy auth logout`.
 - **Uninstall.** `Uninstall-Package 'GoDaddy CLI'` removes the binary and shim
   but leaves your sign-in. Run `gddy auth logout` first to clear it.
 
@@ -104,6 +116,8 @@ text). Failures come back as `{ "error": { "code", "message", "hint",
 "details" } }`. The codes are:
 
 - `AUTH_REQUIRED`, `AUTH_EXPIRED`, `PERMISSION_DENIED`
+- `EXTERNAL_DNS`: the domain is registered here, but another provider hosts its
+  DNS (for example Cloudflare), so GoDaddy holds no records for it.
 - `VALIDATION_ERROR`, `NOT_FOUND`, `AMBIGUOUS_MATCH`, `DUPLICATE_RECORD`, `CONFLICT`, `NO_CHANGE`
 - `APPROVAL_REQUIRED`, `STATE_CHANGED`
 - `PROVIDER_LIMITATION`, `READ_ONLY_RECORD_TYPE`
@@ -140,7 +154,7 @@ MX, SRV, SVCB, TLSA, TXT, plus NS and SOA read-only.
      tool names, not arguments.
    - An `ask` rule outranks any later "always allow", and still prompts in
      auto mode.
-   - **Other clients** (Claude Desktop, Gemini CLI, Copilot CLI) get no
+   - **Other clients** (Claude Desktop, Copilot CLI) get no
      per-tool rule from this bucket. Set their tool approval to ask before
      relying on them for changes; otherwise only the agent's own adherence to
      the server instructions stands between a plan and its execution.
@@ -244,8 +258,16 @@ approval_mode = "prompt"         # same for create and delete
 
 Check with `codex mcp get godaddy`.
 
-**Any other MCP client** (Claude Desktop, Gemini CLI, Copilot CLI, Cursor,
-VS Code, ...) -- local stdio, no network listener:
+**Claude Desktop and Copilot CLI** get the same entry. Both prompt before each
+MCP tool call by default; keep it that way for the write tools.
+
+**Grok CLI and Antigravity are skipped on purpose.** The bucket wires its other
+MCP servers into them, but sets no approval rule there, and their default MCP
+approval behavior is unverified. Add the entry below by hand once each is set
+to ask before running a tool.
+
+**Any other MCP client** (Cursor, VS Code, ...) -- local stdio, no network
+listener:
 
 ```json
 { "mcpServers": { "godaddy": {
@@ -261,11 +283,11 @@ only JSON-RPC to stdout; diagnostics go to stderr.
 | You say | What the agent does |
 |---|---|
 | "List all the domains in my GoDaddy account." | `godaddy_list_domains` |
-| "Show me the DNS records for enabl.org." | `godaddy_list_dns_records { domain: "enabl.org" }`, grouped by type |
+| "Show me the DNS records for enabl.org." | `godaddy_list_dns_records { domain: "enabl.org" }`, grouped by type. `enabl.org` itself is registered at GoDaddy but its DNS is hosted by Cloudflare, so this returns `EXTERNAL_DNS` naming Cloudflare. The agent can then show what is live with `godaddy_verify_dns` per type. For a domain on GoDaddy DNS (e.g. `michaelis.net`) it lists every record with its `recordId` |
 | "Check whether the SPF record for enabl.org is configured correctly." | `godaddy_get_dns_record` for TXT `@` (SPF lint: exactly one record, `all` qualifier, the 10-lookup limit), then `godaddy_verify_dns` TXT `@` to confirm the public answer |
 | "Prepare a new TXT verification record for enabl.org." | Asks for the value if you did not give it, then `godaddy_create_dns_record` with `dryRun=true`. Shows the plan, risks and rollback and **stops for your approval** |
 | "Change the www CNAME for enabl.org to enabl.github.io." | Reads the current CNAME, then dry-runs `godaddy_update_dns_record { type: "CNAME", name: "www", currentData: <current>, data: "enabl.github.io" }`. Flags the web-traffic risk and waits. After you approve, applies with the token, verifies, and runs `godaddy_verify_dns` |
-| "Explain why email authentication is failing for this domain." | `godaddy_verify_dns` with TXT `@` and MX. The `emailAuthentication` report covers MX, SPF, DMARC and DKIM selectors, so the agent can pinpoint, say, two SPF records (permerror) or `p=reject` without DKIM |
+| "Explain why email authentication is failing for this domain." | `godaddy_verify_dns` with TXT `@` and MX. The `emailAuthentication` report covers MX, SPF, DMARC and DKIM selectors, so the agent can pinpoint, say, two SPF records (permerror) or `p=reject` without DKIM. For a domain hosted elsewhere, the report is built from public DNS; DKIM selectors can't be listed that way, so check a known selector by name |
 | "Compare the configured DNS records with what public DNS currently returns." | `godaddy_verify_dns` per record type. `in_sync`, `propagating` (public cache still old), `authoritative_mismatch`, or `external_nameservers` (the domain is not on GoDaddy DNS, so GoDaddy records are not live) |
 
 ## 6. Tests
@@ -284,8 +306,9 @@ so automated tests never create, change, or delete live DNS.
 | Symptom | Fix |
 |---|---|
 | `AUTH_REQUIRED` / `AUTH_EXPIRED` | Run `gddy auth login` in a terminal, then retry |
+| You signed in, but `gddy` still opens a browser or says "expired" | The token is in gddy's file store but gddy reads Credential Manager. Run `gddy config set credentials.store file` (the package does this on install and update) |
 | `PERMISSION_DENIED` on a write | `gddy auth login --scope domains.dns:update`, or a PAT with that scope |
-| `external_nameservers` from verify | The domain's DNS is hosted elsewhere (e.g. Cloudflare). Edit records there |
+| `EXTERNAL_DNS`, or `external_nameservers` from verify | The domain's DNS is hosted elsewhere (e.g. Cloudflare). Edit records there; `godaddy_verify_dns` still shows what is live |
 | `STATE_CHANGED` | Records changed after the plan was approved, or the arguments differ. Re-plan and re-approve |
 | `PROVIDER_LIMITATION` | A TTL/priority-only change to one record of a multi-record set, or GoDaddy returned no `recordId`. Use the GoDaddy DNS page, or a separately approved delete then create |
 | Server missing from an agent | `Update-Package 'MCP Server Configuration'` (needs `gddy` installed first) |

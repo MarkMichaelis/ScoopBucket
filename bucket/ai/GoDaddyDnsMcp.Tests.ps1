@@ -294,6 +294,18 @@ Describe 'GoDaddy DNS MCP: authentication' -Tag 'Light', 'GoDaddy' {
         finally { $env:GDDY_PAT_PROD = $saved }
     }
 
+    It 'finds a sign-in kept only in the file store and uses that store for every account call' {
+        # Live finding: on Windows gddy's OAuth token exceeds Credential
+        # Manager's 2560-byte limit, so login saves it to the file store while
+        # the default store reports "expired".
+        Reset-FakeGddy -Zone (Get-StandardZone) -Authenticated $false
+        $script:Fake.Override = { param($a) if ($a[0] -eq 'auth' -and $a[1] -eq 'status' -and $a -contains 'file') { New-FakeResult @(@{ env = 'prod'; expired = $false; refreshable = $true; identity = 'user'; expires_at = ''; provider = 'godaddy'; scopes = @() }) } }
+        $r = Invoke-Tool 'godaddy_list_dns_records' @{ domain = 'enabl.org' }
+        $r.IsError | Should -BeFalse
+        $call = $script:Fake.Calls | Where-Object { $_[0] -eq 'dns' } | Select-Object -First 1
+        ($call -join ' ') | Should -Match '--credential-store file'
+    }
+
     It 'reports AUTH_REQUIRED when gddy starts the browser login anyway' {
         Reset-FakeGddy -Zone (Get-StandardZone)
         $script:Fake.Override = { param($a) if ($a[0] -eq 'dns') { [pscustomobject]@{ ExitCode = -1; StdOut = 'Opening browser for authentication...'; StdErr = ''; TimedOut = $false; AuthPromptDetected = $true } } }
@@ -338,6 +350,27 @@ Describe 'GoDaddy DNS MCP: CLI failures and output parsing' -Tag 'Light', 'GoDad
         $r.Data.error.code | Should -Be 'NOT_FOUND'
         $r.Data.error.message | Should -Match 'not in this account'
         $r.Data.error.details.command | Should -Match '^gddy dns list enabl\.org'
+    }
+
+    It 'reads gddy''s error envelope from stderr, where gddy writes it' {
+        $script:Fake.Override = { param($a) if ($a[0] -eq 'dns') { [pscustomobject]@{ ExitCode = 4; StdOut = ''; StdErr = '{ "error": { "code": "ERROR", "message": "listing DNS records failed (HTTP 500): upstream unavailable" } }'; TimedOut = $false; AuthPromptDetected = $false } } }
+        $r = Invoke-Tool 'godaddy_list_dns_records' @{ domain = 'enabl.org' }
+        $r.Data.error.message | Should -Be 'gddy failed: listing DNS records failed (HTTP 500): upstream unavailable'
+    }
+
+    It 'names the DNS host when the domain is registered here but its DNS is hosted elsewhere' {
+        Reset-FakeGddy -Zone @() -NameServers @('cameron.ns.cloudflare.com', 'saanvi.ns.cloudflare.com')
+        $script:Fake.Override = { param($a) if ($a[0] -eq 'dns' -and $a[1] -eq 'list') { [pscustomobject]@{ ExitCode = 4; StdOut = ''; StdErr = '{"error":{"code":"ERROR","message":"listing DNS records failed (HTTP 404 Not Found): {\"message\":\"zone not found\",\"name\":\"ZONE_NOT_FOUND\"}"}}'; TimedOut = $false; AuthPromptDetected = $false } } }
+        $r = Invoke-Tool 'godaddy_list_dns_records' @{ domain = 'enabl.org' }
+        $r.Data.error.code | Should -Be 'EXTERNAL_DNS'
+        $r.Data.error.message | Should -Match 'Cloudflare'
+        $r.Data.error.details.nameServers | Should -Contain 'cameron.ns.cloudflare.com'
+        $r.Data.error.hint | Should -Match 'godaddy_verify_dns'
+    }
+
+    It 'keeps NOT_FOUND for a zone-not-found domain that is on GoDaddy nameservers' {
+        $script:Fake.Override = { param($a) if ($a[0] -eq 'dns' -and $a[1] -eq 'list') { [pscustomobject]@{ ExitCode = 4; StdOut = ''; StdErr = '{"error":{"code":"ERROR","message":"HTTP 404 Not Found: zone not found"}}'; TimedOut = $false; AuthPromptDetected = $false } } }
+        (Invoke-Tool 'godaddy_list_dns_records' @{ domain = 'enabl.org' }).Data.error.code | Should -Be 'NOT_FOUND'
     }
 
     It 'reports TIMEOUT when gddy hangs' {
@@ -773,6 +806,26 @@ Describe 'GoDaddy DNS MCP: live DNS verification' -Tag 'Light', 'GoDaddy' {
         $r = Invoke-Tool 'godaddy_verify_dns' @{ domain = 'enabl.org'; type = 'A' }
         $r.Data.status | Should -Be 'external_nameservers'
         $r.Data.explanation | Should -Match 'not GoDaddy'
+    }
+
+    It 'verifies a domain whose DNS is hosted elsewhere against its own nameservers and public DNS, with a public email report' {
+        Reset-FakeGddy -Zone @() -NameServers @('cameron.ns.cloudflare.com', 'saanvi.ns.cloudflare.com')
+        $script:Fake.Override = { param($a) if ($a[0] -eq 'dns' -and $a[1] -eq 'list') { [pscustomobject]@{ ExitCode = 4; StdOut = ''; StdErr = '{"error":{"code":"ERROR","message":"HTTP 404 Not Found: zone not found"}}'; TimedOut = $false; AuthPromptDetected = $false } } }
+        Mock -ModuleName GoDaddyDnsMcp Resolve-GoDaddyAuthoritativeDns { [ordered]@{ status = 'NOERROR'; values = @('v=spf1 include:_spf.mx.cloudflare.net ~all') } }
+        Mock -ModuleName GoDaddyDnsMcp Resolve-GoDaddyPublicDns {
+            if ($Type -eq 'MX') { return [ordered]@{ status = 'NOERROR'; values = @('10 route1.mx.cloudflare.net'); ttl = 300 } }
+            if ($Fqdn -like '_dmarc.*') { return [ordered]@{ status = 'NOERROR'; values = @('v=DMARC1; p=none; rua=mailto:d@enabl.org'); ttl = 300 } }
+            [ordered]@{ status = 'NOERROR'; values = @('v=spf1 include:_spf.mx.cloudflare.net ~all'); ttl = 300 }
+        }
+        $r = Invoke-Tool 'godaddy_verify_dns' @{ domain = 'enabl.org'; type = 'TXT'; name = '@' }
+        $r.IsError | Should -BeFalse
+        $r.Data.status | Should -Be 'external_nameservers'
+        $r.Data.hostedBy | Should -Be 'Cloudflare'
+        $r.Data.public[0].values | Should -Contain 'v=spf1 include:_spf.mx.cloudflare.net ~all'
+        $r.Data.public[0].matchesExpected | Should -BeNullOrEmpty -Because 'with no GoDaddy records and no expected values there is nothing to compare'
+        $r.Data.emailAuthentication.source | Should -Match 'public DNS'
+        @($r.Data.emailAuthentication.findings | Where-Object { $_.check -eq 'spf' -and $_.severity -eq 'ok' }) | Should -HaveCount 1
+        @($r.Data.emailAuthentication.findings | Where-Object { $_.check -eq 'mx' -and $_.severity -eq 'ok' }) | Should -HaveCount 1
     }
 
     It 'compares TXT values exactly and includes the SPF/DMARC/DKIM report' {
