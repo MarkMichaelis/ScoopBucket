@@ -55,7 +55,10 @@ BeforeAll {
         'Resolve-EnginePath'
         'Resolve-PowerShellPath'
         'Install-BootstrapPowerShell'
-        'Install-BootstrapBundle'
+        'Get-BootstrapModulePath'
+        'Get-BootstrapPickerArgument'
+        'Invoke-BootstrapPicker'
+        'Resolve-BootstrapScoopRoot'
     )
     foreach ($fn in $script:installFunctions) {
         if ($fn.Name -in $wanted) { . ([scriptblock]::Create($fn.Extent.Text)) }
@@ -492,10 +495,59 @@ Describe 'install.ps1 -- PowerShell 7 for bundles (issue #504)' -Tag 'Light', 'M
         { Install-BootstrapPowerShell } | Should -Throw '*PowerShell 7*'
     }
 
-    It 'hands every bundle to Install-BootstrapBundle rather than calling scoop directly' {
+    It 'opens the package picker instead of installing a fixed bundle (#543)' {
         $body = Get-Content -LiteralPath $script:installPath -Raw
-        $body | Should -Match "Install-BootstrapBundle -Name \`$_ -ScoopPath \`$scoopPath -PwshPath \`$pwshPath"
+        $body | Should -Match 'Invoke-BootstrapPicker -ScoopPath \$scoopPath -PwshPath \$pwshPath -ModulePath \(Get-BootstrapModulePath -ScoopRoot \(Resolve-BootstrapScoopRoot -ScoopPath \$scoopPath -Fallback \$scoopRoot\)\)'
+        $body | Should -Not -Match "'OSBasePackages' \| ForEach-Object"
         $body | Should -Not -Match '& \$scoopPath (install -g|update) \$(app|Name)\b' -Because 'a bundle run by scoop in this host would run under Windows PowerShell'
+    }
+
+    It 'finds the bucket''s module in the bucket clone' {
+        Get-BootstrapModulePath -ScoopRoot 'C:\ProgramData\scoop' |
+            Should -Be 'C:\ProgramData\scoop\buckets\MarkMichaelis\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
+    }
+
+    It 'takes the scoop root from where scoop actually is' {
+        function script:Invoke-PrefixScoop { 'D:\Tools\scoop\apps\scoop\current' }
+        Resolve-BootstrapScoopRoot -ScoopPath 'Invoke-PrefixScoop' -Fallback 'C:\ProgramData\scoop' | Should -Be 'D:\Tools\scoop'
+    }
+
+    It 'falls back to the expected scoop root when scoop cannot say' {
+        function script:Invoke-SilentScoop { }
+        function script:Invoke-ThrowingScoop { throw 'scoop is broken' }
+        Resolve-BootstrapScoopRoot -ScoopPath 'Invoke-SilentScoop' -Fallback 'C:\ProgramData\scoop' | Should -Be 'C:\ProgramData\scoop'
+        Resolve-BootstrapScoopRoot -ScoopPath 'Invoke-ThrowingScoop' -Fallback 'C:\ProgramData\scoop' | Should -Be 'C:\ProgramData\scoop'
+    }
+
+    It 'runs Install-Package interactively' {
+        $argv = @(Get-BootstrapPickerArgument -ModulePath 'C:\m\M.psd1')
+        $argv | Should -Not -Contain '-NonInteractive'
+        $argv | Should -Contain '-Command'
+    }
+
+    It 'loads the module from a folder with <Label> and exits 1 only when an install failed' -ForEach @(
+        @{ Label = 'spaces and an apostrophe'; Folder = "it's here" }
+        @{ Label = 'a typographic apostrophe'; Folder = "it$([char]0x2019)s here" }
+    ) {
+        # A stand-in module with the real name, so the module-qualified call resolves.
+        $dir = Join-Path (Join-Path $TestDrive $Folder) 'MarkMichaelis.ScoopBucket'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $psm1 = Join-Path $dir 'MarkMichaelis.ScoopBucket.psm1'
+        Set-Content -LiteralPath $psm1 -Value 'function Install-Package { [pscustomobject]@{ Name = "x"; Status = $env:BOOTSTRAP_STUB_STATUS } }'
+        $argv = @(Get-BootstrapPickerArgument -ModulePath $psm1)
+        $pwsh = (Get-Process -Id $PID).Path
+        $saved = $global:LASTEXITCODE
+        try {
+            $env:BOOTSTRAP_STUB_STATUS = 'Installed'
+            $null = & $pwsh @argv
+            $LASTEXITCODE | Should -Be 0
+            $env:BOOTSTRAP_STUB_STATUS = 'Failed'
+            $null = & $pwsh @argv
+            $LASTEXITCODE | Should -Be 1
+        } finally {
+            Remove-Item Env:\BOOTSTRAP_STUB_STATUS -ErrorAction Ignore
+            $global:LASTEXITCODE = $saved
+        }
     }
 
     It 'refuses to run <_> below PowerShell 7' -ForEach @('OSBasePackages', 'DeveloperBasePackages', 'ClientBasePackages', 'AIAgents') {
@@ -503,53 +555,42 @@ Describe 'install.ps1 -- PowerShell 7 for bundles (issue #504)' -Tag 'Light', 'M
             Should -Be '#requires -Version 7.0'
     }
 
-    Context 'Install-BootstrapBundle' {
+    Context 'Invoke-BootstrapPicker (#543)' {
 
         BeforeEach {
             $script:savedExitCode = $global:LASTEXITCODE
             $script:pwshCalls = [System.Collections.Generic.List[string]]::new()
             $script:fakeExitCode = 0
-            $script:scoopList = @()
             function script:Invoke-FakePwsh { $script:pwshCalls.Add($args -join ' '); $global:LASTEXITCODE = $script:fakeExitCode }
-            function script:Invoke-FakeScoop { $script:scoopList }
+            $script:modulePath = (New-Item -ItemType File -Path (Join-Path $TestDrive 'M.psd1') -Force).FullName
         }
 
         AfterEach {
             $global:LASTEXITCODE = $script:savedExitCode
         }
 
-        It 'installs a bundle that is not installed yet, under PowerShell 7' {
-            Install-BootstrapBundle -Name 'OSBasePackages' -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh'
-            $script:pwshCalls | Should -HaveCount 1
-            $script:pwshCalls[0] | Should -Match '-File Invoke-FakeScoop install -g OSBasePackages$'
-        }
-
-        It 'refreshes the buckets, then re-applies an installed bundle without the cache' {
-            $script:scoopList = [pscustomobject]@{ Name = 'OSBasePackages'; Info = 'Global install' }
-            Install-BootstrapBundle -Name 'OSBasePackages' -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh'
+        It 'refreshes the buckets, then opens the picker under PowerShell 7' {
+            Invoke-BootstrapPicker -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh' -ModulePath $script:modulePath
             $script:pwshCalls | Should -HaveCount 2
             $script:pwshCalls[0] | Should -Match '-File Invoke-FakeScoop update$'
-            $script:pwshCalls[1] | Should -Match '-File Invoke-FakeScoop update OSBasePackages --global --force --no-cache$'
+            $script:pwshCalls[1] | Should -Match '-Command Import-Module .*MarkMichaelis\.ScoopBucket\\Install-Package'
         }
 
-        It 'treats a per-user install as not installed' {
-            $script:scoopList = [pscustomobject]@{ Name = 'OSBasePackages'; Info = '' }
-            Install-BootstrapBundle -Name 'OSBasePackages' -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh'
-            $script:pwshCalls[-1] | Should -Match 'install -g OSBasePackages$'
-        }
-
-        It 'stops when scoop fails to install the bundle' {
-            $script:fakeExitCode = 3
-            { Install-BootstrapBundle -Name 'OSBasePackages' -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh' } |
-                Should -Throw "*scoop failed for 'OSBasePackages' (exit code 3)*"
-        }
-
-        It 'stops when scoop fails to re-apply a bundle that is already installed' {
-            $script:scoopList = [pscustomobject]@{ Name = 'OSBasePackages'; Info = 'Global install' }
+        It 'warns, rather than stops, when Install-Package reports a failure' {
             $script:fakeExitCode = 1
-            { Install-BootstrapBundle -Name 'OSBasePackages' -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh' } |
-                Should -Throw "*scoop failed for 'OSBasePackages' (exit code 1)*"
-            $script:pwshCalls[-1] | Should -Match 'update OSBasePackages --global --force --no-cache$'
+            Invoke-BootstrapPicker -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh' -ModulePath $script:modulePath -WarningVariable warned 3>$null
+            $warned | Should -Not -BeNullOrEmpty
+        }
+
+        It 'says nothing more when the picker succeeds' {
+            Invoke-BootstrapPicker -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh' -ModulePath $script:modulePath -WarningVariable warned 3>$null
+            $warned | Should -BeNullOrEmpty
+        }
+
+        It 'stops with a clear error when the bucket''s module is missing' {
+            { Invoke-BootstrapPicker -ScoopPath 'Invoke-FakeScoop' -PwshPath 'Invoke-FakePwsh' -ModulePath (Join-Path $TestDrive 'missing.psd1') } |
+                Should -Throw '*module*'
+            $script:pwshCalls | Should -HaveCount 1 -Because 'the buckets are refreshed first, then the module is looked for'
         }
     }
 }
