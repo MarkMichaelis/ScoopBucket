@@ -138,7 +138,8 @@ Describe 'Setting in-use files aside (#547)' -Tag 'Light', 'Module' {
         # original is missing on purpose. Restoring it would undo that run's work.
         $owner = Start-RunningCopy (Join-Path $TestDrive "owner-$([guid]::NewGuid().ToString('N')).exe")
         New-Item -ItemType Directory -Force -Path $script:dir | Out-Null
-        $left = "$($script:exe).superseded-20260101000000000-$($owner.Id)"
+        $stamp = (Get-Date).AddSeconds(1).ToString('yyyyMMddHHmmssfff')
+        $left = "$($script:exe).superseded-$stamp-$($owner.Id)"
         Set-Content -LiteralPath $left -Value 'original'
 
         $null = & $script:module { param($d) Move-InUseFileAside -Directory $d } $script:dir
@@ -147,11 +148,23 @@ Describe 'Setting in-use files aside (#547)' -Tag 'Light', 'Module' {
         $left | Should -Exist
     }
 
+    It 'restores a set-aside file whose recorded owner id now belongs to a newer, unrelated process' {
+        # The owning run crashed and Windows reused its process id.
+        New-Item -ItemType Directory -Force -Path $script:dir | Out-Null
+        $reused = Start-RunningCopy (Join-Path $TestDrive "reused-$([guid]::NewGuid().ToString('N')).exe")
+        Set-Content -LiteralPath "$($script:exe).superseded-20260101000000000-$($reused.Id)" -Value 'original'
+
+        $null = & $script:module { param($d) Move-InUseFileAside -Directory $d } $script:dir
+
+        Get-Content -LiteralPath $script:exe | Should -Be 'original'
+    }
+
     It 'never puts back a file that an upgrade no longer ships, and deletes it once nothing runs it' {
         # e.g. Grok Build names its exe after its version: a successful upgrade
         # writes grok-<new>.exe and no longer has grok-<old>.exe.
         $p = Start-RunningCopy $script:exe
         $moved = @(& $script:module { param($d) Move-InUseFileAside -Directory $d } $script:dir)
+        Set-Content -LiteralPath (Join-Path $script:dir 'tool-2.0.exe') -Value 'new version'
 
         $null = & $script:module { param($m) Complete-InUseFileAside -Moved $m -Upgraded } $moved
         $script:exe | Should -Not -Exist
@@ -275,6 +288,19 @@ Describe 'Update-WingetPackage upgrades a portable package while it runs (#547)'
         $r.State | Should -Be 'Updated'
         $script:exe | Should -Not -Exist -Because 'the new version replaced tool.exe with tool-2.0.exe'
     }
+
+    It 'puts the running executable back when winget reports success but installed nothing' {
+        $null = Start-RunningCopy $script:exe
+        Mock -ModuleName MarkMichaelis.ScoopBucket winget {
+            if ($args[0] -eq 'list') { $global:LASTEXITCODE = 0; return 'row' }
+            $global:LASTEXITCODE = 0
+        }
+
+        $null = & $script:engine -Package $script:pkg -TimeoutMinutes 0
+
+        $script:exe | Should -Exist
+        Get-SetAside $script:dir | Should -BeNullOrEmpty
+    }
 }
 
 Describe 'Update-Package -MachineWide upgrades running portables too (#547)' -Tag 'Light', 'Module' {
@@ -311,6 +337,25 @@ Describe 'Update-Package -MachineWide upgrades running portables too (#547)' -Ta
         $r.State | Should -Be 'Updated'
         Get-Content -LiteralPath $script:upExe | Should -Be 'new version'
         Get-SetAside $script:keepDir | Should -BeNullOrEmpty
+    }
+
+    It 'puts back a running executable whose package the sweep did not upgrade (e.g. a pinned package)' {
+        # winget list still shows an Available version for a pinned package, but
+        # winget upgrade --all skips it and exits 0.
+        $script:pinDir = Join-Path $TestDrive "pin-$([guid]::NewGuid().ToString('N'))"
+        $script:pinExe = Join-Path $script:pinDir 'pinned.exe'
+        $null = Start-RunningCopy $script:pinExe
+        $hash = (Get-FileHash -LiteralPath $script:pinExe).Hash
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-PackageUpdateIndex {
+            @{ winget = @{ 'vendor.pinned' = @{ Installed = '1.0'; Available = '2.0' } } }
+        }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-WingetPortableDirectory { $script:pinDir }
+        Mock -ModuleName MarkMichaelis.ScoopBucket winget { $global:LASTEXITCODE = 0 }
+
+        $null = & $script:module { Update-AllWingetPackages }
+
+        (Get-FileHash -LiteralPath $script:pinExe).Hash | Should -Be $hash
+        Get-SetAside $script:pinDir | Should -BeNullOrEmpty
     }
 }
 Describe 'Update-Package -WhatIf previews an upgrade of a running portable (#547)' -Tag 'Light', 'Module' {
