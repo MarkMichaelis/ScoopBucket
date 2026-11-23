@@ -325,11 +325,11 @@ foreach (`$pair in @(
     [Package]@{
         Name        = 'Claude Code CLI'
         # #547: declared under winget, the engine that actually installs claude.exe
-        # (a per-user portable). The MarkMichaelis/ClaudeCode scoop manifest only
-        # wraps this winget call, so declaring the wrapper made Update-Package ask
-        # scoop -- which re-runs the wrapper only when this bucket bumps its version,
-        # never when Anthropic ships one -- and made the #464 gate refuse the real
-        # winget install as a foreign copy. PreviousInstaller records the wrapper:
+        # (a per-user portable). The retired MarkMichaelis/ClaudeCode scoop manifest
+        # only wrapped this winget call, so declaring the wrapper made Update-Package
+        # ask scoop -- which re-ran the wrapper only when this bucket bumped its
+        # version, never when Anthropic shipped one -- and made the #464 gate refuse
+        # the real winget install as a foreign copy. PreviousInstaller records the wrapper:
         # it takes effect when Uninstall-Package removes the CLI (the wrapper puts
         # nothing on PATH, so the install-time gate never needs it). That uninstall
         # runs at this entry's user scope, so a wrapper installed with -g keeps an
@@ -433,8 +433,8 @@ Register-ArgumentCompleter -Native -CommandName agy -ScriptBlock {
     [Package]@{
         Name        = 'GitHub Copilot CLI'
         # #547: declared under winget like the DeveloperBasePackages copy, for
-        # the same reason as 'Claude Code CLI' above -- the
-        # MarkMichaelis/GitHubCopilotCli scoop manifest only wraps winget
+        # the same reason as 'Claude Code CLI' above -- the retired
+        # MarkMichaelis/GitHubCopilotCli scoop manifest only wrapped winget
         # GitHub.Copilot (a portable copilot.exe), so the wrapper declaration
         # hid new versions and made the #464 gate refuse the real install.
         Installer   = 'winget'
