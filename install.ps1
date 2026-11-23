@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-    Bootstrap a machine: install Chocolatey and Scoop, register this bucket,
-    and install the OS base packages bundle.
+    Bootstrap a machine: install Chocolatey, Scoop and PowerShell 7, register
+    this bucket, then open the package list to choose what to install (#543).
 
 .DESCRIPTION
     Intended to be run directly from the repo:
@@ -510,8 +510,9 @@ function Install-BootstrapGit {
       `scoop bucket add` needs git, and the bundle that declares the real Git
       package lives in a bucket. main/mingit breaks that cycle: unlike main/git
       it unpacks without scoop's 7zip, whose `7z` would collide with the winget
-      7-Zip package. The Git package names main/mingit as its predecessor, so
-      installing OSBasePackages replaces this copy.
+      7-Zip package. The Git package (OS Base Packages, checked by default in
+      the package list) names main/mingit as its predecessor, so installing it
+      replaces this copy.
   .PARAMETER ScoopPath
       Path to the real scoop executable/script, from Get-RequiredEnginePath.
   #>
@@ -573,43 +574,121 @@ function Install-BootstrapPowerShell {
   $path
 }
 
-function Install-BootstrapBundle {
+function Get-BootstrapModulePath {
   <#
   .SYNOPSIS
-      Install a bundle, or re-apply one already installed, under PowerShell 7.
+      Where the bucket's PowerShell module sits in the bucket clone.
   .DESCRIPTION
-      Stops when scoop fails, so a bundle that did not apply is never
-      reported as done.
+      Pure. `scoop bucket add` clones the whole repository, module included,
+      to <scoopRoot>\buckets\<bucket>.
+  #>
+  [OutputType([string])]
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ScoopRoot,
+    [Parameter()][ValidateNotNullOrEmpty()][string]$Bucket = 'MarkMichaelis'
+  )
+  Join-Path $ScoopRoot "buckets\$Bucket\module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1"
+}
+
+function Get-BootstrapPickerArgument {
+  <#
+  .SYNOPSIS
+      The PowerShell 7 command line that opens the package picker.
+  .DESCRIPTION
+      Pure. Interactive on purpose (no -NonInteractive): the picker reads the
+      keyboard of the console the bootstrap runs in. The module-qualified
+      name keeps PackageManagement's own Install-Package out of the way.
+
+      The path sits in a single-quoted string, where PowerShell treats the
+      typographic apostrophes (U+2018-U+201B) as quotes too, so all of them
+      are doubled. Install-Package continues past a failed package and
+      reports it as a Failed row rather than an error, so the command exits 1
+      itself when any row failed; a thrown error (no interactive console)
+      exits 1 on its own.
+  #>
+  [OutputType([string[]])]
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ModulePath
+  )
+  # Every character PowerShell reads as a single quote, written by code
+  # point so this file stays ASCII for Windows PowerShell 5.1.
+  $apostrophes = "'" + [char]0x2018 + [char]0x2019 + [char]0x201A + [char]0x201B
+  $quoted = $ModulePath -replace "([$apostrophes])", '$1$1'
+  @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+    ("Import-Module '$quoted' -Force; " +
+      "`$results = @(MarkMichaelis.ScoopBucket\Install-Package); `$results; " +
+      "if (@(`$results | Where-Object { `$_.Status -eq 'Failed' }).Count -gt 0) { exit 1 }"))
+}
+
+function Resolve-BootstrapScoopRoot {
+  <#
+  .SYNOPSIS
+      The scoop root, as the installed scoop reports it.
+  .DESCRIPTION
+      `scoop prefix scoop` names <root>\apps\scoop\current, which is where
+      scoop actually lives -- not necessarily $env:SCOOP or ProgramData, for
+      example on a machine whose scoop predates this bootstrap. Falls back to
+      the expected root when scoop cannot say.
+  .PARAMETER ScoopPath
+      Path to the real scoop script, from Get-RequiredEnginePath.
+  .PARAMETER Fallback
+      The root this bootstrap expects, from Resolve-ScoopRoot.
+  #>
+  [OutputType([string])]
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ScoopPath,
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Fallback
+  )
+  $prefix = $null
+  try {
+    $prefix = @(& $ScoopPath prefix scoop 2>$null) | Where-Object { $_ } | Select-Object -Last 1
+  } catch {
+    $prefix = $null
+  }
+  if ($prefix -and ([string]$prefix) -match '^(?<root>.+?)\\apps\\scoop\\current\\?$') { return $Matches['root'] }
+  $Fallback
+}
+
+function Invoke-BootstrapPicker {
+  <#
+  .SYNOPSIS
+      Let the owner choose what to install, under PowerShell 7 (#543).
+  .DESCRIPTION
+      Refreshes the buckets so the list reflects the bucket as it is now, then
+      runs `Install-Package` with no names, which opens the picker in this
+      console. Without an interactive console Install-Package refuses and
+      names the commands to run instead.
+
+      A non-zero exit is a warning, not a stop: Install-Package continues
+      past a failed package, so some of what was chosen may have installed,
+      and the bootstrap itself is complete either way.
   .PARAMETER ScoopPath
       Path to the real scoop script, from Get-RequiredEnginePath.
   .PARAMETER PwshPath
       Path to PowerShell 7, from Install-BootstrapPowerShell.
+  .PARAMETER ModulePath
+      The bucket's module, from Get-BootstrapModulePath.
   #>
   [CmdletBinding()]
   param(
-    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Name,
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ScoopPath,
-    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$PwshPath
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$PwshPath,
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ModulePath
   )
-  # Check if app is already installed globally. `scoop list` has NO `-g`
-  # flag -- it's `scoop list [query]`. A row with Info='Global install' is
-  # how scoop signals scope; treat its presence as the "installed" probe.
-  $installed = @(& $ScoopPath list $Name 2>$null | Where-Object { $_.Name -eq $Name -and ($_.Info -as [string]) -match 'Global' }).Count -gt 0
-
-  if ($installed) {
-    Write-Host "'$Name' is already installed. Checking for updates..." -ForegroundColor Green
-    # Refresh the buckets first: updating a named app does not, so a local clone
-    # would keep serving the old bundle.
-    & $PwshPath -NoProfile -ExecutionPolicy Bypass -File $ScoopPath update
-    # --force: a bundle at the current version is otherwise skipped, which would
-    # strand one that scoop recorded as installed after its script failed (#504).
-    # --no-cache: the same version would otherwise replay the cached script.
-    & $PwshPath -NoProfile -ExecutionPolicy Bypass -File $ScoopPath update $Name --global --force --no-cache
-  } else {
-    Write-Host "Installing $Name..." -ForegroundColor Cyan
-    & $PwshPath -NoProfile -ExecutionPolicy Bypass -File $ScoopPath install -g $Name
+  # Best effort: a failed refresh still leaves the clone that was just added.
+  & $PwshPath -NoProfile -ExecutionPolicy Bypass -File $ScoopPath update
+  if (-not (Test-Path -LiteralPath $ModulePath)) {
+    throw "The bucket's module is not at '$ModulePath', so the package list cannot open. Check that 'scoop bucket add MarkMichaelis' succeeded above."
   }
-  if ($LASTEXITCODE) { throw "scoop failed for '$Name' (exit code $LASTEXITCODE). See the output above." }
+  Write-Host 'Opening the package list: choose what to install.' -ForegroundColor Cyan
+  $pickerArgs = Get-BootstrapPickerArgument -ModulePath $ModulePath
+  & $PwshPath @pickerArgs
+  if ($LASTEXITCODE) {
+    Write-Warning "Install-Package reported a problem (exit code $LASTEXITCODE); see the output above. Open the list again any time from PowerShell 7 with: Install-Package"
+  }
 }
 
 function Add-ScoopBucket {
@@ -686,6 +765,6 @@ Add-ScoopBucket -Name 'extras' -ScoopPath $scoopPath
 
 $pwshPath = Install-BootstrapPowerShell
 
-<#'McAfeeUninstall',#> 'OSBasePackages' | ForEach-Object {
-  Install-BootstrapBundle -Name $_ -ScoopPath $scoopPath -PwshPath $pwshPath
-}
+# Choose what to install from the bucket's package list (#543). Nothing is
+# installed beyond the engines without the owner's say-so.
+Invoke-BootstrapPicker -ScoopPath $scoopPath -PwshPath $pwshPath -ModulePath (Get-BootstrapModulePath -ScoopRoot (Resolve-BootstrapScoopRoot -ScoopPath $scoopPath -Fallback $scoopRoot))
