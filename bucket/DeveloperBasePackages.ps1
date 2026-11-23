@@ -359,6 +359,21 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
             $data = ($result | Out-String | ConvertFrom-Json -ErrorAction SilentlyContinue).data
             if ($data) { Write-Host "  gddy $($data.previousVersion) -> $($data.newVersion) ($($data.status))" }
         }
+        # gddy's OAuth token (~3.5 KB) is larger than Windows Credential
+        # Manager's 2560-byte per-entry limit, so `gddy auth login` saves it
+        # to gddy's file store (%APPDATA%\gddy\credentials) -- but the default
+        # 'auto' store reads only Credential Manager, so every later command
+        # acts signed out and opens a browser. Point gddy at the file store,
+        # unless the user already chose a store deliberately (#527).
+        ConfigScript = {
+            if (-not (Get-Command gddy -CommandType Application -ErrorAction SilentlyContinue)) { return }
+            $current = (gddy config get credentials.store --output json 2>$null | Out-String | ConvertFrom-Json -ErrorAction SilentlyContinue).data
+            if ($current -and $current.source -eq 'default') {
+                gddy config set credentials.store file --output json *>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "gddy config set credentials.store file failed (exit $LASTEXITCODE)" }
+                Write-Host '  gddy: credentials.store = file (Windows Credential Manager cannot hold its OAuth token)'
+            }
+        }
         CustomUninstallScript = {
             $installDir = Join-Path $env:LOCALAPPDATA 'Programs\gddy'
             $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $HOME 'scoop' }

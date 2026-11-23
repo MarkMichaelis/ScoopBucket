@@ -133,6 +133,38 @@ Describe 'DeveloperBasePackages: GoDaddy CLI install and uninstall behavior (#52
         { & $script:Package.CustomInstallScript $script:Package } | Should -Throw '*did not create*'
     }
 
+    It 'points gddy at its file credential store when the setting is still the default' {
+        $global:__GddyCalls = @()
+        Mock -ModuleName MarkMichaelis.ScoopBucket gddy {
+            $global:__GddyCalls += , ($args -join ' ')
+            if ($args[0] -eq 'config' -and $args[1] -eq 'get') { '{"data":{"key":"credentials.store","value":"auto","source":"default"}}' }
+            $global:LASTEXITCODE = 0
+        }
+        try {
+            & $script:Package.ConfigScript $script:Package 6>$null
+            $global:__GddyCalls | Should -Contain 'config set credentials.store file --output json'
+        }
+        finally { Remove-Variable -Name __GddyCalls -Scope Global -ErrorAction SilentlyContinue }
+    }
+
+    It 'leaves a credential store the user chose alone, and is a no-op when gddy is absent' {
+        $global:__GddyCalls = @()
+        Mock -ModuleName MarkMichaelis.ScoopBucket gddy {
+            $global:__GddyCalls += , ($args -join ' ')
+            if ($args[0] -eq 'config' -and $args[1] -eq 'get') { '{"data":{"key":"credentials.store","value":"keyring","source":"file"}}' }
+            $global:LASTEXITCODE = 0
+        }
+        try {
+            & $script:Package.ConfigScript $script:Package 6>$null
+            @($global:__GddyCalls | Where-Object { $_ -like 'config set*' }) | Should -BeNullOrEmpty
+            Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command -ParameterFilter { $Name -eq 'gddy' } { $null }
+            $global:__GddyCalls = @()
+            & $script:Package.ConfigScript $script:Package 6>$null
+            $global:__GddyCalls | Should -BeNullOrEmpty
+        }
+        finally { Remove-Variable -Name __GddyCalls -Scope Global -ErrorAction SilentlyContinue }
+    }
+
     It 'removes only the gddy folder from the user PATH, keeping %VARS% and REG_EXPAND_SZ' {
         $gddyDir = Split-Path $script:Exe
         $global:__RawPath = "%USERPROFILE%\bin;$gddyDir;C:\Tools"
