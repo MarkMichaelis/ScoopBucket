@@ -10,16 +10,22 @@
 # new version at the original path. No reboot is involved.
 #
 # Move-InUseFileAside renames each in-use executable image under the given
-# directories to '<name>.superseded-<timestamp>' just before the engine runs.
+# directories to '<name>.superseded-<timestamp>-<pid>' just before the engine runs.
 # Complete-InUseFileAside settles each one afterwards:
-#   - a replacement exists at the original path -> delete the set-aside copy, or,
-#     while a process still runs it, keep it for a later run to delete;
-#   - no replacement (no upgrade, or the upgrade failed) -> put it back.
-# Every Move-InUseFileAside call first settles leftovers from earlier runs the same
-# way, which is what eventually deletes a copy that was still running last time and
-# recovers from a run that was interrupted between the rename and the settle.
+#   - nothing was upgraded (no upgrade, or it failed) -> put it back;
+#   - upgraded, and a replacement exists -> delete the set-aside copy;
+#   - upgraded, and the new version no longer ships that file (e.g. Grok Build's
+#     versioned grok-<ver>.exe) -> delete it, never put it back.
+# A set-aside copy that a process still runs cannot be deleted yet; it stays for a
+# later run, renamed '<name>.obsolete-...' when it must never be restored.
+# Every Move-InUseFileAside call first settles leftovers from earlier runs: that
+# deletes copies that were still running last time and recovers from a run that
+# was interrupted between the rename and the settle. The <pid> records which run
+# set a copy aside, so a sweep never restores a file that a still-running run (a
+# concurrent Update-Package) has moved out of its engine's way. Paths go through
+# the .NET file APIs, which take them literally ('[', ']' in a profile path).
 
-$script:SupersededMarker = '.superseded-'
+$script:SetAsidePattern = '^(?<original>.+\.(?:exe|dll))\.(?<kind>superseded|obsolete)-(?<stamp>\d{17})(?:-(?<owner>\d+))?$'
 
 function Get-WingetPortableDirectory {
     # winget installs portable packages under <root>\Packages\<Id>_<SourceId>,
@@ -47,8 +53,8 @@ function Get-WingetPortableDirectory {
 
 function Test-FileInUse {
     # A loaded executable image (or a file another process holds without write
-    # sharing) cannot be opened exclusively for writing. Access-denied (read-only,
-    # ACL) is NOT "in use": that is left for the engine to report.
+    # sharing) cannot be opened exclusively for writing. Access-denied (no rights,
+    # read-only) is NOT "in use": that is left for the engine to report.
     [CmdletBinding()]
     [OutputType([bool])]
     param([Parameter(Mandatory)][string]$Path)
@@ -59,50 +65,84 @@ function Test-FileInUse {
     } catch {
         $e = $_.Exception
         while ($e -is [System.Management.Automation.MethodInvocationException] -and $e.InnerException) { $e = $e.InnerException }
+        if ($e -is [System.UnauthorizedAccessException]) {
+            Write-Verbose "Could not check whether '$Path' is in use (access denied); leaving it in place for the engine."
+            return $false
+        }
         return ($e -is [System.IO.IOException] -and $e -isnot [System.IO.FileNotFoundException] -and $e -isnot [System.IO.DirectoryNotFoundException])
     }
 }
 
-function Resolve-SupersededFile {
+function Test-SetAsideOwnerRunning {
+    # True when another, still-running process set the file aside (it will settle
+    # it itself). This process's own earlier calls have finished, so they do not count.
+    [OutputType([bool])]
+    param([AllowNull()][Nullable[int]]$Owner)
+
+    if (-not $Owner -or $Owner -eq $PID) { return $false }
+    return [bool](Get-Process -Id $Owner -ErrorAction SilentlyContinue)
+}
+
+function Resolve-SetAsideFile {
     # Settle one set-aside copy. Returns 'Deleted', 'Restored', or 'Kept' (a
-    # process still runs it, so a later run deletes it).
+    # process still runs it, or its owning run is still in progress).
     [CmdletBinding()]
     [OutputType([string])]
     param(
         [Parameter(Mandatory)][string]$Original,
-        [Parameter(Mandatory)][string]$Renamed
+        [Parameter(Mandatory)][string]$Renamed,
+        # The engine upgraded the package: never put a missing original back.
+        [switch]$Upgraded,
+        # Already marked as no longer shipped: delete only.
+        [switch]$Obsolete,
+        [Nullable[int]]$Owner
     )
 
-    if (-not (Test-Path -LiteralPath $Renamed)) { return 'Deleted' }
-    if (-not (Test-Path -LiteralPath $Original)) {
+    if (-not [System.IO.File]::Exists($Renamed)) { return 'Deleted' }
+    $replaced = [System.IO.File]::Exists($Original)
+
+    if (-not $replaced -and -not $Upgraded -and -not $Obsolete) {
+        if (Test-SetAsideOwnerRunning $Owner) { return 'Kept' }
         try {
-            Move-Item -LiteralPath $Renamed -Destination $Original -ErrorAction Stop
+            [System.IO.File]::Move($Renamed, $Original)
             return 'Restored'
         } catch {
             Write-Warning "Could not put '$Original' back from '$Renamed': $($_.Exception.Message)"
             return 'Kept'
         }
     }
+
     try {
-        Remove-Item -LiteralPath $Renamed -Force -ErrorAction Stop
+        [System.IO.File]::Delete($Renamed)
         return 'Deleted'
     } catch {
+        # Still running. When the upgrade no longer ships this file, mark it so no
+        # later sweep mistakes it for an interrupted run and puts it back.
+        if (-not $replaced -and -not $Obsolete) {
+            $marked = $Renamed -replace '\.superseded-(?=\d{17})', '.obsolete-'
+            try { [System.IO.File]::Move($Renamed, $marked) } catch {
+                Write-Verbose "Could not mark '$Renamed' obsolete: $($_.Exception.Message)"
+            }
+        }
         return 'Kept'
     }
 }
 
-function Get-SupersededFile {
-    # Set-aside copies left under $Directory by earlier runs, as Original/Renamed pairs.
+function Get-SetAsideFile {
+    # Copies earlier runs set aside under $Directory, with the original path, kind
+    # and owning process id parsed from the name. Only .exe / .dll set-asides match,
+    # so a vendor file that merely resembles one is never touched.
     [CmdletBinding()]
     param([string[]]$Directory)
 
     foreach ($dir in $Directory) {
         foreach ($file in @(Get-ChildItem -LiteralPath $dir -File -Recurse -Force -ErrorAction SilentlyContinue)) {
-            $at = $file.Name.LastIndexOf($script:SupersededMarker, [StringComparison]::OrdinalIgnoreCase)
-            if ($at -le 0 -or $file.Name.Substring($at + $script:SupersededMarker.Length) -notmatch '^\d+$') { continue }
+            if ($file.Name -notmatch $script:SetAsidePattern) { continue }
             [pscustomobject]@{
-                Original = Join-Path $file.DirectoryName $file.Name.Substring(0, $at)
+                Original = Join-Path $file.DirectoryName $Matches.original
                 Renamed  = $file.FullName
+                Obsolete = ($Matches.kind -eq 'obsolete')
+                Owner    = if ($Matches.owner) { [int]$Matches.owner } else { $null }
             }
         }
     }
@@ -133,15 +173,15 @@ function Move-InUseFileAside {
     $dirs = @($Directory | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) })
     if ($dirs.Count -eq 0) { return }
 
-    foreach ($left in @(Get-SupersededFile -Directory $dirs)) {
-        $null = Resolve-SupersededFile -Original $left.Original -Renamed $left.Renamed
+    foreach ($left in @(Get-SetAsideFile -Directory $dirs)) {
+        $null = Resolve-SetAsideFile -Original $left.Original -Renamed $left.Renamed -Obsolete:$left.Obsolete -Owner $left.Owner
     }
 
     $stamp = (Get-Date).ToString('yyyyMMddHHmmssfff')
     foreach ($file in @(Get-InUseFile -Directory $dirs)) {
-        $renamed = "$($file.FullName)$($script:SupersededMarker)$stamp"
+        $renamed = "$($file.FullName).superseded-$stamp-$PID"
         try {
-            Move-Item -LiteralPath $file.FullName -Destination $renamed -ErrorAction Stop
+            [System.IO.File]::Move($file.FullName, $renamed)
             Write-Verbose "Set aside in-use '$($file.FullName)' as '$renamed'."
             [pscustomobject]@{ Original = $file.FullName; Renamed = $renamed }
         } catch {
@@ -154,17 +194,21 @@ function Complete-InUseFileAside {
     <#
     .SYNOPSIS
         Settle the pairs Move-InUseFileAside returned once the engine has run.
-        Returns counts: Moved, Restored (no replacement was written), Kept (still
-        running; a later run deletes it).
+        -Upgraded says the engine upgraded the package, so a missing original is a
+        file the new version dropped, not one to put back. Returns counts: Moved,
+        Restored, Kept (still running; a later run deletes it).
     #>
     [CmdletBinding()]
-    param([AllowNull()][AllowEmptyCollection()][object[]]$Moved)
+    param(
+        [AllowNull()][AllowEmptyCollection()][object[]]$Moved,
+        [switch]$Upgraded
+    )
 
     $pairs = @($Moved | Where-Object { $_ })
     $restored = 0
     $kept = 0
     foreach ($pair in $pairs) {
-        switch (Resolve-SupersededFile -Original $pair.Original -Renamed $pair.Renamed) {
+        switch (Resolve-SetAsideFile -Original $pair.Original -Renamed $pair.Renamed -Upgraded:$Upgraded) {
             'Restored' { $restored++ }
             'Kept'     { $kept++ }
         }
