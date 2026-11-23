@@ -426,7 +426,7 @@ Describe 'AIAgents declares each agent CLI under the engine that installs it (#5
         $script:agent.Id | Should -Be $Id
     }
 
-    It '<Name>: names the old scoop wrapper as its predecessor so Install-Package retires it' {
+    It '<Name>: names the retired scoop wrapper as its predecessor so Uninstall-Package also clears its record' {
         $script:agent.PreviousInstaller | Should -Be 'scoop'
         $script:agent.PreviousId | Should -Be $Wrapper
     }

@@ -35,8 +35,6 @@
     Codex                      = @{ Verify = 'Cli'; Cli = 'codex' }
     DbxCli                     = @{ Verify = 'Cli'; Cli = 'dbxcli' }
     PowerShellCore             = @{ Verify = 'Cli'; Cli = 'pwsh' }
-    ClaudeCode                 = @{ Verify = 'Cli'; Cli = 'claude' }
-    GitHubCopilotCli           = @{ Verify = 'Cli'; Cli = 'copilot' }
     Chocolatey                 = @{ Verify = 'Cli'; Cli = 'choco' }
 
     # --- Cluster B: Get-Program '*pattern*' --------------------------------

@@ -572,7 +572,7 @@ Describe 'The bare-manifest dispatch path is gated too' -Tag 'Light', 'Module' {
         New-Item -ItemType Directory -Path $script:bucketDir -Force | Out-Null
 
         # A bucket-owned manifest, plus a bundle whose [Package] links to it by
-        # Id -- the exact shape of 'Claude Code CLI' -> ai/ClaudeCode.json.
+        # Id -- the shape 'Claude Code CLI' -> ai/ClaudeCode.json had before #547.
         '{ "version": "1.00.000", "installer": { "script": ["$null"] } }' |
             Set-Content -LiteralPath (Join-Path $script:bucketDir 'WidgetCli.json') -Encoding utf8
         '{ "version": "1.00.000", "installer": { "script": ["$null"] } }' |
