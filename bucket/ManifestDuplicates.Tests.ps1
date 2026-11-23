@@ -9,7 +9,12 @@
 #
 # A manifest a bundle installs through ('MarkMichaelis/<manifest>') is that
 # bundle's package, not a stray copy, so it is out of scope here; two bundles
-# carrying the same CLI under different engines is tracked separately.
+# carrying the same CLI under different engines is tracked separately (#551).
+#
+# Deliberately narrow: it reads only a manifest's own installer.script and only
+# the `winget install|upgrade ... --id <Id>` form. A manifest whose .ps1 calls
+# winget, the `--id=<Id>` or positional forms, and duplicates of a bundle's
+# non-winget packages are not detected.
 
 BeforeAll {
     $script:psd1 = Join-Path (Split-Path -Parent $PSScriptRoot) 'module\MarkMichaelis.ScoopBucket\MarkMichaelis.ScoopBucket.psd1'
@@ -23,6 +28,7 @@ Describe 'Bare manifests do not duplicate bundle packages (#550)' -Tag 'Light' {
         foreach ($p in $script:packages | Where-Object { $_.Installer -eq 'winget' -and $_.Id }) {
             $declared[$p.Id] = "$($p.Bundle)/$($p.Name)"
         }
+        $declared.Count | Should -BeGreaterThan 0 -Because 'with no declared winget packages there is nothing to compare, and the check would pass vacuously'
         $bundles = @($script:packages.Bundle | Sort-Object -Unique)
         $usedByBundle = @($script:packages | Where-Object { $_.Installer -eq 'scoop' -and $_.Id -match '^MarkMichaelis/' } |
                 ForEach-Object { ($_.Id -split '/')[-1] })

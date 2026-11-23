@@ -151,7 +151,7 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
         # which is also Anthropic's actual deployment model (per-user app under
         # %LOCALAPPDATA%\AnthropicClaude). See #85.
         Scope       = 'user'
-        Notes       = 'MCP-capable desktop client. Local Claude.json manifest also installs this via winget; keeping the declarative entry here is the canonical home for the package.'
+        Notes       = 'MCP-capable desktop client. This declarative entry is the only home for the package; the old Claude.json manifest that duplicated it was retired (#550).'
     }
     [Package]@{
         Name      = 'ChatGPT'
