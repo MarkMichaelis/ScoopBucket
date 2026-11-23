@@ -23,12 +23,21 @@ function Update-AllWingetPackages {
 
     Write-UpdateStatus "Sweeping winget (winget upgrade --all)..."
     Write-Verbose "  winget $($upgradeArgs -join ' ')"
-    $out = & winget @upgradeArgs *>&1
-    $exit = $LASTEXITCODE
+    # Running portable programs would fail their upgrade (and lose their command
+    # alias); set their locked executables aside first, as Update-WingetPackage
+    # does per package (#547).
+    $aside = @(Move-InUseFileAside -Directory @(Get-WingetPortableDirectory))
+    try {
+        $out = & winget @upgradeArgs *>&1
+        $exit = $LASTEXITCODE
+    } finally {
+        $settled = Complete-InUseFileAside -Moved $aside
+    }
     $joined = ($out | ForEach-Object { $_.ToString() }) -join "`n"
     if ($joined) { Write-Verbose $joined }
     if ($exit -eq 0) {
-        return @{ State = 'Updated'; Reason = $null; Engine = 'winget' }
+        $note = if ($settled.Moved -gt $settled.Restored) { Get-InUseUpgradeNote -Count ($settled.Moved - $settled.Restored) }
+        return @{ State = 'Updated'; Reason = $note; Engine = 'winget' }
     }
     return @{ State = 'Failed'; Reason = "winget upgrade --all exited with $exit.$(Get-CapturedOutputTail $joined)"; Engine = 'winget' }
 }

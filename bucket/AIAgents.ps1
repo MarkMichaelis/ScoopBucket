@@ -324,8 +324,18 @@ foreach (`$pair in @(
     # rollout for your account. Nothing to install here beyond Claude Code.
     [Package]@{
         Name        = 'Claude Code CLI'
-        Installer   = 'scoop'
-        Id          = 'MarkMichaelis/ClaudeCode'
+        # #547: declared under winget, the engine that actually installs claude.exe
+        # (a per-user portable). The MarkMichaelis/ClaudeCode scoop manifest only
+        # wraps this winget call, so declaring the wrapper made Update-Package ask
+        # scoop -- which re-runs the wrapper only when this bucket bumps its version,
+        # never when Anthropic ships one -- and made the #464 gate refuse the real
+        # winget install as a foreign copy. PreviousInstaller lets Install-Package
+        # retire the wrapper's scoop record on machines that have it.
+        Installer   = 'winget'
+        Id          = 'Anthropic.ClaudeCode'
+        Scope       = 'user'
+        PreviousInstaller = 'scoop'
+        PreviousId  = 'MarkMichaelis/ClaudeCode'
         CliCommands = @('claude')
         DependsOn   = @('Node.js')
         Completion  = 'auto'
