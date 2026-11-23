@@ -90,17 +90,23 @@ function Test-SetAsideOwnerRunning {
     $process = Get-Process -Id $Owner -ErrorAction SilentlyContinue
     if (-not $process) { return $false }
     if (-not $Stamp) { return $true }
-    try {
-        $setAt = [datetime]::ParseExact($Stamp, 'yyyyMMddHHmmssfff', [Globalization.CultureInfo]::InvariantCulture)
-        return ($process.StartTime -le $setAt)
-    } catch {
+    $setAt = [datetime]::MinValue
+    if (-not [datetime]::TryParseExact($Stamp, 'yyyyMMddHHmmssfff', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$setAt)) {
         return $false
     }
+    try { $start = $process.StartTime } catch { $start = $null }
+    # An owner whose start time may not be read (an elevated run seen from a
+    # normal one, or the reverse) is assumed to be the live run: leaving a file
+    # for a later sweep is the safer mistake than restoring it mid-upgrade.
+    if ($null -eq $start) { return $true }
+    return ($start -le $setAt)
 }
 
 function Test-NewFileSince {
-    # True when a file other than a set-aside copy was created or written in
-    # $Directory at or after $Since -- the sign that an upgrade landed there.
+    # True when an executable image (.exe / .dll) other than a set-aside copy was
+    # created or written in $Directory at or after $Since -- the sign that an
+    # upgrade landed there. Other files do not count: a skipped program that is
+    # still running may write its own logs or cache into the folder meanwhile.
     [OutputType([bool])]
     param(
         [Parameter(Mandatory)][string]$Directory,
@@ -109,7 +115,7 @@ function Test-NewFileSince {
 
     if (-not $Since) { return $true }
     foreach ($file in @(Get-ChildItem -LiteralPath $Directory -File -Recurse -Force -ErrorAction SilentlyContinue)) {
-        if ($file.Name -match $script:SetAsidePattern) { continue }
+        if ($file.Extension -notin '.exe', '.dll' -or $file.Name -match $script:SetAsidePattern) { continue }
         if ($file.CreationTime -ge $Since -or $file.LastWriteTime -ge $Since) { return $true }
     }
     return $false
