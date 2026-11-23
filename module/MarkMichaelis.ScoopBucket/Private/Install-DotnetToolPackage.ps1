@@ -19,14 +19,8 @@ function Install-DotnetToolPackage {
     }
 
     if (-not $WhatIf) {
-        try {
-            $listOut = & dotnet tool list -g 2>$null | Out-String
-            if ($listOut -match "(?im)^\s*$([regex]::Escape($id))\s+\S+") {
-                return @{ State = 'AlreadyInstalled'; Reason = "dotnet tool list -g already lists $id." }
-            }
-        } catch {
-            Write-Verbose "Install-DotnetToolPackage: AlreadyInstalled probe failed: $($_.Exception.Message)"
-        }
+        $presence = Get-PackagePresence -Package $Package
+        if ($presence.Present) { return @{ State = 'AlreadyInstalled'; Reason = $presence.Reason } }
     }
 
     $installArgs = @('tool', 'install', '-g', $id)

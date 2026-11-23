@@ -27,14 +27,8 @@ function Install-WingetPackage {
 
     # AlreadyInstalled probe (exact match first, for Store ids; see #516).
     if (-not $WhatIf) {
-        try {
-            $probe = Test-WingetPackageInstalled -Package $Package
-            if ($probe.Installed) {
-                return @{ State = 'AlreadyInstalled'; Reason = "$($probe.Command) returned 0." }
-            }
-        } catch {
-            Write-Verbose "Install-WingetPackage: AlreadyInstalled probe failed: $($_.Exception.Message)"
-        }
+        $presence = Get-PackagePresence -Package $Package
+        if ($presence.Present) { return @{ State = 'AlreadyInstalled'; Reason = $presence.Reason } }
     }
 
     $installArgs = @('install', '--id', $id, '--accept-package-agreements', '--accept-source-agreements')

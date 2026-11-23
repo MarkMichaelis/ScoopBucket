@@ -36,7 +36,6 @@
     DbxCli                     = @{ Verify = 'Cli'; Cli = 'dbxcli' }
     PowerShellCore             = @{ Verify = 'Cli'; Cli = 'pwsh' }
     ClaudeCode                 = @{ Verify = 'Cli'; Cli = 'claude' }
-    GeminiCli                  = @{ Verify = 'Cli'; Cli = 'gemini' }
     GitHubCopilotCli           = @{ Verify = 'Cli'; Cli = 'copilot' }
     Chocolatey                 = @{ Verify = 'Cli'; Cli = 'choco' }
 
@@ -72,8 +71,8 @@
                                     Script = { [bool](Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue) }
                                     Reason = "ChatGPT.ps1 installs Microsoft Store product 9PLM9XGG6VKS (Appx package OpenAI.Codex) through winget's msstore source, which hosted Windows Server runners cannot reach. Not ChatGPT Classic's OpenAI.ChatGPT-Desktop (#511)." }
     Gemini                     = @{ Verify = 'Custom'
-                                    Script = { Test-Path (Join-Path $env:LOCALAPPDATA 'Google\Google\latest\google.exe') }
-                                    Reason = "Gemini.ps1 performs a fully automated install via direct download from dl.google.com (~11 MB Omaha installer); falls back to the legacy browser-watch pattern only if that direct fetch fails." }
+                                    Script = { $null = winget list --id Google.GeminiDesktop --exact --accept-source-agreements 2>$null; $LASTEXITCODE -eq 0 }
+                                    Reason = "Gemini.ps1 installs Google's Gemini desktop app from winget (Google.GeminiDesktop, user-scope nullsoft). Not the Google app for desktop it installed before #534." }
     ClaudeExcel                = @{ Verify = 'Scoop'; Manual = $true
                                     Reason = "Claude for Excel is an Office Web Add-in that Microsoft only allows installing through AppSource's 'Get it now' UI flow (no winget / MS Store / silent installer). Cannot run unattended in CI." }
     MicrosoftCopilot           = @{ Verify = 'Scoop'

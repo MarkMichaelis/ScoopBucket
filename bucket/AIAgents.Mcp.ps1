@@ -306,7 +306,26 @@ function Add-McpServerToJsonConfig {
         $entry | Add-Member -NotePropertyName env -NotePropertyValue $envObj
     }
 
-    if ($config.mcpServers.PSObject.Properties[$Server.Name]) {
+    $existing = $config.mcpServers.PSObject.Properties[$Server.Name]
+    if ($existing -and $existing.Value -is [pscustomobject]) {
+        # Refresh only the keys this bucket owns (command, args, env) and keep
+        # the rest. Agents keep user state on the entry -- Antigravity's app
+        # toggles `disabled` and tool filters in its shared mcp_config.json --
+        # and replacing the whole entry would silently undo it on every run
+        # (#535). env stays owned: dropping it when Server has none is how a
+        # previously written token is migrated out.
+        $current = $existing.Value
+        foreach ($key in 'command','args') {
+            $current | Add-Member -NotePropertyName $key -NotePropertyValue $entry.$key -Force
+        }
+        if ($entry.PSObject.Properties['env']) {
+            $current | Add-Member -NotePropertyName env -NotePropertyValue $entry.env -Force
+        }
+        elseif ($current.PSObject.Properties['env']) {
+            $current.PSObject.Properties.Remove('env')
+        }
+    }
+    elseif ($existing) {
         $config.mcpServers.($Server.Name) = $entry
     }
     else {
@@ -317,14 +336,16 @@ function Add-McpServerToJsonConfig {
     Write-Host "$AgentLabel`: configured $($Server.Name) MCP in $Path"
 }
 
-function Add-McpServerToCodex {
+function Add-McpServerToTomlConfig {
+    # Codex CLI (~/.codex/config.toml) and Grok CLI (~/.grok/config.toml)
+    # share the same [mcp_servers.<name>] command / args / env layout.
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][hashtable]$Server,
-        [string]$Path
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$AgentLabel,
+        [Parameter(Mandatory)][hashtable]$Server
     )
 
-    if (-not $Path) { $Path = Join-Path $env:USERPROFILE '.codex\config.toml' }
     $dir  = Split-Path -Parent $Path
     if ($dir -and -not (Test-Path $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -354,9 +375,10 @@ args = [$argsToml]
         }
         $section += "`r`n[mcp_servers.$($Server.Name).env]`r`n" + ($envLines -join "`r`n")
     }
-    # Per-tool approval (Codex: auto | prompt | writes | approve), e.g. so
-    # read-only tools run unattended while write tools always ask.
-    if ($Server.ContainsKey('CodexToolApproval') -and $Server.CodexToolApproval) {
+    # Per-tool approval for Codex (auto | prompt | writes | approve), e.g. so
+    # read-only tools run unattended while write tools always ask (#527).
+    # Codex only: no other TOML agent's schema is known to accept it.
+    if ($AgentLabel -eq 'Codex CLI' -and $Server.ContainsKey('CodexToolApproval') -and $Server.CodexToolApproval) {
         foreach ($tool in $Server.CodexToolApproval.Keys) {
             $section += "`r`n[mcp_servers.$($Server.Name).tools.$tool]`r`napproval_mode = `"$($Server.CodexToolApproval[$tool])`""
         }
@@ -375,7 +397,7 @@ args = [$argsToml]
     else {
         Set-Content -Path $Path -Value ($section + "`r`n") -Encoding UTF8
     }
-    Write-Host "Codex CLI: configured $($Server.Name) MCP in $Path"
+    Write-Host "$AgentLabel`: configured $($Server.Name) MCP in $Path"
 }
 
 function Remove-McpServerFromJsonConfig {
@@ -402,14 +424,14 @@ function Remove-McpServerFromJsonConfig {
     Write-Host "$AgentLabel`: pruned $ServerName MCP from $Path"
 }
 
-function Remove-McpServerFromCodex {
+function Remove-McpServerFromTomlConfig {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$ServerName,
-        [string]$Path
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$AgentLabel,
+        [Parameter(Mandatory)][string]$ServerName
     )
 
-    if (-not $Path) { $Path = Join-Path $env:USERPROFILE '.codex\config.toml' }
     if (-not (Test-Path $Path)) { return }
 
     $sectionPattern = "(?ms)^\[mcp_servers\.$([regex]::Escape($ServerName))(\.[^\]]+)?\].*?(?=^\[|\z)"
@@ -418,7 +440,7 @@ function Remove-McpServerFromCodex {
     $newContent = [regex]::Replace($content, $sectionPattern, '')
     if ($newContent -ne $content) {
         Set-Content -Path $Path -Value $newContent.TrimEnd() -Encoding UTF8
-        Write-Host "Codex CLI: pruned $ServerName MCP from $Path"
+        Write-Host "$AgentLabel`: pruned $ServerName MCP from $Path"
     }
 }
 
@@ -472,8 +494,31 @@ function Get-AIAgentsMcpJsonAgent {
     @(
         @{ Label = 'Claude Desktop';     Path = (Join-Path $env:APPDATA     'Claude\claude_desktop_config.json') }
         @{ Label = 'Claude Code CLI';    Path = (Join-Path $env:USERPROFILE '.claude.json') }
-        @{ Label = 'Gemini CLI';         Path = (Join-Path $env:USERPROFILE '.gemini\settings.json') }
+        # Antigravity CLI, the Antigravity 2.0 app and the IDE share this
+        # global file (antigravity.google/docs/mcp). It replaces Gemini CLI's
+        # ~/.gemini/settings.json, which is no longer written (#535).
+        @{ Label = 'Antigravity';        Path = (Join-Path $env:USERPROFILE '.gemini\config\mcp_config.json') }
         @{ Label = 'GitHub Copilot CLI'; Path = (Join-Path $env:USERPROFILE '.copilot\mcp-config.json') }
+    )
+}
+
+function Get-AIAgentsMcpTomlAgent {
+    <#
+    .SYNOPSIS
+        The TOML-config agents AIAgents wires MCP servers into.
+    .DESCRIPTION
+        Both use [mcp_servers.<name>] tables in a user config.toml. Grok also
+        reads ~/.claude.json as a lower-priority fallback, but is wired
+        explicitly so it works without Claude Code installed (#507).
+    .OUTPUTS
+        Hashtable[] with Label and Path keys.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable[]])]
+    param()
+    @(
+        @{ Label = 'Codex CLI'; Path = (Join-Path $env:USERPROFILE '.codex\config.toml') }
+        @{ Label = 'Grok CLI';  Path = (Join-Path $env:USERPROFILE '.grok\config.toml') }
     )
 }
 
@@ -815,6 +860,12 @@ function Get-GoDaddyMcpServerEntry {
         Command           = $PwshPath
         Arguments         = @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $ScriptPath)
         CodexToolApproval = $approval
+        # DNS writes need a per-call human prompt. Grok CLI and Antigravity
+        # get no approval rule from this bucket and their default MCP approval
+        # behavior is unverified, so the server is not wired into them; add it
+        # by hand there (docs/GoDaddyDns.md) once their tool approval asks.
+        SkipAgents        = @('Grok CLI', 'Antigravity')
+        SkipReason        = 'no verified per-call approval for DNS writes; see docs/GoDaddyDns.md'
     }
 }
 
@@ -922,7 +973,7 @@ function Install-AIAgentsMcpConfiguration {
         Self-contained machine configuration for the AIAgents bundle: install
         Playwright browsers, the PoshMcp dotnet tool, and the MCP npm packages;
         resolve a GitHub PAT; write the mcpServers entries into every supported
-        agent config (JSON + Codex TOML); persist the PAT out-of-band; and
+        agent config (JSON + Codex / Grok TOML); persist the PAT out-of-band; and
         install the profile self-heal block. Re-running overwrites only the
         named entries -- other MCP servers in the same config are preserved.
 
@@ -1054,6 +1105,7 @@ function Install-AIAgentsMcpConfiguration {
     }
 
     $jsonAgents = Get-AIAgentsMcpJsonAgent
+    $tomlAgents = Get-AIAgentsMcpTomlAgent
 
     foreach ($server in $mcpServers) {
         $skip = @()
@@ -1061,13 +1113,17 @@ function Install-AIAgentsMcpConfiguration {
 
         foreach ($agent in $jsonAgents) {
             if ($skip -contains $agent.Label) {
-                Write-Host "$($agent.Label): skipping $($server.Name) MCP (built-in equivalent)."
+                Write-Host "$($agent.Label): skipping $($server.Name) MCP ($(if ($server.ContainsKey('SkipReason')) { $server.SkipReason } else { 'built-in equivalent' }))."
                 continue
             }
             Add-McpServerToJsonConfig -Path $agent.Path -AgentLabel $agent.Label -Server $server
         }
-        if ($skip -notcontains 'Codex CLI') {
-            Add-McpServerToCodex -Server $server
+        foreach ($agent in $tomlAgents) {
+            if ($skip -contains $agent.Label) {
+                Write-Host "$($agent.Label): skipping $($server.Name) MCP ($(if ($server.ContainsKey('SkipReason')) { $server.SkipReason } else { 'built-in equivalent' }))."
+                continue
+            }
+            Add-McpServerToTomlConfig -Path $agent.Path -AgentLabel $agent.Label -Server $server
         }
     }
 
@@ -1106,6 +1162,7 @@ function Reset-AIAgentsMcpConfiguration {
 
     $deprecated     = Get-AIAgentsDeprecatedMcpServer
     $jsonAgents     = Get-AIAgentsMcpJsonAgent
+    $tomlAgents     = Get-AIAgentsMcpTomlAgent
     $mcpNpmPackages = Get-AIAgentsMcpNpmPackage
     $isElevated     = Test-IsElevated
 
@@ -1114,7 +1171,9 @@ function Reset-AIAgentsMcpConfiguration {
         foreach ($agent in $jsonAgents) {
             Remove-McpServerFromJsonConfig -Path $agent.Path -AgentLabel $agent.Label -ServerName $name
         }
-        Remove-McpServerFromCodex -ServerName $name
+        foreach ($agent in $tomlAgents) {
+            Remove-McpServerFromTomlConfig -Path $agent.Path -AgentLabel $agent.Label -ServerName $name
+        }
     }
 
     # Prune entries this bucket intentionally skips (server -> skipped agents)

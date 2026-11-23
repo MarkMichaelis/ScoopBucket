@@ -38,6 +38,7 @@ Install-Module PSReadLine -Force -Scope AllUsers   # Update the version of PSRea
 Install-Module Microsoft.PowerShell.SecretManagement -Scope AllUsers
 Install-Module WinGet-Essentials -Repository PSGallery -Scope AllUsers
 Install-Module Microsoft.PowerShell.ConsoleGuiTools -Repository PSGallery -Scope AllUsers
+Install-Module Az -Repository PSGallery -Scope AllUsers  # Azure PowerShell rollup (Az.Accounts, Az.Compute, Az.Resources, ...). No -Force: about 80 sub-modules.
 choco install Pester
 
 # Install Scott Hanselman's Windows Terminal Copilot CLI skill

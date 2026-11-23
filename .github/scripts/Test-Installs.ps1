@@ -60,8 +60,8 @@ $script:CISkipPackages = @{
     'Warp.Warp'                     = 'GUI terminal; pulls a VCRedist dependency and expects a desktop session — installer returns -1/0xFFFFFFFF on the headless Server runner (persistently flaky). Revisit if upstream ships a headless-clean installer (#322)'
     # choco: delisted or CI-incompatible
     'Office365ProPlus'              = 'Requires GUI session and license activation (exit 17004)'
-    # scoop: browser-watch installers requiring interactive Download click
-    'MarkMichaelis/Gemini'          = 'Browser-watch installer requires interactive Download click; see #25, #26'
+    # scoop: wraps a user-scope winget nullsoft app not yet validated headless
+    'MarkMichaelis/Gemini'          = 'Wraps winget Google.GeminiDesktop, a user-scope nullsoft installer (#534) not yet validated on a headless Server runner. It replaced the browser-watch installer that needed an interactive Download click (#25, #26). Drop this skip, together with the AIAgents Gemini CISkip, once a validate-installs run proves it installs headless.'
     # winget: machine-scope MSIX, same provisioning shape as Claude Desktop (#85) --
     # runFullTrust requires an interactive desktop with sideloading enabled;
     # fails headless Server runners with APPINSTALLER_CLI_ERROR_INSTALL_SYSTEM_NOT_SUPPORTED

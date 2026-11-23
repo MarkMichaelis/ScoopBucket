@@ -100,7 +100,6 @@ $ExpectedCliOverrides = @{
     'calibre.calibre'                                      = 'calibre'
     'MarkMichaelis/ClaudeCode'                             = 'claude'
     'MarkMichaelis/Codex'                                  = 'codex'
-    'MarkMichaelis/GeminiCli'                              = 'gemini'
     'MarkMichaelis/GitHubCopilotCli'                       = 'copilot'
     'MarkMichaelis/Aspire'                                 = 'aspire'
     'VisualStudio2026Enterprise'                           = 'devenv'

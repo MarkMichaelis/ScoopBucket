@@ -25,7 +25,9 @@ because Microsoft Defender blocks an elevated command that downloads and runs a
 script.
 
 It installs Chocolatey, installs Scoop, registers this bucket
-plus `extras`, then installs `OSBasePackages`. If the machine has no git, it
+plus `extras`, installs PowerShell 7 if it is missing, then installs
+`OSBasePackages` under PowerShell 7, whichever shell you started from. Re-running
+it re-applies the bundle. If the machine has no git, it
 first installs a temporary one from Scoop, because adding a bucket needs git.
 `OSBasePackages` replaces that copy with the `Git` package, which `Update-Package`
 keeps current like any other package. Other bundles
@@ -221,7 +223,40 @@ Install-Package -Name 'BitwardenCli'   # auto-pulls Bitwarden via DependsOn (clo
 Install-Package -Name beyon<Tab>       # Tab-completes to 'Beyond Compare'
 Install-Package -Name 'ripgrep' -DryRun   # preview, no real install
 Update-Package  -Name 'ripgrep' -DryRun   # preview, no real update
+Install-Package -Name '*'                 # converge this machine (see below)
 ```
+
+#### Converging a machine: `Install-Package -Name '*'` and `Default`
+
+`Install-Package -Name '*'` (quote the `*`) brings a machine to the bucket's
+default set in one command, from any starting state:
+
+- Every **default** package of every declarative bundle is installed, or
+  upgraded with its `ConfigScript` and completions re-applied.
+- A package declared with `Default = $false` is **optional**: `*` upgrades it
+  when it is already installed, and otherwise leaves it out with a `Skipped`
+  row naming the command that installs it. An optional package that a default
+  one needs (`DependsOn` / `Companions`) is installed anyway.
+- Config-only manifests (`GitConfigure`, `SetPowerConfiguration`,
+  `EnableRemoteDesktop`, `McAfeeUninstall`, `PowerToysSettingsBackup`, ...) are
+  never included; run them by name.
+- A package or bundle named explicitly alongside `*` installs regardless of
+  its default.
+
+Whether a package is a default is declared on the package itself, so removing
+a package removes it from the default set with nothing else to edit:
+
+```powershell
+[Package]@{
+    Name    = 'Avalonia Developer Tools'
+    # ...
+    Default = $false   # optional: '*' upgrades it where installed, never adds it
+}
+```
+
+`Default` is on unless set. `Get-Package` shows it. A package that only links
+to another bundle (`Installer = 'scoop'`, `Id = 'MarkMichaelis/<bundle>'`)
+carries no default of its own; set it on that bundle's packages.
 
 **Preview is one opt-in mechanism.** `Install-Package` and
 `Update-Package` build on PowerShell's standard
@@ -678,7 +713,7 @@ Behavior:
 Completions are declarative and the framework re-applies them across
 install and update. **Configuration** -- idempotent machine state a
 package owns, such as the AIAgents MCP-server wiring (`mcpServers` JSON /
-Codex TOML entries, the persisted GitHub PAT, the profile self-heal
+Codex and Grok TOML entries, the persisted GitHub PAT, the profile self-heal
 block) -- gets the same treatment via the `[Package].ConfigScript` hook.
 
 The **Windows Terminal** and **Claude Code CLI** entries use the same hook
