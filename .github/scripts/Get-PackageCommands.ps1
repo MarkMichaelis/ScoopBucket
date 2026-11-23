@@ -118,8 +118,8 @@ $NoCliPackages = @(
     'gitextensions','gitkraken','git-credential-manager-for-windows',
     'Microsoft.Teams','Office365ProPlus','foxitreader','Foxit.FoxitReader',
     'geosetter','TotalCommander','MarkMichaelis/ChatGPT',
-    'MarkMichaelis/Claude','MarkMichaelis/Gemini','MarkMichaelis/MicrosoftCopilot',
-    'MarkMichaelis/ClaudeExcel','MarkMichaelis/AIAgents',
+    'MarkMichaelis/Gemini','MarkMichaelis/MicrosoftCopilot',
+    'MarkMichaelis/AIAgents',
     # Scoop GUI desktop apps (separate from corresponding CLI packages above)
     'extras/claude','extras/spotify',
     # Bundle of tools (procexp/procmon/psexec/...); availability handled by
