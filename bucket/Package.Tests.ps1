@@ -122,6 +122,14 @@ Describe 'Package class — construction and defaults' -Tag 'Light', 'Module' {
         $p.DependsOn   | Should -Be @()
     }
 
+    It 'is in the default set unless it says otherwise (#454)' {
+        ([Package]@{ Name = 'demo'; Installer = 'scoop'; Id = 'main/demo' }).Default | Should -BeTrue
+    }
+
+    It 'can leave the default set with Default = $false (#454)' {
+        ([Package]@{ Name = 'demo'; Installer = 'scoop'; Id = 'main/demo'; Default = $false }).Default | Should -BeFalse
+    }
+
     It 'rejects unknown property names at cast time' {
         { [Package]@{ Name = 'demo'; Installer = 'scoop'; Id = 'main/demo'; Nope = 'bad' } } |
             Should -Throw

@@ -51,19 +51,12 @@ function Install-ScoopPackage {
         }
     }
 
-    # AlreadyInstalled probe: `scoop list <app>` lists the named app
-    # only when installed; resolved by stripping any bucket prefix. Stays
-    # in-process -- `scoop list` is read-only and cannot run a manifest
-    # script, so it cannot trigger the #451 session-state teardown.
+    # AlreadyInstalled probe (`scoop list <app>`), shared with
+    # Install-Package -Name '*' so the two never disagree. A probe that fails
+    # reports unknown, and the install proceeds.
     if (-not $WhatIf) {
-        try {
-            $listOut = & scoop list $appName 2>$null | Out-String
-            if ($listOut -match "(?im)^\s*$([regex]::Escape($appName))\s+\S+") {
-                return @{ State = 'AlreadyInstalled'; Reason = "scoop list $appName returned a row." }
-            }
-        } catch {
-            Write-Verbose "Install-ScoopPackage: AlreadyInstalled probe failed: $($_.Exception.Message)"
-        }
+        $presence = Get-PackagePresence -Package $Package
+        if ($presence.Present) { return @{ State = 'AlreadyInstalled'; Reason = $presence.Reason } }
     }
 
     $installArgs = @('install')

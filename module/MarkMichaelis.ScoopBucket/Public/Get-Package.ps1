@@ -37,7 +37,8 @@ function Get-Package {
 
     .OUTPUTS
         PSCustomObject[] with Bundle, Name, Installer, Id, Source, Scope,
-        CliCommands, Completion, DependsOn, Companions, CISkip, Notes, WingetExtraArgs.
+        CliCommands, Completion, DependsOn, Companions, CISkip, Notes, WingetExtraArgs,
+        Default (is the package in the default set; see Install-Package -Name '*').
 
     .EXAMPLE
         Get-Package -Installer scoop
@@ -107,6 +108,9 @@ function Get-Package {
                 Notes       = $p.Notes
                 WingetExtraArgs = @($p.WingetExtraArgs)
                 UpdateTimeoutMinutes = [int]$p.UpdateTimeoutMinutes
+                # Metadata from before the field existed has no Default; the
+                # class default (on) applies.
+                Default     = if ($p.PSObject.Properties['Default']) { [bool]$p.Default } else { $true }
                 HasPostInstallScript   = [bool]$p.HasPostInstallScript
                 HasPostUpdateScript    = [bool]$p.HasPostUpdateScript
                 HasCustomInstallScript = [bool]$p.HasCustomInstallScript

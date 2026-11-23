@@ -23,18 +23,10 @@ function Install-NpmGlobalPackage {
     }
 
     if (-not $WhatIf) {
-        # npm list -g --depth=0 produces a tree; grep for the bare package
-        # name. Fast and ignores semver differences (good enough for the
-        # idempotency contract — npm itself short-circuits a redundant
-        # install).
-        try {
-            $listOut = & npm.cmd list -g --depth=0 2>$null | Out-String
-            if ($listOut -match "(?im)^\S+\s+$([regex]::Escape($id))@") {
-                return @{ State = 'AlreadyInstalled'; Reason = "npm list -g already lists $id." }
-            }
-        } catch {
-            Write-Verbose "Install-NpmGlobalPackage: AlreadyInstalled probe failed: $($_.Exception.Message)"
-        }
+        # `npm list -g --depth=0`, ignoring semver differences (npm itself
+        # short-circuits a redundant install).
+        $presence = Get-PackagePresence -Package $Package
+        if ($presence.Present) { return @{ State = 'AlreadyInstalled'; Reason = $presence.Reason } }
     }
 
     $installArgs = @('install', '--global', $id)

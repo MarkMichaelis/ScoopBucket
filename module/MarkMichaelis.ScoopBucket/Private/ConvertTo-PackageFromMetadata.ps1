@@ -44,6 +44,9 @@ function ConvertTo-PackageFromMetadata {
         # (Reinstall / SelfManaged / NoAutoUpdateSupport) survives the
         # metadata-only fallback path and is classified correctly (#276).
         UpdateMode  = if ($Metadata.PSObject.Properties['UpdateMode'] -and $Metadata.UpdateMode) { [string]$Metadata.UpdateMode } else { 'Auto' }
+        # Default must round-trip so an optional package stays optional on the
+        # metadata-only path (#454).
+        Default     = if ($Metadata.PSObject.Properties['Default']) { [bool]$Metadata.Default } else { $true }
     }
     # Completion's ExpectedCompletions invariant only matters at install
     # time; reconstruct enough to satisfy Validate() for non-'none' modes.
