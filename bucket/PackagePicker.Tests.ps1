@@ -360,6 +360,17 @@ Describe 'The picker''s screen and keys (#543)' -Tag 'Light', 'Module' {
         (-join @($line.Segments | ForEach-Object Text)).TrimEnd() | Should -Be $line.Text.TrimEnd()
     }
 
+    It 'keeps the truncation marker when a narrow window cuts a row with an "also in" note' {
+        $null = & $script:press (Key -Key DownArrow)
+        $null = & $script:press (Key -Key RightArrow)
+        $all = & $script:M { param($s) Format-PickerScreen -State $s -Width 24 -Height 30 } $script:state
+        $line = @($all | ForEach-Object { $_ } | Where-Object { $_.Text -match 'shared twin' })[0]
+        $line.Text | Should -Match '~$'
+        if ($line.PSObject.Properties['Segments'] -and $line.Segments) {
+            -join @($line.Segments | ForEach-Object Text) | Should -Be $line.Text
+        }
+    }
+
     It 'says what Space will do to the group under the cursor' {
         (& $script:screen) -join "`n" | Should -Match 'Space: add everything not installed'
     }

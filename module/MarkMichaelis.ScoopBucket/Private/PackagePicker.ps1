@@ -435,9 +435,12 @@ function Format-PickerScreen {
     )
     $lines = [System.Collections.Generic.List[object]]::new()
     $add = {
-        param([string]$Text, [string]$Color = 'Gray', [bool]$Highlight = $false)
-        if ($Text.Length -gt $Width) { $Text = $Text.Substring(0, [Math]::Max(0, $Width - 1)) + '~' }
-        $lines.Add([pscustomobject]@{ Text = $Text.PadRight($Width); Color = $Color; Highlight = $Highlight })
+        param([string]$Text, [string]$Color = 'Gray', [bool]$Highlight = $false, [object[]]$Segments = $null)
+        # A line cut to fit is drawn in one color, so it keeps its '~' marker.
+        if ($Text.Length -gt $Width) { $Text = $Text.Substring(0, [Math]::Max(0, $Width - 1)) + '~'; $Segments = $null }
+        $line = [pscustomobject]@{ Text = $Text.PadRight($Width); Color = $Color; Highlight = $Highlight }
+        if ($Segments) { $line | Add-Member -NotePropertyName Segments -NotePropertyValue $Segments }
+        $lines.Add($line)
     }
 
     if ($State.Mode -eq 'Review') {
@@ -509,14 +512,13 @@ function Format-PickerScreen {
             $color = Get-PickerBoxColor -Box $box
             $marker = if ($i -eq $State.Cursor) { '>' } else { ' ' }
             $text = "{0} {1}{2} {3}{4}" -f $marker, ('  ' * $row.Depth), $box, $row.Node.Name, $suffix
-            & $add ($text + $note) $color ($i -eq $State.Cursor)
             # The "also in" note is a side remark: dimmed, unless the cursor
             # row's highlight already draws the whole line in one color.
+            $segments = $null
             if ($note -and $i -ne $State.Cursor) {
-                $lines[$lines.Count - 1] | Add-Member -NotePropertyName Segments -NotePropertyValue @(
-                    [pscustomobject]@{ Text = $text; Color = $color }
-                    [pscustomobject]@{ Text = $note; Color = 'DarkGray' })
+                $segments = @([pscustomobject]@{ Text = $text; Color = $color }, [pscustomobject]@{ Text = $note; Color = 'DarkGray' })
             }
+            & $add ($text + $note) $color ($i -eq $State.Cursor) $segments
         }
         while ($lines.Count -lt $treeHeight + 2) { & $add '' }
         $plan = Get-PickerPlan -State $State
