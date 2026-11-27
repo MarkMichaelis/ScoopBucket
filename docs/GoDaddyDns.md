@@ -47,9 +47,13 @@ gddy domain list                                   # proves the sign-in works
     install and update, unless you already picked a store yourself.
   - The MCP server also checks the file store and uses it when the sign-in is
     there.
-  - The file inherits `%APPDATA%`'s permissions, so anything that can read your
-    profile, including sandboxed agent processes granted read access to it,
-    can read the token. Revoke it with `gddy auth logout`.
+  - The package also locks the token **folder** to you and SYSTEM, with no
+    inherited access. Otherwise it would inherit `%APPDATA%`'s permissions,
+    which can let other principals read it, such as `CodexSandboxUsers` (so a
+    sandboxed Codex shell could read the token). The rule is inheritable, so
+    every token file `gddy` writes there, now or after a refresh, is private
+    too. It's re-checked on every install and update. Revoke the token itself
+    with `gddy auth logout`.
 - **Uninstall.** `Uninstall-Package 'GoDaddy CLI'` removes the binary and shim
   but leaves your sign-in. Run `gddy auth logout` first to clear it.
 

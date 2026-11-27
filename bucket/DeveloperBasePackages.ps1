@@ -369,7 +369,31 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
         # unless the user already chose a store deliberately (#527).
         ConfigScript = {
             if (-not (Get-Command gddy -CommandType Application -ErrorAction SilentlyContinue)) { return }
-            $current = (gddy config get credentials.store --output json 2>$null | Out-String | ConvertFrom-Json -ErrorAction SilentlyContinue).data
+            # The token folder otherwise inherits %APPDATA%'s ACL, which can
+            # grant read to other principals (e.g. CodexSandboxUsers, so a
+            # sandboxed shell could read the GoDaddy token). Restrict the
+            # FOLDER to the user and SYSTEM, inheritable, so every token file
+            # gddy writes there -- now or after a refresh -- is private too.
+            $credDir = Join-Path $env:APPDATA 'gddy\credentials'
+            if (-not (Test-Path -LiteralPath $credDir)) { New-Item -ItemType Directory -Path $credDir -Force | Out-Null }
+            $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+            $system = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+            $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+            $acl = Get-Acl -LiteralPath $credDir
+            $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+            $private = $acl.AreAccessRulesProtected -and $rules.Count -eq 2 -and -not @($rules | Where-Object {
+                $_.AccessControlType -ne 'Allow' -or $_.FileSystemRights -ne 'FullControl' -or $_.InheritanceFlags -ne $inherit -or
+                $_.IdentityReference.Value -notin @($me.Value, $system.Value) })
+            if (-not $private) {
+                $new = [System.Security.AccessControl.DirectorySecurity]::new()
+                $new.SetAccessRuleProtection($true, $false)
+                foreach ($sid in $me, $system) {
+                    $new.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', $inherit, 'None', 'Allow'))
+                }
+                Set-Acl -LiteralPath $credDir -AclObject $new
+                Write-Host "  gddy: token folder $credDir restricted to $($me.Translate([System.Security.Principal.NTAccount])) and SYSTEM"
+            }
+            $current =(gddy config get credentials.store --output json 2>$null | Out-String | ConvertFrom-Json -ErrorAction SilentlyContinue).data
             if (-not $current -or $current.source -ne 'default') { return }
             # Never strand a sign-in the default store already holds (e.g. a
             # Credential Manager login from a gddy build that fits there).

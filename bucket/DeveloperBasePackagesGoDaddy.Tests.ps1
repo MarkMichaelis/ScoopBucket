@@ -69,9 +69,11 @@ Describe 'DeveloperBasePackages: GoDaddy CLI install and uninstall behavior (#52
     BeforeEach {
         $script:SavedLocalAppData = $env:LOCALAPPDATA
         $script:SavedScoop = $env:SCOOP
+        $script:SavedAppData = $env:APPDATA
         $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
         $env:LOCALAPPDATA = Join-Path $root 'LocalAppData'
         $env:SCOOP = Join-Path $root 'scoop'
+        $env:APPDATA = Join-Path $root 'AppData'
         New-Item -ItemType Directory -Path $env:LOCALAPPDATA, (Join-Path $env:SCOOP 'shims') -Force | Out-Null
         $script:Exe = Join-Path $env:LOCALAPPDATA 'Programs\gddy\gddy.exe'
         $script:ShimFile = Join-Path $env:SCOOP 'shims\gddy.shim'
@@ -104,6 +106,7 @@ Describe 'DeveloperBasePackages: GoDaddy CLI install and uninstall behavior (#52
     AfterEach {
         $env:LOCALAPPDATA = $script:SavedLocalAppData
         $env:SCOOP = $script:SavedScoop
+        $env:APPDATA = $script:SavedAppData
         Remove-Variable -Name __GddyInstallerCalls, __ScoopCalls -Scope Global -ErrorAction SilentlyContinue
     }
 
@@ -190,6 +193,41 @@ Describe 'DeveloperBasePackages: GoDaddy CLI install and uninstall behavior (#52
             $global:__GddyCalls | Should -BeNullOrEmpty
         }
         finally { Remove-Variable -Name __GddyCalls -Scope Global -ErrorAction SilentlyContinue }
+    }
+
+    Context 'token folder permissions' {
+        BeforeEach {
+            Mock -ModuleName MarkMichaelis.ScoopBucket gddy {
+                if ($args[0] -eq 'config' -and $args[1] -eq 'get') { '{"data":{"key":"credentials.store","value":"file","source":"config"}}' }
+                $global:LASTEXITCODE = 0
+            }
+            $script:CredDir = Join-Path $env:APPDATA 'gddy\credentials'
+            $script:Me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        }
+
+        It 'restricts the token folder to the user and SYSTEM, inheritably, including an existing token file' {
+            New-Item -ItemType Directory -Path $script:CredDir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $script:CredDir 'godaddy-prod.json') -Value '{}'
+            & $script:Package.ConfigScript $script:Package 6>$null
+            $acl = Get-Acl -LiteralPath $script:CredDir
+            $acl.AreAccessRulesProtected | Should -BeTrue -Because 'the folder must not inherit the profile''s ACL'
+            $sids = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value }) | Sort-Object
+            $sids | Should -Be (@($script:Me, 'S-1-5-18') | Sort-Object)
+            $fileSids = @((Get-Acl -LiteralPath (Join-Path $script:CredDir 'godaddy-prod.json')).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value }) | Sort-Object -Unique
+            $fileSids | Should -Be (@($script:Me, 'S-1-5-18') | Sort-Object) -Because 'the existing token file must pick up the folder''s restriction'
+        }
+
+        It 'creates the folder locked down before any sign-in exists' {
+            & $script:Package.ConfigScript $script:Package 6>$null
+            (Get-Acl -LiteralPath $script:CredDir).AreAccessRulesProtected | Should -BeTrue
+        }
+
+        It 'changes nothing on a re-run once the folder is private' {
+            & $script:Package.ConfigScript $script:Package 6>$null
+            Mock -ModuleName MarkMichaelis.ScoopBucket Set-Acl { }
+            & $script:Package.ConfigScript $script:Package 6>$null
+            Should -Invoke Set-Acl -ModuleName MarkMichaelis.ScoopBucket -Times 0 -Exactly
+        }
     }
 
     It 'removes only the gddy folder from the user PATH, keeping %VARS% and REG_EXPAND_SZ' {
