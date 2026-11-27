@@ -252,9 +252,10 @@ Describe 'What the picker checks (#543)' -Tag 'Light', 'Module' {
 
     It 'starts the group cycle over when the filter changes' {
         $rootB = $script:catalog.Roots | Where-Object Name -eq 'Root B'
-        # Under 'b1' the first Space unchecks b1 (steps 1 and 2 change
-        # nothing), leaving nothing checked among what the filter shows.
-        $script:state.Filter = 'b1'
+        # Under 'shared' the first Space unchecks the shared package (steps 1
+        # and 2 change nothing), leaving nothing checked among what the filter
+        # shows. ('b1' would also show b1's dependency b2, #559.)
+        $script:state.Filter = 'shared'
         & $script:M { param($s, $n) Switch-PickerNode -State $s -Node $n } $script:state $rootB
         # Under 'b2' nothing shown is checked either; only the filter tells the
         # two apart, and a new filter is a new cycle.

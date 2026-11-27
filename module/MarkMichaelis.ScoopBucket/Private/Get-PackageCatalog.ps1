@@ -131,8 +131,60 @@ function Get-PackageCatalog {
         }
     }
 
+    # Sub-items (#559). A package's Companions and DependsOn are shown under
+    # it. A companion is only ever shown there. A dependency stays an item of
+    # its group too, unless another bundle lists the same package as an item
+    # of its own -- Node.js is AIAgents' dependency but DeveloperBasePackages'
+    # item. Every choco package needs Chocolatey, shown as its dependency.
+    $subNames = @{}      # bundle -> names shown only as sub-items
+    $ownedBy = @{}       # identity -> bundles that list it as an item of their own
+    foreach ($b in $bundles.Values) {
+        $companions = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
+        $dependencies = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
+        foreach ($p in $b.Packages) {
+            foreach ($c in @($p.Companions)) { if ($c) { [void]$companions.Add($c) } }
+            foreach ($d in @($p.DependsOn)) { if ($d) { [void]$dependencies.Add($d) } }
+        }
+        $subNames[$b.Bundle] = [pscustomobject]@{ Companions = $companions; Dependencies = $dependencies }
+        foreach ($p in $b.Packages) {
+            if (Get-PickerLinkTarget -Package $p) { continue }
+            if ($companions.Contains($p.Name) -or $dependencies.Contains($p.Name)) { continue }
+            $id = Get-PickerIdentity -Package $p -Bundle $b.Bundle
+            if (-not $ownedBy.ContainsKey($id)) { $ownedBy[$id] = [System.Collections.Generic.List[string]]::new() }
+            $ownedBy[$id].Add($b.Bundle)
+        }
+    }
+    $chocoManifest = if ($manifests.ContainsKey('Chocolatey')) { $manifests['Chocolatey'] } else { $null }
+    if ($chocoManifest -and @($bundles.Values | ForEach-Object { $_.Packages } | Where-Object { $_.Installer -eq 'choco' }).Count -gt 0) {
+        [void]$usedManifests.Add('Chocolatey')
+    }
+
     $groups = [System.Collections.Generic.Dictionary[string, object]]::new($ignoreCase)
     $building = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
+    function New-PackageNode([object]$Package, [string]$Bundle, [string]$Role, [string[]]$Path) {
+        $info = $bundles[$Bundle]
+        $node = [pscustomobject]@{
+            Kind = 'Package'; Name = $Package.Name; Key = "pkg:$Bundle/$($Package.Name)"
+            Bundle = $Bundle; BundlePath = $info.BundlePath
+            Identity = Get-PickerIdentity -Package $Package -Bundle $Bundle
+            Default = [bool]$Package.Default; Package = $Package; Role = $Role
+            Children = [System.Collections.Generic.List[object]]::new()
+        }
+        $here = @($Path) + $Package.Name
+        $byName = { param($n) $info.Packages | Where-Object { $_.Name -eq $n -and -not (Get-PickerLinkTarget -Package $_) } | Select-Object -First 1 }
+        foreach ($pair in @(@(@($Package.Companions), 'Companion'), @(@($Package.DependsOn), 'Dependency'))) {
+            foreach ($n in $pair[0]) {
+                $sub = if ($n -and $here -notcontains $n) { & $byName $n }
+                if ($sub) { $node.Children.Add((New-PackageNode $sub $Bundle $pair[1] $here)) }
+            }
+        }
+        if ($Package.Installer -eq 'choco' -and $chocoManifest) {
+            $choco = New-ManifestNode $chocoManifest
+            $choco | Add-Member -NotePropertyName Role -NotePropertyValue 'Dependency'
+            $node.Children.Add($choco)
+        }
+        $node
+    }
     function New-ManifestNode([object]$Manifest) {
         $identity = if ($manifestPackage.ContainsKey($Manifest.Name)) { $manifestPackage[$Manifest.Name] } else { "manifest|$($Manifest.Name)" }
         [pscustomobject]@{
@@ -156,12 +208,15 @@ function Get-PackageCatalog {
                 if (-not $bundles[$target].IsRoot) { $node.Children.Add((Get-NestedNode $target)) }
                 continue
             }
-            $node.Children.Add([pscustomobject]@{
-                Kind = 'Package'; Name = $p.Name; Key = "pkg:$Name/$($p.Name)"
-                Bundle = $Name; BundlePath = $info.BundlePath
-                Identity = Get-PickerIdentity -Package $p -Bundle $Name
-                Default = [bool]$p.Default; Package = $p
-            })
+            # A companion is shown only under its package; a dependency only
+            # there too when another bundle lists it as an item of its own.
+            $sub = $subNames[$Name]
+            if ($sub.Companions.Contains($p.Name)) { continue }
+            if ($sub.Dependencies.Contains($p.Name)) {
+                $id = Get-PickerIdentity -Package $p -Bundle $Name
+                if ($ownedBy.ContainsKey($id) -and @($ownedBy[$id] | Where-Object { $_ -ne $Name }).Count -gt 0) { continue }
+            }
+            $node.Children.Add((New-PackageNode $p $Name $null @()))
         }
         foreach ($d in $info.Depends) {
             if ($bundles.ContainsKey($d)) { if (-not $bundles[$d].IsRoot) { $node.Children.Add((Get-NestedNode $d)) } }
