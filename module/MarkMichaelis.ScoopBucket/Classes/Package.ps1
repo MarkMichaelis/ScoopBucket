@@ -217,6 +217,11 @@ class Package {
     # 'scoop', Id '<bucket>/<that bundle>') carries no default of its own; the
     # linked bundle's packages do (DefaultPackages.Tests.ps1).
     [bool]     $Default = $true
+    # Always installed: something the bucket itself cannot work without (Git).
+    # The package picker shows it locked on and never leaves it out (#559).
+    # A Required package should also keep Default = $true, so
+    # `Install-Package -Name '*'` installs it too.
+    [bool]     $Required = $false
 
     # Cross-field invariants the type system can't express. Returns the
     # first violation as a string, or $null when the declaration is valid.

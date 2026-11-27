@@ -282,9 +282,12 @@ function Install-Package {
         # abort the whole sweep, discarding every result collected so far. Keep
         # each bundle's blast radius to that bundle. See also #272.
         try {
+            Assert-BundleFileExists -BundlePath $entry.BundlePath
             $results.AddRange([object[]]@(
+                # A companion the picker's owner unchecked is skipped (#559).
+                $skip = if ($entry.PSObject.Properties['Skip'] -or ($entry -is [hashtable] -and $entry.ContainsKey('Skip'))) { @($entry.Skip | Where-Object { $_ }) } else { @() }
                 Invoke-PackageInstall -Packages $pkgObjects -Bundle $entry.Bundle `
-                    -Name @($entry.Names) -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
+                    -Name @($entry.Names) -Skip $skip -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
                     -NoUpgrade:$NoUpgrade `
                     -ErrorAction Continue -ErrorVariable +pkgErrors))
         } catch [System.Management.Automation.PipelineStoppedException] {
@@ -303,6 +306,7 @@ function Install-Package {
         Write-UpdateStatus -Activity 'Install-Package' "Install-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
         $pkgObjects = @(Get-BundlePackageObjects -BundlePath $b.BundlePath)
         try {
+            Assert-BundleFileExists -BundlePath $b.BundlePath
             $results.AddRange([object[]]@(
                 Invoke-PackageInstall -Packages $pkgObjects -Bundle $b.Bundle `
                     -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
