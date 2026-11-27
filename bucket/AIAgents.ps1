@@ -170,6 +170,9 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
         # 0x80073D02 "apps need to be closed", then done during the 15:48
         # sign-in). winget asks the Store to close a running app only with
         # --force (AllowForcedAppRestart), which this module never passes.
+        # That update was the Store's own; what winget reports for one it
+        # starts while the app runs was not observed, so Update-Package may
+        # read Updated before Windows registers the new version.
         Installer   = 'winget'
         Id          = '9PLM9XGG6VKS'
         Source      = 'msstore'
