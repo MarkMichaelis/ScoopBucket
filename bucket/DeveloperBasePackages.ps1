@@ -316,6 +316,10 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
         Name        = 'GoDaddy CLI'
         Installer   = 'custom'
         Scope       = 'user'
+        # Owner's call (#527): opt-in. Only machines that manage GoDaddy DNS
+        # need it, it needs a GoDaddy sign-in, and installing it also registers
+        # the GoDaddy MCP server with that machine's agents.
+        Default     = $false
         CliCommands = @('gddy')
         Completion  = 'native'
         NativeCompletionKind = 'native'

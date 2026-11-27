@@ -48,6 +48,10 @@ Describe 'DeveloperBasePackages: GoDaddy CLI declaration (#527)' -Tag 'Light', '
         @($script:Declared[0].CliCommands) | Should -Be @('gddy')
     }
 
+    It 'is opt-in: not part of the default install set (owner decision, #527)' {
+        $script:Package.Default | Should -BeFalse -Because "Install-Package -Name '*' must not put gddy and its MCP server on every machine"
+    }
+
     It 'takes completion from the binary itself (gddy completion powershell)' {
         $script:Declared[0].Completion | Should -Be 'native'
         $script:Declared[0].NativeCompletionKind | Should -Be 'native'
