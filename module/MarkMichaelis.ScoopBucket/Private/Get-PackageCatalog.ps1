@@ -110,21 +110,37 @@ function Get-PackageCatalog {
 
     # A top-level bundle that another top-level bundle installs is shown only
     # inside it (#559: AIAgents inside ClientBasePackages), so toggling the
-    # parent changes only its own children. Only a parent nothing else
-    # installs counts: two bundles that install each other both stay on top.
-    $rootLinkedBy = @{}
+    # parent changes only its own children -- down a whole chain. A bundle
+    # stays on top only when every bundle installing it is one it installs
+    # in turn (a cycle), so that no bundle disappears from the tree.
+    $rootLinks = @{}       # top-level bundle -> top-level bundles it installs
+    $rootLinkedBy = @{}    # top-level bundle -> top-level bundles installing it
     foreach ($b in @($bundles.Values | Where-Object IsRoot)) {
+        $rootLinks[$b.Bundle] = [System.Collections.Generic.List[string]]::new()
         $targets = @($b.Packages | ForEach-Object { Get-PickerLinkTarget -Package $_ } | Where-Object { $_ }) + @($b.Depends)
         foreach ($t in $targets) {
             if ($t -ine $b.Bundle -and $bundles.ContainsKey($t) -and $bundles[$t].IsRoot) {
+                $rootLinks[$b.Bundle].Add($t)
                 if (-not $rootLinkedBy.ContainsKey($t)) { $rootLinkedBy[$t] = [System.Collections.Generic.List[string]]::new() }
                 $rootLinkedBy[$t].Add($b.Bundle)
             }
         }
     }
+    $reaches = {
+        param([string]$From, [string]$To)
+        $seenRoots = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
+        $queue = [System.Collections.Generic.Queue[string]]::new()
+        $queue.Enqueue($From)
+        while ($queue.Count -gt 0) {
+            $cur = $queue.Dequeue()
+            if (-not $seenRoots.Add($cur)) { continue }
+            foreach ($next in @($rootLinks[$cur])) { if ($next -ieq $To) { return $true }; $queue.Enqueue($next) }
+        }
+        $false
+    }
     $nestedRoots = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
     foreach ($t in $rootLinkedBy.Keys) {
-        if (@($rootLinkedBy[$t] | Where-Object { -not $rootLinkedBy.ContainsKey($_) }).Count -gt 0) { [void]$nestedRoots.Add($t) }
+        if (@($rootLinkedBy[$t] | Where-Object { -not (& $reaches $t $_) }).Count -gt 0) { [void]$nestedRoots.Add($t) }
     }
     $showsOnTop = { param([string]$Name) $bundles[$Name].IsRoot -and -not $nestedRoots.Contains($Name) }
 
