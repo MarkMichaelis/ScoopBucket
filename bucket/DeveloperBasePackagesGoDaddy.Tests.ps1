@@ -90,6 +90,17 @@ Describe 'DeveloperBasePackages: GoDaddy CLI install and uninstall behavior (#52
         Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command -ParameterFilter { $Name -eq 'gddy' } { [pscustomobject]@{ Source = 'shim\gddy.exe' } }
     }
 
+    BeforeAll {
+        # Pester can only Mock a command that exists. CI machines have no gddy,
+        # so give the ConfigScript tests a placeholder to mock there.
+        $script:DefinedGddyStub = -not (Get-Command gddy -ErrorAction SilentlyContinue)
+        if ($script:DefinedGddyStub) { function global:gddy { } }
+    }
+
+    AfterAll {
+        if ($script:DefinedGddyStub) { Remove-Item -Path Function:\gddy -ErrorAction SilentlyContinue }
+    }
+
     AfterEach {
         $env:LOCALAPPDATA = $script:SavedLocalAppData
         $env:SCOOP = $script:SavedScoop
