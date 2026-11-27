@@ -387,7 +387,14 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
                 # Private = protected, and exactly one FullControl/inheritable/no-propagation allow rule for each of the two SIDs.
                 $actual = @($rules | ForEach-Object { '{0}|{1}|{2}|{3}|{4}' -f $_.IdentityReference.Value, $_.AccessControlType, $_.FileSystemRights, $_.InheritanceFlags, $_.PropagationFlags } | Sort-Object)
                 $expected = @(@($me.Value, $system.Value) | ForEach-Object { '{0}|Allow|FullControl|{1}|None' -f $_, $inherit } | Sort-Object)
-                $private = $acl.AreAccessRulesProtected -and (($actual -join ';') -eq ($expected -join ';'))
+                # Files already inside keep any EXPLICIT entries they were created
+                # with (e.g. BUILTIN\Administrators on a token written from an
+                # elevated `gddy auth login`); those must go too.
+                $children = @(Get-ChildItem -LiteralPath $credDir -Force -Recurse -ErrorAction SilentlyContinue)
+                $loose = @($children | Where-Object {
+                    $c = Get-Acl -LiteralPath $_.FullName
+                    $c.AreAccessRulesProtected -or @($c.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])).Count })
+                $private = $acl.AreAccessRulesProtected -and (($actual -join ';') -eq ($expected -join ';')) -and -not $loose.Count
                 if (-not $private) {
                     $new = [System.Security.AccessControl.DirectorySecurity]::new()
                     $new.SetAccessRuleProtection($true, $false)
@@ -395,6 +402,12 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
                         $new.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', $inherit, 'None', 'Allow'))
                     }
                     Set-Acl -LiteralPath $credDir -AclObject $new
+                    foreach ($child in $children) {
+                        $c = Get-Acl -LiteralPath $child.FullName
+                        foreach ($rule in @($c.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) { [void]$c.RemoveAccessRuleSpecific($rule) }
+                        $c.SetAccessRuleProtection($false, $false)
+                        Set-Acl -LiteralPath $child.FullName -AclObject $c
+                    }
                     Write-Host "  gddy: token folder $credDir restricted to the current user ($($me.Value)) and SYSTEM"
                 }
             }

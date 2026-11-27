@@ -217,6 +217,18 @@ Describe 'DeveloperBasePackages: GoDaddy CLI install and uninstall behavior (#52
             $fileSids | Should -Be (@($script:Me, 'S-1-5-18') | Sort-Object) -Because 'the existing token file must pick up the folder''s restriction'
         }
 
+        It 'strips explicit entries a token file was created with (e.g. Administrators from an elevated login)' {
+            New-Item -ItemType Directory -Path $script:CredDir -Force | Out-Null
+            $token = Join-Path $script:CredDir 'godaddy-prod.json'
+            Set-Content -LiteralPath $token -Value '{}'
+            $a = Get-Acl -LiteralPath $token
+            $a.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new([System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'), 'FullControl', 'Allow'))
+            Set-Acl -LiteralPath $token -AclObject $a
+            & $script:Package.ConfigScript $script:Package 6>$null
+            $fileSids = @((Get-Acl -LiteralPath $token).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value }) | Sort-Object -Unique
+            $fileSids | Should -Be (@($script:Me, 'S-1-5-18') | Sort-Object)
+        }
+
         It 'creates the folder locked down before any sign-in exists' {
             & $script:Package.ConfigScript $script:Package 6>$null
             (Get-Acl -LiteralPath $script:CredDir).AreAccessRulesProtected | Should -BeTrue
