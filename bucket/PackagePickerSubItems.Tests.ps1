@@ -67,6 +67,7 @@ Invoke-PackageInstall -Packages `$Packages -Bundle '$Bundle'
     [Package]@{ Name = 'core';    Installer = 'winget'; Id = 'Test.Core'; Required = $true }
     [Package]@{ Name = 'svc';     Installer = 'winget'; Id = 'Test.Svc'; Companions = @('svc cfg') }
     [Package]@{ Name = 'svc cfg'; Installer = 'scoop';  Id = 'MarkMichaelis/SvcCfg' }
+    [Package]@{ Name = 'needer';  Installer = 'winget'; Id = 'Test.Needer'; Default = $false; DependsOn = @('app cli') }
     [Package]@{ Name = 'kit user';    Installer = 'winget'; Id = 'Test.KitUser'; DependsOn = @('Kit bundle') }
     [Package]@{ Name = 'Kit bundle';  Installer = 'scoop';  Id = 'MarkMichaelis/Kit' }
 '@
@@ -133,6 +134,18 @@ Describe 'Picker sub-items in the tree (#559)' -Tag 'Light', 'Module' {
 
     It 'does not offer Chocolatey again under "Also available"' {
         $script:catalog.Roots.Name | Should -Not -Contain 'Dev'
+    }
+}
+
+Describe 'The picker knows Chocolatey is installed however it got there (#559)' -Tag 'Light', 'Module' {
+    It 'counts choco on PATH as an installed Chocolatey' {
+        # No scoop, no npm: only choco is on PATH.
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command { $null }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-Command -ParameterFilter { $Name -eq 'choco' } { [pscustomobject]@{ Name = 'choco.exe' } }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-PackageUpdateIndex { @{} }
+        $map = & $script:M { param($c) Get-InstalledPackageMap -Catalog $c } $script:catalog
+        $map['manifest|Chocolatey'] | Should -BeTrue
+        $map.ContainsKey('winget|Test.AppCfg') | Should -BeTrue -Because 'sub-items are items too'
     }
 }
 
@@ -205,7 +218,7 @@ Describe 'Picker sub-item behaviour (#559)' -Tag 'Light', 'Module' {
     It 'locks Chocolatey on while a choco package is needed' {
         $runtime = & $script:child (& $script:child $script:rootC 'agent') 'runtime'
         & $script:box (& $script:child $runtime 'Chocolatey') | Should -Be '[!]'
-        (& $script:plan).Manifests | Should -Contain 'Chocolatey'
+        (& $script:plan).First | Should -Contain 'Chocolatey'
     }
 
     It 'keeps a Required package on even when everything is unchecked' {
@@ -234,6 +247,38 @@ Describe 'Picker sub-item behaviour (#559)' -Tag 'Light', 'Module' {
         $rows.Name | Should -Contain 'app'
         $rows.Name | Should -Not -Contain 'app cfg'
         $rows.Name | Should -Not -Contain 'app cli'
+    }
+
+    It 'does not skip a companion that another checked package needs' {
+        $needer = & $script:child $script:rootC 'needer'
+        & $script:toggle $needer
+        $rootC = (& $script:plan).ByBundle.Values | Where-Object Bundle -eq 'RootC'
+        $rootC.Skip | Should -Not -Contain 'app cli'
+        & $script:box (& $script:child $needer 'app cli') | Should -Be '[!]'
+    }
+
+    It 'installs a needed Chocolatey before the bundles that use it' {
+        Mock -ModuleName MarkMichaelis.ScoopBucket Test-PickerInteractive { $true }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Get-InstalledPackageMap { @{} }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Show-PackagePicker {
+            & (Get-Module MarkMichaelis.ScoopBucket) {
+                param($c, $i)
+                $state = New-PickerState -Catalog $c -Installed $i
+                Set-PickerSelection -State $state -Mode None
+                Switch-PickerNode -State $state -Node (($c.Roots | Where-Object Name -eq 'Root D').Children | Where-Object Name -eq 'runtime')
+                Get-PickerPlan -State $state
+            } $Catalog $Installed
+        }
+        $script:order = [System.Collections.Generic.List[string]]::new()
+        Mock -ModuleName MarkMichaelis.ScoopBucket Invoke-PackageInstall { $script:order.Add("bundle:$Bundle"); @() }
+        Mock -ModuleName MarkMichaelis.ScoopBucket Write-UpdateStatus { if ($Status -match "dispatching manifest '([^']+)'") { $script:order.Add("manifest:$($Matches[1])") } }
+
+        $null = Install-Package -DryRun -SkipCompletion -BucketPath $script:bucket
+
+        $script:order | Should -Contain 'manifest:Chocolatey'
+        $firstBundle = @($script:order | Where-Object { $_ -like 'bundle:*' })[0]
+        $firstBundle | Should -Not -BeNullOrEmpty
+        $script:order.IndexOf('manifest:Chocolatey') | Should -BeLessThan ($script:order.IndexOf($firstBundle))
     }
 
     It 'opens a package with sub-items like a group' {
