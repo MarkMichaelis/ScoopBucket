@@ -25,18 +25,26 @@ because Microsoft Defender blocks an elevated command that downloads and runs a
 script.
 
 It installs Chocolatey, installs Scoop, registers this bucket
-plus `extras`, installs PowerShell 7 if it is missing, then installs
-`OSBasePackages` under PowerShell 7, whichever shell you started from. Re-running
-it re-applies the bundle. If the machine has no git, it
-first installs a temporary one from Scoop, because adding a bucket needs git.
-`OSBasePackages` replaces that copy with the `Git` package, which `Update-Package`
-keeps current like any other package. Other bundles
-(`DeveloperBasePackages`, `ClientBasePackages`, `AIAgents`) are opt-in:
+plus `extras`, and installs PowerShell 7 if it is missing. Then, under
+PowerShell 7 whichever shell you started from, it opens the **package list**:
+every installable item in the bucket as a tree, with the default set and
+anything already installed pre-checked. Check what this machine should have,
+press Enter to review, and `y` to install (see
+[Choosing what to install](#choosing-what-to-install-install-package-with-no-arguments)).
+Nothing beyond the engines is installed without your say-so, and re-running the
+bootstrap opens the list again with what is installed already checked.
+
+If the machine has no git, the bootstrap first installs a temporary one from
+Scoop, because adding a bucket needs git. The `Git` package in OS Base Packages
+replaces that copy and `Update-Package` keeps it current like any other package.
+
+Without an interactive console the bootstrap stops after the engines and names
+the commands instead. From PowerShell 7 you can install the default set, or
+open the list again, at any time:
 
 ```powershell
-scoop install MarkMichaelis/DeveloperBasePackages
-scoop install MarkMichaelis/ClientBasePackages
-scoop install MarkMichaelis/AIAgents
+Install-Package -Name '*'   # the default set, no questions
+Install-Package             # choose from the list
 ```
 
 ## Idempotency contract
@@ -224,7 +232,59 @@ Install-Package -Name beyon<Tab>       # Tab-completes to 'Beyond Compare'
 Install-Package -Name 'ripgrep' -DryRun   # preview, no real install
 Update-Package  -Name 'ripgrep' -DryRun   # preview, no real update
 Install-Package -Name '*'                 # converge this machine (see below)
+Install-Package                           # choose from a list (see below)
 ```
+
+#### Choosing what to install: `Install-Package` with no arguments
+
+Run `Install-Package` with no arguments in a console to choose from every
+installable item in the bucket, shown as a tree:
+
+```
+Space toggle  Right/Left open/close  / filter  d defaults  a all  n none  ? details  Enter review  Esc cancel
+[x] install  [*] installed, upgrade  [=] installed, leave as is  [!] needed by a choice  [~] partly checked  [ ] skip
+  [~] AI Agents  + 14/16
+> [~] Client Base Packages  - 30/35
+    [*] exiftool  installed
+    [x] Notion
+    [*] ChatGPT  installed  (also in AI Agents)
+    [x] Microsoft Office 365  + 5/5
+    [ ] Also available  + 0/5
+  [~] Developer Base Packages  + 10/23
+  [~] OS Base Packages  + 19/26
+  [ ] Admin  + 0/3
+20 new   50 upgrades   0 needed     Space: check all
+```
+
+- The tree is built from the bucket each time, never from a list:
+  - the bundles at the bucket root are the top level, and a top-level bundle
+    is never nested under another one, so a group only ever affects its own
+    items;
+  - a bundle another one pulls in (Office 365 in Client Base) is nested under
+    it;
+  - what no bundle installs goes under **Also available** in the top-level
+    group its folder is named after (`client` -> Client Base Packages, `ai` ->
+    AI Agents, ...); a folder no group matches (`admin`) is a group of its own.
+- It starts with the default set (see `Default` below) plus everything already
+  installed, so `d` (defaults) selects what `Install-Package -Name '*'` installs.
+- The legend under the keys explains every box. `[*]` and `[=]` are both
+  installed items: `[*]` is checked and will be upgraded, `[=]` is unchecked and
+  is left exactly as it is.
+- Space on an item toggles it. Space on a group steps through three states:
+  everything in it, then only what is installed (so you can add new installs
+  one by one), then back to how it was. The footer says which comes next.
+- A package declared in two top-level groups is one checkbox, so the row says
+  where else it appears, dimmed: `(also in AI Agents)`.
+- Keys: arrows move, Right/Left open and close a group, `/` filters by name
+  (a group whose name matches shows all of its items), `?` shows an item's
+  engine, id and notes, `d` / `a` / `n` select the defaults, everything, or
+  nothing.
+- Enter shows what will happen -- new installs, upgrades, what your choices
+  need, and what stays as it is -- and `y` installs it. Esc cancels.
+- It never uninstalls: unchecking an installed item only skips its upgrade.
+
+It needs an interactive console and never waits for one: anywhere else it
+refuses at once, so name what to install or use `Install-Package -Name '*'`.
 
 #### Converging a machine: `Install-Package -Name '*'` and `Default`
 

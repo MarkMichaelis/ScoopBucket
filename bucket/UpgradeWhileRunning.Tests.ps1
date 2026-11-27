@@ -400,9 +400,10 @@ Describe 'Update-Package -WhatIf previews an upgrade of a running portable (#547
     }
 }
 
-Describe 'AIAgents declares each agent CLI under the engine that installs it (#547)' -Tag 'Light', 'Bundle' -ForEach @(
+Describe 'AIAgents declares each agent CLI under the engine that installs it (#547, #553)' -Tag 'Light', 'Bundle' -ForEach @(
     @{ Name = 'Claude Code CLI';    Cli = 'claude';  Id = 'Anthropic.ClaudeCode'; Wrapper = 'MarkMichaelis/ClaudeCode' }
     @{ Name = 'GitHub Copilot CLI'; Cli = 'copilot'; Id = 'GitHub.Copilot';       Wrapper = 'MarkMichaelis/GitHubCopilotCli' }
+    @{ Name = 'Codex CLI';          Cli = 'codex';   Id = 'OpenAI.Codex';         Wrapper = 'MarkMichaelis/Codex' }
 ) {
 
     BeforeAll {
@@ -429,5 +430,46 @@ Describe 'AIAgents declares each agent CLI under the engine that installs it (#5
     It '<Name>: names the retired scoop wrapper as its predecessor so Uninstall-Package also clears its record' {
         $script:agent.PreviousInstaller | Should -Be 'scoop'
         $script:agent.PreviousId | Should -Be $Wrapper
+    }
+}
+Describe 'AIAgents declares ChatGPT under the Store engine that installs it (#553)' -Tag 'Light', 'Bundle' {
+    # The MarkMichaelis/ChatGPT scoop manifest only runs ai/ChatGPT.ps1, which
+    # installs the Store app through winget's msstore source. Declared as that
+    # wrapper, Update-Package asked scoop, which re-runs it only when this
+    # bucket bumps its version, never when OpenAI ships one.
+
+    BeforeAll {
+        $harvest = { param($bundle, $name) Get-BundlePackageObjects -BundlePath $bundle | Where-Object Name -eq $name }
+        $script:agent = & $script:module $harvest (Join-Path $PSScriptRoot 'AIAgents.ps1') 'ChatGPT'
+        $script:canonical = & $script:module $harvest (Join-Path $PSScriptRoot 'ai\ChatGPT.ps1') 'ChatGPT'
+    }
+
+    It 'asks winget''s msstore source for the same Store product as ai/ChatGPT.ps1' {
+        $script:agent.Installer | Should -Be 'winget'
+        $script:agent.Source    | Should -Be 'msstore'
+        $script:agent.Id        | Should -Be $script:canonical.Id
+    }
+
+    It 'declares no predecessor, because ai/ChatGPT.json stays a manifest Install-Package installs' {
+        # A PreviousId of MarkMichaelis/ChatGPT would make Install-Package refuse
+        # that manifest as the superseded install (#464), unlike Codex.json,
+        # which this change retires.
+        $script:agent.PreviousInstaller | Should -BeNullOrEmpty
+        $script:agent.PreviousId        | Should -BeNullOrEmpty
+    }
+
+    It 'counts the current app (Appx OpenAI.Codex) as installed, and ChatGPT Classic alone as not' {
+        foreach ($scope in @{}, @{ ModuleName = 'MarkMichaelis.ScoopBucket' }) {
+            Mock Get-AppxPackage @scope -ParameterFilter { $Name -eq 'OpenAI.Codex' } { $null }
+            Mock Get-AppxPackage @scope -ParameterFilter { $Name -eq 'OpenAI.ChatGPT-Desktop' } {
+                [pscustomobject]@{ Name = 'OpenAI.ChatGPT-Desktop' }
+            }
+        }
+        & $script:agent.VerifyScript | Should -BeFalse -Because 'a machine with only ChatGPT Classic has not moved to the current app (#511)'
+
+        foreach ($scope in @{}, @{ ModuleName = 'MarkMichaelis.ScoopBucket' }) {
+            Mock Get-AppxPackage @scope -ParameterFilter { $Name -eq 'OpenAI.Codex' } { [pscustomobject]@{ Name = 'OpenAI.Codex' } }
+        }
+        & $script:agent.VerifyScript | Should -BeTrue
     }
 }

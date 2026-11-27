@@ -32,7 +32,6 @@
 
     # --- Cluster A: Test-Command '<cli>' ----------------------------------
     Aspire                     = @{ Verify = 'Cli'; Cli = 'aspire' }
-    Codex                      = @{ Verify = 'Cli'; Cli = 'codex' }
     DbxCli                     = @{ Verify = 'Cli'; Cli = 'dbxcli' }
     PowerShellCore             = @{ Verify = 'Cli'; Cli = 'pwsh' }
     Chocolatey                 = @{ Verify = 'Cli'; Cli = 'choco' }

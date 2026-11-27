@@ -154,9 +154,32 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
         Notes       = 'MCP-capable desktop client. This declarative entry is the only home for the package; the old Claude.json manifest that duplicated it was retired (#550).'
     }
     [Package]@{
-        Name      = 'ChatGPT'
-        Installer = 'scoop'
-        Id        = 'MarkMichaelis/ChatGPT'
+        Name        = 'ChatGPT'
+        # #553: declared under winget's msstore source, the engine that installs
+        # the Store app, for the reason given at 'Claude Code CLI' below. The
+        # MarkMichaelis/ChatGPT scoop manifest only runs ai/ChatGPT.ps1, so the
+        # wrapper declaration made Update-Package ask scoop, which re-runs it only
+        # when this bucket bumps its version. ai/ChatGPT.ps1 stays the canonical
+        # declaration; keep Id, Source and VerifyScript identical to it. No
+        # PreviousId: that would make Install-Package refuse ChatGPT.json, which
+        # stays a valid manifest.
+        #
+        # Upgrading while ChatGPT runs needs no set-aside: the Store stages the
+        # new version without touching the running app, and Windows registers
+        # it later (Dakar, 2026-11-25: registration refused at 15:36 with
+        # 0x80073D02 "apps need to be closed", then done during the 15:48
+        # sign-in). winget asks the Store to close a running app only with
+        # --force (AllowForcedAppRestart), which this module never passes.
+        # That update was the Store's own; what winget reports for one it
+        # starts while the app runs was not observed, so Update-Package may
+        # read Updated before Windows registers the new version.
+        Installer   = 'winget'
+        Id          = '9PLM9XGG6VKS'
+        Source      = 'msstore'
+        VerifyScript = {
+            [bool](Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue)
+        }
+        Notes       = 'Official MS Store listing (publisher: OpenAI), package OpenAI.Codex. Same declaration as ai/ChatGPT.ps1 (canonical). Replaces ChatGPT Classic (9NT1R1C2HH7J), retiring 2027-01-30 (#511).'
     }
     [Package]@{
         Name      = 'Gemini'
@@ -376,8 +399,16 @@ Register-ArgumentCompleter -Native -CommandName claude -ScriptBlock {
     }
     [Package]@{
         Name        = 'Codex CLI'
-        Installer   = 'scoop'
-        Id          = 'MarkMichaelis/Codex'
+        # #553: declared under winget, the engine that installs codex.exe (a
+        # portable zip, so the #547 set-aside lets it upgrade while codex runs),
+        # for the reason given at 'Claude Code CLI' above. The retired
+        # MarkMichaelis/Codex scoop manifest only wrapped this winget call. No
+        # Scope, so it installs machine-wide and links codex into
+        # C:\Program Files\WinGet\Links, like 'Antigravity CLI' and 'Grok CLI'.
+        Installer   = 'winget'
+        Id          = 'OpenAI.Codex'
+        PreviousInstaller = 'scoop'
+        PreviousId  = 'MarkMichaelis/Codex'
         CliCommands = @('codex')
         DependsOn   = @('Node.js')
         Completion  = 'auto'

@@ -193,7 +193,7 @@ Describe 'Manifest test coverage (drift)' -Tag 'Light' -ForEach @(@{ D = $script
 
     It 'discovers the member manifests in the category subfolders (#302, #513)' {
         @($D.HarnessCases).Count | Should -BeGreaterThan 0 -Because 'an empty harness means the Install suite above silently runs nothing'
-        @($D.HarnessCases | ForEach-Object { $_.Name }) | Should -Contain 'Codex' -Because 'ai/Codex.json is a harness manifest'
+        @($D.HarnessCases | ForEach-Object { $_.Name }) | Should -Contain 'ChatGPT' -Because 'ai/ChatGPT.json is a harness manifest'
         foreach ($c in $D.HarnessCases) {
             Test-Path -LiteralPath $c.Path -PathType Leaf | Should -BeTrue -Because "case '$($c.Name)' must point at its manifest"
         }
