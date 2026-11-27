@@ -98,6 +98,8 @@ Register-ArgumentCompleter -Native -CommandName 7z -ScriptBlock {
         Name              = 'Git'
         Installer         = 'winget'
         Id                = 'Git.Git'
+        # The bucket itself needs git: always installed, never unchecked (#559).
+        Required          = $true
         # install.ps1 needs git before any bucket exists, so it installs this
         # predecessor; declaring it is what hands the machine over to this
         # package. Winget also recognizes a Program Files install from any
@@ -251,10 +253,14 @@ Register-ArgumentCompleter -Native -CommandName gcloud -ScriptBlock {
     # text editor available before DeveloperBasePackages runs. The winget
     # engine's AlreadyInstalled probe makes the duplicate declaration in
     # DeveloperBasePackages a no-op on a second pass.
+    # Git's diff and merge tool settings for VS Code; installed with VS Code as
+    # its companion, and can be turned off on its own (#559).
+    [Package]@{ Name = 'Git settings for VS Code'; Installer = 'scoop'; Id = 'MarkMichaelis/GitConfigVSCode' }
     [Package]@{
         Name        = 'Visual Studio Code'
         Installer   = 'winget'
         Id          = 'Microsoft.VisualStudioCode'
+        Companions  = @('Git settings for VS Code')
         CliCommands = @('code')
         Completion  = 'auto'
         Notes       = '`code --help` lists CLI switches but `code` has no completion subcommand and no PSCompletions catalog entry. Hand-curated flag list shared with DeveloperBasePackages.'
@@ -382,6 +388,10 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
         }
         Notes       = 'Stays on scoop: winget Microsoft.Sysinternals.Suite carries the same build (2026-09-10 == 20260910) and resolves at --scope machine, but Microsoft re-uploads SysinternalsSuite.zip in place, so winget''s pinned SHA256 goes stale between manifest updates and an elevated install hard-fails with "Installer hash does not match; this cannot be overridden when running as admin" (#44). winget also ships only per-tool portable aliases, not the whole suite. Re-confirmed in #465. extras/sysinternals declares every tool in its manifest "bin" list, so scoop creates a shim per tool (procexp, autoruns, accesschk, ...) automatically. No PATH update required. CliCommands enumerates the curated subset that gets tab-completion via a shared per-CLI flag completer (universal Sysinternals flags: /?, /accepteula, /nobanner). See #44.'
     }
+    # Make Install-Package in every new shell this bucket's command, and keep
+    # the MarkMichaelis bucket registered (#559, owner's N9).
+    [Package]@{ Name = 'RegisterBucketModule';        Installer = 'scoop'; Id = 'MarkMichaelis/RegisterBucketModule' }
+    [Package]@{ Name = 'AddMarkMichaelisScoopBucket'; Installer = 'scoop'; Id = 'MarkMichaelis/AddMarkMichaelisScoopBucket' }
 )
 
 Invoke-PackageInstall -Packages $Packages -Bundle 'OSBasePackages'

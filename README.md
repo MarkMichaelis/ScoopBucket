@@ -275,6 +275,17 @@ Space toggle  Right/Left open/close  / filter  d defaults  a all  n none  ? deta
   one by one), then back to how it was. The footer says which comes next.
 - A package declared in two top-level groups is one checkbox, so the row says
   where else it appears, dimmed: `(also in AI Agents)`.
+- A package unfolds (`+`) to show its sub-items, taken from its declaration:
+  - **companions** (`Companions`), such as Git settings for Beyond Compare or
+    DbxCli for Dropbox, are on by their own default, go off and back on with
+    their package, and can each be turned off; the install then skips them.
+  - **dependencies** (`DependsOn`), such as Node.js under the AI agents that
+    need it, stay installed while a package that needs them is checked (`[!]`).
+    A dependency another group lists as its own item (Node.js in Developer
+    Base) is shown only as a sub-item here.
+  - **Chocolatey**, under every package installed with choco.
+- A package declared `Required` (Git) is always installed and says
+  `required`.
 - Keys: arrows move, Right/Left open and close a group, `/` filters by name
   (a group whose name matches shows all of its items), `?` shows an item's
   engine, id and notes, `d` / `a` / `n` select the defaults, everything, or
