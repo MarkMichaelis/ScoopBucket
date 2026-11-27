@@ -222,6 +222,11 @@ Describe 'DeveloperBasePackages: GoDaddy CLI install and uninstall behavior (#52
             (Get-Acl -LiteralPath $script:CredDir).AreAccessRulesProtected | Should -BeTrue
         }
 
+        It 'warns instead of failing the install when the folder cannot be restricted' {
+            Mock -ModuleName MarkMichaelis.ScoopBucket Set-Acl { throw 'access denied' }
+            { & $script:Package.ConfigScript $script:Package 6>$null 3>$null } | Should -Not -Throw
+        }
+
         It 'changes nothing on a re-run once the folder is private' {
             & $script:Package.ConfigScript $script:Package 6>$null
             Mock -ModuleName MarkMichaelis.ScoopBucket Set-Acl { }

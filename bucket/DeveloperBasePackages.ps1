@@ -374,25 +374,31 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
             # sandboxed shell could read the GoDaddy token). Restrict the
             # FOLDER to the user and SYSTEM, inheritable, so every token file
             # gddy writes there -- now or after a refresh -- is private too.
-            $credDir = Join-Path $env:APPDATA 'gddy\credentials'
-            if (-not (Test-Path -LiteralPath $credDir)) { New-Item -ItemType Directory -Path $credDir -Force | Out-Null }
-            $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-            $system = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18')
-            $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
-            $acl = Get-Acl -LiteralPath $credDir
-            $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
-            $private = $acl.AreAccessRulesProtected -and $rules.Count -eq 2 -and -not @($rules | Where-Object {
-                $_.AccessControlType -ne 'Allow' -or $_.FileSystemRights -ne 'FullControl' -or $_.InheritanceFlags -ne $inherit -or
-                $_.IdentityReference.Value -notin @($me.Value, $system.Value) })
-            if (-not $private) {
-                $new = [System.Security.AccessControl.DirectorySecurity]::new()
-                $new.SetAccessRuleProtection($true, $false)
-                foreach ($sid in $me, $system) {
-                    $new.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', $inherit, 'None', 'Allow'))
+            # Best-effort hardening: a failure here (redirected AppData, a share
+            # that refuses ACL edits) warns instead of failing the install.
+            try {
+                $credDir = Join-Path $env:APPDATA 'gddy\credentials'
+                if (-not (Test-Path -LiteralPath $credDir)) { New-Item -ItemType Directory -Path $credDir -Force | Out-Null }
+                $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+                $system = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+                $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+                $acl = Get-Acl -LiteralPath $credDir
+                $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+                # Private = protected, and exactly one FullControl/inheritable/no-propagation allow rule for each of the two SIDs.
+                $actual = @($rules | ForEach-Object { '{0}|{1}|{2}|{3}|{4}' -f $_.IdentityReference.Value, $_.AccessControlType, $_.FileSystemRights, $_.InheritanceFlags, $_.PropagationFlags } | Sort-Object)
+                $expected = @(@($me.Value, $system.Value) | ForEach-Object { '{0}|Allow|FullControl|{1}|None' -f $_, $inherit } | Sort-Object)
+                $private = $acl.AreAccessRulesProtected -and (($actual -join ';') -eq ($expected -join ';'))
+                if (-not $private) {
+                    $new = [System.Security.AccessControl.DirectorySecurity]::new()
+                    $new.SetAccessRuleProtection($true, $false)
+                    foreach ($sid in $me, $system) {
+                        $new.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', $inherit, 'None', 'Allow'))
+                    }
+                    Set-Acl -LiteralPath $credDir -AclObject $new
+                    Write-Host "  gddy: token folder $credDir restricted to the current user ($($me.Value)) and SYSTEM"
                 }
-                Set-Acl -LiteralPath $credDir -AclObject $new
-                Write-Host "  gddy: token folder $credDir restricted to $($me.Translate([System.Security.Principal.NTAccount])) and SYSTEM"
             }
+            catch { Write-Warning "gddy: could not restrict the token folder's permissions: $($_.Exception.Message)" }
             $current =(gddy config get credentials.store --output json 2>$null | Out-String | ConvertFrom-Json -ErrorAction SilentlyContinue).data
             if (-not $current -or $current.source -ne 'default') { return }
             # Never strand a sign-in the default store already holds (e.g. a
