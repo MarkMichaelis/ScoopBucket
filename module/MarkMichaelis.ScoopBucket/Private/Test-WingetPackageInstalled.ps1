@@ -7,8 +7,17 @@
 # probe therefore tries the exact match first and falls back to the plain
 # match, so a Store id is found and a differently-cased id still is.
 #
-# Returns @{ Installed = <bool>; ExitCode = <int>; Command = <string> }, where
-# ExitCode and Command describe the last list call made.
+# The plain match is a substring match over every identity winget knows,
+# including a Store app's package family: with the ChatGPT Store app (family
+# OpenAI.Codex_2p2nqsd0c76g0) installed, `winget list --id OpenAI.Codex` exits
+# 0 and lists ChatGPT (#553). So a plain-match hit counts only when a listed
+# row's Id is the declared Id, ignoring case.
+#
+# Returns @{ Installed = <bool>; Id = <string>; ExitCode = <int>;
+# Command = <string>; Reason = <string> }. Id is the installed package's id as
+# winget lists it, so callers can target it with --exact (empty when not
+# installed). ExitCode and Command describe the last list call made; Reason
+# says in one sentence what that call showed.
 
 function Test-WingetPackageInstalled {
     [CmdletBinding()]
@@ -24,13 +33,32 @@ function Test-WingetPackageInstalled {
 
     $exit = $null
     $command = $null
-    foreach ($attemptArgs in @(, ($listArgs + '--exact')) + @(, $listArgs)) {
+    $reason = $null
+    foreach ($exact in $true, $false) {
+        $attemptArgs = if ($exact) { $listArgs + '--exact' } else { $listArgs }
         $command = "winget $($attemptArgs -join ' ')"
-        $null = & winget @attemptArgs 2>$null
+        $output = @(& winget @attemptArgs 2>$null | ForEach-Object { [string]$_ })
         $exit = $LASTEXITCODE
-        if ($exit -eq 0) {
-            return @{ Installed = $true; ExitCode = $exit; Command = $command }
+        $reason = "$command returned $exit."
+        if ($exit -ne 0) { continue }
+        if ($exact) {
+            return @{ Installed = $true; Id = [string]$Package.Id; ExitCode = $exit; Command = $command; Reason = $reason }
         }
+
+        $listed = ConvertFrom-WingetVersionTable $output
+        if ($listed.Count -eq 0) {
+            # No table to check (an output layout the parser does not know):
+            # trust the exit code, as this probe did before #553. Callers name
+            # the declared id with --exact, so they still cannot act on a
+            # different package.
+            return @{ Installed = $true; Id = [string]$Package.Id; ExitCode = $exit; Command = $command; Reason = $reason }
+        }
+        $row = $listed[([string]$Package.Id).ToLowerInvariant()]
+        if ($row) {
+            return @{ Installed = $true; Id = $row.Id; ExitCode = $exit; Command = $command; Reason = $reason }
+        }
+        $others = @($listed.Values | ForEach-Object { $_.Id } | Sort-Object)
+        $reason = "$command listed only $($others -join ', '), not $($Package.Id)."
     }
-    return @{ Installed = $false; ExitCode = $exit; Command = $command }
+    return @{ Installed = $false; Id = ''; ExitCode = $exit; Command = $command; Reason = $reason }
 }

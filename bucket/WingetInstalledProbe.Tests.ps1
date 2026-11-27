@@ -12,7 +12,16 @@
     Git.Git), so the probe must keep the old non-exact match as a fallback or a
     declaration with a differently-cased id would regress.
 
-    The winget mocks below reproduce that observed behaviour.
+    The non-exact match is a substring match over every identity winget knows,
+    a Store app's package family included (#553): with the ChatGPT Store app
+    (family OpenAI.Codex_2p2nqsd0c76g0) installed, `winget list --id
+    OpenAI.Codex` exits 0 and lists ChatGPT, although Codex CLI (winget
+    OpenAI.Codex) is not installed. The fallback therefore counts only a listed
+    row that carries the declared id, and upgrade and uninstall then name that
+    row's id with --exact, so they cannot act on the Store app.
+
+    The winget mocks below reproduce that observed behaviour, with the table
+    winget printed on 2026-11-26 (v1.30).
 #>
 
 BeforeAll {
@@ -21,6 +30,16 @@ BeforeAll {
 
     $script:module = Get-Module MarkMichaelis.ScoopBucket
     $script:NotFound = -1978335212
+
+    function New-WingetListTable {
+        # The fixed-width table `winget list` prints when its output is redirected.
+        param([string]$Name, [string]$Id, [string]$Version, [string]$Source = 'winget')
+        $nameW = [Math]::Max(4, $Name.Length) + 1
+        $idW = [Math]::Max(2, $Id.Length) + 1
+        $verW = [Math]::Max(7, $Version.Length) + 1
+        $header = 'Name'.PadRight($nameW) + 'Id'.PadRight($idW) + 'Version'.PadRight($verW) + 'Source'
+        @($header, ('-' * $header.Length), ($Name.PadRight($nameW) + $Id.PadRight($idW) + $Version.PadRight($verW) + $Source))
+    }
 }
 
 Describe 'winget installed probe (#516)' -Tag 'Light', 'Module' {
@@ -34,8 +53,12 @@ Describe 'winget installed probe (#516)' -Tag 'Light', 'Module' {
             Mock -ModuleName MarkMichaelis.ScoopBucket winget {
                 $script:calls.Add(($args -join ' '))
                 if ($args[0] -eq 'list') {
-                    $global:LASTEXITCODE = if ($args -contains '--exact') { 0 } else { $script:NotFound }
-                    return 'row'
+                    if ($args -contains '--exact') {
+                        $global:LASTEXITCODE = 0
+                        return New-WingetListTable -Name 'ChatGPT' -Id '9PLM9XGG6VKS' -Version '26.1120.6357.0' -Source 'msstore'
+                    }
+                    $global:LASTEXITCODE = $script:NotFound
+                    return 'No installed package found matching input criteria.'
                 }
                 $global:LASTEXITCODE = 0
                 return ''
@@ -67,6 +90,13 @@ Describe 'winget installed probe (#516)' -Tag 'Light', 'Module' {
             $probe | Should -Match '--source msstore'
             $probe | Should -Match '--id 9PLM9XGG6VKS'
         }
+
+        It 'upgrades and uninstalls the exact id the probe found' {
+            $null = & $script:module { param($p) Update-WingetPackage -Package $p -TimeoutMinutes 0 } $script:pkg
+            $null = & $script:module { param($p) Uninstall-WingetPackage -Package $p } $script:pkg 6>$null
+            @($script:calls | Where-Object { $_ -like 'upgrade *' })[0] | Should -Match '--id 9PLM9XGG6VKS --exact'
+            @($script:calls | Where-Object { $_ -like 'uninstall *' })[0] | Should -Match '--id 9PLM9XGG6VKS --exact'
+        }
     }
 
     Context 'an id whose declared case differs from winget''s, so only the non-exact list finds it' {
@@ -74,8 +104,12 @@ Describe 'winget installed probe (#516)' -Tag 'Light', 'Module' {
             Mock -ModuleName MarkMichaelis.ScoopBucket winget {
                 $script:calls.Add(($args -join ' '))
                 if ($args[0] -eq 'list') {
-                    $global:LASTEXITCODE = if ($args -contains '--exact') { $script:NotFound } else { 0 }
-                    return 'row'
+                    if ($args -contains '--exact') {
+                        $global:LASTEXITCODE = $script:NotFound
+                        return 'No installed package found matching input criteria.'
+                    }
+                    $global:LASTEXITCODE = 0
+                    return New-WingetListTable -Name 'Git' -Id 'Git.Git' -Version '2.56.1'
                 }
                 $global:LASTEXITCODE = 0
                 return ''
@@ -91,6 +125,86 @@ Describe 'winget installed probe (#516)' -Tag 'Light', 'Module' {
         It 'update still runs winget upgrade' {
             $r = & $script:module { param($p) Update-WingetPackage -Package $p -TimeoutMinutes 0 } $script:pkg
             $r.State | Should -Be 'Updated'
+        }
+
+        It 'upgrades and uninstalls the id as winget lists it, matched exactly' {
+            $null = & $script:module { param($p) Update-WingetPackage -Package $p -TimeoutMinutes 0 } $script:pkg
+            $null = & $script:module { param($p) Uninstall-WingetPackage -Package $p } $script:pkg 6>$null
+            @($script:calls | Where-Object { $_ -like 'upgrade *' })[0] | Should -Match '--id Git\.Git --exact'
+            @($script:calls | Where-Object { $_ -like 'uninstall *' })[0] | Should -Match '--id Git\.Git --exact'
+        }
+    }
+
+    Context 'a non-exact list that exits 0 with output that is not a table' {
+        # Without a table there is no row to check, so the probe keeps its
+        # pre-#553 behaviour and trusts the exit code.
+        BeforeEach {
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget {
+                $script:calls.Add(($args -join ' '))
+                if ($args[0] -eq 'list') {
+                    $global:LASTEXITCODE = if ($args -contains '--exact') { $script:NotFound } else { 0 }
+                    return 'an output layout the parser does not know'
+                }
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+            $script:pkg = [Package]@{ Name = 'Widget'; Installer = 'winget'; Id = 'Vendor.Widget' }
+        }
+
+        It 'install reports AlreadyInstalled' {
+            $r = & $script:module { param($p) Install-WingetPackage -Package $p } $script:pkg
+            $r.State | Should -Be 'AlreadyInstalled'
+        }
+
+        It 'update names the declared id with --exact' {
+            $r = & $script:module { param($p) Update-WingetPackage -Package $p -TimeoutMinutes 0 } $script:pkg
+            $r.State | Should -Be 'Updated'
+            @($script:calls | Where-Object { $_ -like 'upgrade *' })[0] | Should -Match '--id Vendor\.Widget --exact'
+        }
+    }
+
+    Context 'a non-exact list that finds only another package whose identity contains the id (#553)' {
+        # Observed on Dakar: Codex CLI not installed, the ChatGPT Store app
+        # (package family OpenAI.Codex_2p2nqsd0c76g0) installed.
+        BeforeEach {
+            Mock -ModuleName MarkMichaelis.ScoopBucket winget {
+                $script:calls.Add(($args -join ' '))
+                if ($args[0] -eq 'list') {
+                    if ($args -contains '--exact') {
+                        $global:LASTEXITCODE = $script:NotFound
+                        return 'No installed package found matching input criteria.'
+                    }
+                    $global:LASTEXITCODE = 0
+                    return New-WingetListTable -Name 'ChatGPT' -Id '9PLM9XGG6VKS' -Version '26.1120.6357.0' -Source 'msstore'
+                }
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+            $script:pkg = [Package]@{ Name = 'Codex CLI'; Installer = 'winget'; Id = 'OpenAI.Codex' }
+        }
+
+        It 'install runs winget install instead of reporting AlreadyInstalled' {
+            $r = & $script:module { param($p) Install-WingetPackage -Package $p } $script:pkg 6>$null
+            $r.State | Should -Be 'Installed'
+            @($script:calls | Where-Object { $_ -like 'install *' }).Count | Should -Be 1
+        }
+
+        It 'update reports NotInstalled, naming the package winget listed instead, and runs no upgrade' {
+            $r = & $script:module { param($p) Update-WingetPackage -Package $p -TimeoutMinutes 0 } $script:pkg
+            $r.State  | Should -Be 'NotInstalled'
+            $r.Reason | Should -Match '9PLM9XGG6VKS'
+            @($script:calls | Where-Object { $_ -like 'upgrade *' }).Count | Should -Be 0
+        }
+
+        It 'uninstall reports NotInstalled and never runs winget uninstall, which would remove the Store app' {
+            $r = & $script:module { param($p) Uninstall-WingetPackage -Package $p } $script:pkg 6>$null
+            $r.State | Should -Be 'NotInstalled'
+            @($script:calls | Where-Object { $_ -like 'uninstall *' }).Count | Should -Be 0
+        }
+
+        It 'presence reports the package absent' {
+            $r = & $script:module { param($p) Get-PackagePresence -Package $p } $script:pkg
+            $r.Present | Should -BeFalse
         }
     }
 

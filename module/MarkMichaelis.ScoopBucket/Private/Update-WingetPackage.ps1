@@ -29,18 +29,23 @@ function Update-WingetPackage {
         return @{ State = 'Failed'; Reason = "winget: Id is empty for '$($Package.Name)'." }
     }
 
+    # Name the installed package exactly as the probe found it: a plain --id is
+    # a substring match, which can also hit a Store app whose package family
+    # contains the id (OpenAI.Codex vs the ChatGPT Store app, #553).
+    $target = @('--id', $id)
     if (-not $WhatIf) {
         try {
             $probe = Test-WingetPackageInstalled -Package $Package
             if (-not $probe.Installed) {
-                return @{ State = 'NotInstalled'; Reason = "$($probe.Command) returned $($probe.ExitCode)." }
+                return @{ State = 'NotInstalled'; Reason = $probe.Reason }
             }
+            if ($probe.Id) { $target = @('--id', $probe.Id, '--exact') }
         } catch {
             Write-Verbose "Update-WingetPackage: presence probe failed: $($_.Exception.Message)"
         }
     }
 
-    $upgradeArgs = @('upgrade', '--id', $id, '--silent', '--accept-package-agreements', '--accept-source-agreements')
+    $upgradeArgs = @('upgrade') + $target + @('--silent', '--accept-package-agreements', '--accept-source-agreements')
     if ($Package.Source -eq 'msstore') {
         $upgradeArgs += @('--source', 'msstore')
     }
