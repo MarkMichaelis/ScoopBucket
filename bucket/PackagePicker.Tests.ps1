@@ -134,6 +134,8 @@ Describe 'The picker''s tree is built from the bucket (#543)' -Tag 'Light', 'Mod
         @{ Raw = 'AIAgents';           Shown = 'AI Agents' }
         @{ Raw = 'MicrosoftOffice365'; Shown = 'Microsoft Office 365' }
         @{ Raw = 'ChatGPT';            Shown = 'ChatGPT' }
+        @{ Raw = 'GitTools';           Shown = 'Git Tools' }
+        @{ Raw = 'PowerShell';         Shown = 'PowerShell' }
         @{ Raw = 'RootA';              Shown = 'Root A' }
     ) {
         & $script:M { param($r) ConvertTo-PickerDisplayName $r } $Raw | Should -Be $Shown
