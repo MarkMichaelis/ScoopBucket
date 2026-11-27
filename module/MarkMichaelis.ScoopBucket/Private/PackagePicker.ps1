@@ -26,12 +26,31 @@ function Get-PickerLeaves {
             if ($seenGroups.Add($n.Key)) { foreach ($c in $n.Children) { & $walk $c } }
         } elseif ($seenIds.Add($n.Identity)) {
             $ids.Add($n)
+            foreach ($c in (Get-PickerSubItems -Node $n)) { & $walk $c }
         }
     }
     & $walk $Node
     # Emitted one by one (no leading comma), so @(Get-PickerLeaves ...) is the
     # list of leaves rather than a list holding the list.
     $ids.ToArray()
+}
+
+function Get-PickerSubItems {
+    # A package's sub-items (#559): its companions and dependencies, and
+    # Chocolatey under a choco package. Groups keep their own Children.
+    param([Parameter(Mandatory)][object]$Node)
+    if ($Node.Kind -ne 'Group' -and $Node.PSObject.Properties['Children'] -and $Node.Children) { $Node.Children.ToArray() }
+}
+
+function Test-PickerOpenable {
+    # A row that unfolds: a group, or a package with sub-items.
+    param([Parameter(Mandatory)][object]$Node)
+    $Node.Kind -eq 'Group' -or @(Get-PickerSubItems -Node $Node).Count -gt 0
+}
+
+function Get-PickerRowChildren {
+    param([Parameter(Mandatory)][object]$Node)
+    if ($Node.Kind -eq 'Group') { $Node.Children.ToArray() } else { Get-PickerSubItems -Node $Node }
 }
 
 function Get-PickerShownLeaves {
@@ -48,8 +67,10 @@ function Get-PickerShownLeaves {
             if (-not $seenGroups.Add($n.Key)) { return }
             $inside = $all -or $n.Name -like "*$Filter*"
             foreach ($c in $n.Children) { & $walk $c $inside }
-        } elseif (($all -or $n.Name -like "*$Filter*") -and $seenIds.Add($n.Identity)) {
-            $shown.Add($n)
+        } else {
+            $hit = $all -or $n.Name -like "*$Filter*"
+            if ($hit -and $seenIds.Add($n.Identity)) { $shown.Add($n) }
+            foreach ($c in (Get-PickerSubItems -Node $n)) { & $walk $c $hit }
         }
     }
     & $walk $Node $false
@@ -81,6 +102,7 @@ function New-PickerState {
     $ignoreCase = [System.StringComparer]::OrdinalIgnoreCase
     # A package is a default if any declaration of it says so.
     $defaults = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
+    $always = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
     $owner = @{}
     foreach ($name in $Catalog.Order) {
         $info = $Catalog.Bundles[$name]
@@ -92,6 +114,7 @@ function New-PickerState {
             if ($target -and $Catalog.Bundles.ContainsKey($target)) { continue }
             $id = Get-PickerIdentity -Package $p -Bundle $name
             if ($p.Default -and $leaves.ContainsKey($id)) { [void]$defaults.Add($id) }
+            if ($p.Required -and $leaves.ContainsKey($id)) { [void]$always.Add($id) }
             # The first bundle (name order, as Install-Package -Name '*' walks
             # them) installs a package several bundles declare.
             if (-not $owner.ContainsKey($id)) { $owner[$id] = [pscustomobject]@{ Bundle = $name; BundlePath = $info.BundlePath; Name = $p.Name } }
@@ -110,8 +133,32 @@ function New-PickerState {
         }
     }
 
+    # Each package's companions (#559), and the Chocolatey item every choco
+    # package needs.
+    $companions = @{}
+    $chocoId = $null
+    foreach ($leaf in $leaves.Values) {
+        if ($leaf.Kind -eq 'Manifest' -and $leaf.Name -eq 'Chocolatey') { $chocoId = $leaf.Identity }
+    }
+    $seenNodes = [System.Collections.Generic.HashSet[string]]::new()
+    $walkNodes = {
+        param($n)
+        if ($n.Kind -eq 'Group') { if ($seenNodes.Add($n.Key)) { foreach ($c in $n.Children) { & $walkNodes $c } }; return }
+        foreach ($c in (Get-PickerSubItems -Node $n)) {
+            if ($c.Role -eq 'Companion') {
+                if (-not $companions.ContainsKey($n.Identity)) { $companions[$n.Identity] = [System.Collections.Generic.HashSet[string]]::new($ignoreCase) }
+                [void]$companions[$n.Identity].Add($c.Identity)
+            }
+            & $walkNodes $c
+        }
+    }
+    foreach ($root in $Catalog.Roots) { & $walkNodes $root }
+
     $state = [pscustomobject]@{
         Catalog     = $Catalog
+        Always      = $always
+        Companions  = $companions
+        ChocoId     = $chocoId
         Installed   = $Installed
         Leaves      = $leaves
         Defaults    = $defaults
@@ -143,22 +190,46 @@ function Update-PickerRequired {
     # bundle that installs each of them.
     param([Parameter(Mandatory)][object]$State)
     $State.Required.Clear()
+    foreach ($id in $State.Always) { if (-not $State.Selected.Contains($id)) { [void]$State.Required.Add($id) } }
     foreach ($name in $State.Catalog.Order) {
         $info = $State.Catalog.Bundles[$name]
-        $names = @(foreach ($id in $State.Selected) {
+        $names = @(foreach ($id in @($State.Selected) + @($State.Always)) {
                 $o = $State.Owner[$id]
                 if ($o -and $o.Bundle -eq $name) { $o.Name }
             })
         if ($names.Count -eq 0) { continue }
         try {
             # Resolve-PackageOrder emits its list as ONE array object; assign
-            # before iterating.
-            $closure = Resolve-PackageOrder -Packages $info.Packages -Name $names
+            # before iterating. An unchecked companion is left out (#559).
+            $skip = @(Get-PickerSkippedCompanions -State $State -Bundle $name)
+            $closure = Resolve-PackageOrder -Packages $info.Packages -Name $names -Skip $skip
         } catch {
             continue   # an unplannable bundle is reported when it is installed
         }
         foreach ($p in $closure) { Add-PickerRequired -State $State -Package $p -Bundle $name }
     }
+    # Every choco package needs Chocolatey.
+    if ($State.ChocoId -and -not $State.Selected.Contains($State.ChocoId)) {
+        foreach ($id in @($State.Selected) + @($State.Required)) {
+            $leaf = $State.Leaves[$id]
+            if ($leaf -and $leaf.Kind -eq 'Package' -and $leaf.Package.Installer -eq 'choco') { [void]$State.Required.Add($State.ChocoId); break }
+        }
+    }
+}
+
+function Get-PickerSkippedCompanions {
+    # The companions in one bundle that are not checked: installing their
+    # package leaves them out (#559).
+    param([Parameter(Mandatory)][object]$State, [Parameter(Mandatory)][string]$Bundle)
+    $names = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($set in $State.Companions.Values) {
+        foreach ($id in $set) {
+            if ($State.Selected.Contains($id)) { continue }
+            $o = $State.Owner[$id]
+            if ($o -and $o.Bundle -eq $Bundle) { [void]$names.Add($o.Name) }
+        }
+    }
+    @($names)
 }
 
 function Add-PickerRequired {
@@ -285,7 +356,16 @@ function Switch-PickerNode {
     #>
     param([Parameter(Mandatory)][object]$State, [Parameter(Mandatory)][object]$Node)
     if ($Node.Kind -ne 'Group') {
-        if ($State.Selected.Contains($Node.Identity)) { [void]$State.Selected.Remove($Node.Identity) } else { [void]$State.Selected.Add($Node.Identity) }
+        $on = -not $State.Selected.Contains($Node.Identity)
+        if ($on) { [void]$State.Selected.Add($Node.Identity) } else { [void]$State.Selected.Remove($Node.Identity) }
+        # A package's companions go with it: off with it, and back on by
+        # their own default (#559).
+        if ($State.Companions.ContainsKey($Node.Identity)) {
+            foreach ($id in $State.Companions[$Node.Identity]) {
+                if (-not $on) { [void]$State.Selected.Remove($id) }
+                elseif ($State.Defaults.Contains($id)) { [void]$State.Selected.Add($id) }
+            }
+        }
         Update-PickerRequired -State $State
         return
     }
@@ -353,8 +433,8 @@ function Get-PickerRows {
     $isMatch = {
         param($n, $seen)
         if ($n.Name -like "*$filter*") { return $true }
-        if ($n.Kind -ne 'Group' -or -not $seen.Add($n.Key)) { return $false }
-        foreach ($c in $n.Children) { if (& $isMatch $c $seen) { return $true } }
+        if (-not (Test-PickerOpenable -Node $n) -or -not $seen.Add($n.Key)) { return $false }
+        foreach ($c in (Get-PickerRowChildren -Node $n)) { if (& $isMatch $c $seen) { return $true } }
         $false
     }
     $walk = {
@@ -363,9 +443,9 @@ function Get-PickerRows {
             if ($filter -and -not $showAll -and -not (& $isMatch $n ([System.Collections.Generic.HashSet[string]]::new()))) { continue }
             $path = "$parent/$($n.Key)"
             $rows.Add([pscustomobject]@{ Node = $n; Depth = $depth; Path = $path; Parent = $parent })
-            $open = $n.Kind -eq 'Group' -and ($filter -or $State.Expanded.Contains($path))
+            $open = (Test-PickerOpenable -Node $n) -and ($filter -or $State.Expanded.Contains($path))
             $childrenAll = $showAll -or ($filter -and $n.Name -like "*$filter*")
-            if ($open -and $onPath -notcontains $n.Key) { & $walk $n.Children ($depth + 1) $path (@($onPath) + $n.Key) $childrenAll }
+            if ($open -and $onPath -notcontains $n.Key) { & $walk @(Get-PickerRowChildren -Node $n) ($depth + 1) $path (@($onPath) + $n.Key) $childrenAll }
         }
     }
     & $walk $State.Catalog.Roots 0 '' @() $false
@@ -382,7 +462,14 @@ function Get-PickerPlan {
     param([Parameter(Mandatory)][object]$State)
     $byBundle = @{}
     $manifests = [System.Collections.Generic.List[string]]::new()
-    foreach ($id in @($State.Selected | Sort-Object)) {
+    $wanted = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($id in @($State.Selected) + @($State.Always)) { [void]$wanted.Add($id) }
+    # A needed bare manifest (Chocolatey) is installed when it is missing.
+    foreach ($id in $State.Required) {
+        $leaf = $State.Leaves[$id]
+        if ($leaf -and $leaf.Kind -eq 'Manifest' -and -not $State.Owner[$id] -and -not (Test-PickerInstalled -State $State -Identity $id)) { [void]$wanted.Add($id) }
+    }
+    foreach ($id in @($wanted | Sort-Object)) {
         # A package goes to the bundle that declares it -- even when it was
         # checked through a manifest node for the same thing; only a manifest
         # no package installs is run as a bare manifest.
@@ -396,6 +483,7 @@ function Get-PickerPlan {
             $byBundle[$o.BundlePath] = [pscustomobject]@{
                 BundlePath = $o.BundlePath; Bundle = $o.Bundle
                 Names = [System.Collections.Generic.List[string]]::new()
+                Skip  = @(Get-PickerSkippedCompanions -State $State -Bundle $o.Bundle)
             }
         }
         $byBundle[$o.BundlePath].Names.Add($o.Name)
@@ -501,8 +589,12 @@ function Format-PickerScreen {
                 $sign = if ($row.Node.Kind -eq 'Group' -and -not ($State.Filter -or $State.Expanded.Contains($row.Path))) { '+' } else { '-' }
                 $suffix = "  $sign $on/$($ids.Count)"
             } else {
-                if ($box -in '[*]', '[=]') { $suffix = '  installed' }
-                elseif ($box -eq '[!]') { $suffix = '  needed' }
+                # A package with sub-items unfolds like a group (#559).
+                if (Test-PickerOpenable -Node $row.Node) {
+                    $suffix = if ($State.Filter -or $State.Expanded.Contains($row.Path)) { '  -' } else { '  +' }
+                }
+                if ($box -in '[*]', '[=]') { $suffix += '  installed' }
+                elseif ($box -eq '[!]') { $suffix += '  needed' }
                 if ($row.Node.Kind -eq 'Manifest') { $suffix += '  (manifest)' }
                 # The same package under another top-level group shares this checkbox.
                 $homeGroup = $State.RootNames[($row.Path -split '/')[1]]
@@ -594,11 +686,11 @@ function Invoke-PickerKey {
         ([ConsoleKey]::Home)       { $State.Cursor = 0; return 'Continue' }
         ([ConsoleKey]::End)        { $State.Cursor = $rows.Count - 1; return 'Continue' }
         ([ConsoleKey]::RightArrow) {
-            if ($row -and $row.Node.Kind -eq 'Group') { [void]$State.Expanded.Add($row.Path) }
+            if ($row -and (Test-PickerOpenable -Node $row.Node)) { [void]$State.Expanded.Add($row.Path) }
             return 'Continue'
         }
         ([ConsoleKey]::LeftArrow) {
-            if ($row -and $row.Node.Kind -eq 'Group' -and $State.Expanded.Contains($row.Path)) {
+            if ($row -and (Test-PickerOpenable -Node $row.Node) -and $State.Expanded.Contains($row.Path)) {
                 [void]$State.Expanded.Remove($row.Path)
             } elseif ($row -and $row.Parent) {
                 for ($i = 0; $i -lt $rows.Count; $i++) { if ($rows[$i].Path -eq $row.Parent) { $State.Cursor = $i; break } }
