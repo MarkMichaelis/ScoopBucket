@@ -71,7 +71,8 @@ function Install-Package {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     [OutputType([PackageResult])]
     param(
-        [Parameter(Mandatory, Position = 0)][string[]]$Name,
+        # Omit it to choose from the interactive picker (#543).
+        [Parameter(Position = 0)][string[]]$Name,
         [switch]$DryRun,
         [switch]$SkipCompletion,
         [switch]$NoUpgrade,
@@ -90,6 +91,18 @@ function Install-Package {
     # the bare-manifest path (c) below). Derive one boolean to thread through.
     if ($DryRun) { $WhatIfPreference = $true }
     $isWhatIf = [bool]$WhatIfPreference
+
+    # Only leaving -Name out opens the picker (#543). An empty list -- say, a
+    # script variable that came back empty -- is a mistake, not a request to
+    # choose, and used to be refused by the mandatory parameter.
+    $usePicker = -not $PSBoundParameters.ContainsKey('Name')
+    if (-not $usePicker -and @($Name | Where-Object { $_ }).Count -eq 0) {
+        throw "Install-Package: -Name is empty. Name a package or bundle, use -Name '*' for the default set, or leave -Name out to choose from a list."
+    }
+    # Refuse before the seconds-long bucket scan, so the answer is immediate.
+    if ($usePicker -and -not (Test-PickerInteractive)) {
+        throw "Install-Package: with no -Name, Install-Package lets you choose from a list, which needs an interactive console. Name what to install (Install-Package -Name <package or bundle>), or install the default set: Install-Package -Name '*'"
+    }
 
     $bundleArgs = @{}
     if ($BucketPath) { $bundleArgs['BucketPath'] = $BucketPath }
@@ -184,6 +197,26 @@ function Install-Package {
         }
 
         throw "Install-Package: no bundle declares a package named '$needed' and no '$needed.json' manifest was found in the bucket."
+    }
+
+    # --- No names: let the owner choose from the picker (#543) ------------
+    # The picker returns the same shape the name classification builds --
+    # package names per bundle, plus bare manifest names -- so everything below
+    # (dispatch, completion, summary) is shared.
+    if ($usePicker) {
+        $catalog = Get-PackageCatalog -BucketPath $effectiveBucket -Bundle $bundles
+        Write-Host 'Checking what is installed...'
+        $plan = Show-PackagePicker -Catalog $catalog -Installed (Get-InstalledPackageMap -Catalog $catalog)
+        if (-not $plan) {
+            Write-Host 'Install-Package: cancelled; nothing was installed.'
+            return
+        }
+        if (@($plan.ByBundle.Keys).Count -eq 0 -and @($plan.Manifests).Count -eq 0) {
+            Write-Host 'Install-Package: nothing is checked; nothing was installed.'
+            return
+        }
+        foreach ($entry in $plan.ByBundle.Values) { $byBundle[$entry.BundlePath] = $entry }
+        foreach ($m in $plan.Manifests) { $manifestNames.Add($m) }
     }
 
     # --- '*': every default package, plus optional ones already installed ---
