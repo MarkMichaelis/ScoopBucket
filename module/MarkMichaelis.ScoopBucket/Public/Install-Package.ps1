@@ -188,7 +188,7 @@ function Install-Package {
         # Searched RECURSIVELY (Resolve-BucketManifestPath), matching both
         # scoop itself and bundle discovery: in the grouped bucket layout the
         # config-only manifests all live in a category subfolder
-        # (developer/GitConfigure.json, os/EnableRemoteDesktop.json, ...), so a
+        # (developer/GitConfigVSCode.json, os/EnableRemoteDesktop.json, ...), so a
         # root-only probe made every one of them unreachable by name. See #452.
         if ($effectiveBucket) {
             if (Resolve-BucketManifestPath -Name $needed -BucketPath $effectiveBucket) {
@@ -246,6 +246,8 @@ function Install-Package {
             foreach ($n in $plan.Names[$b.BundlePath]) {
                 if ($byBundle[$b.BundlePath].Names -notcontains $n) { $byBundle[$b.BundlePath].Names.Add($n) }
             }
+            # An optional companion does not come along with its package (#563).
+            if ($plan.Skip -and $plan.Skip.ContainsKey($b.BundlePath)) { $byBundle[$b.BundlePath]['Skip'] = @($plan.Skip[$b.BundlePath]) }
         }
         $skippedOptional = @($plan.Skipped)
     }

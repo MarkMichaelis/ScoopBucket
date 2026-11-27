@@ -153,11 +153,20 @@ function New-PickerState {
         }
     }
     foreach ($root in $Catalog.Roots) { & $walkNodes $root }
+    # The other direction: the packages each companion accompanies.
+    $companionOf = @{}
+    foreach ($accompanied in $companions.Keys) {
+        foreach ($id in $companions[$accompanied]) {
+            if (-not $companionOf.ContainsKey($id)) { $companionOf[$id] = [System.Collections.Generic.List[string]]::new() }
+            $companionOf[$id].Add($accompanied)
+        }
+    }
 
     $state = [pscustomobject]@{
         Catalog     = $Catalog
         Always      = $always
         Companions  = $companions
+        CompanionOf = $companionOf
         ChocoId     = $chocoId
         Installed   = $Installed
         Leaves      = $leaves
@@ -178,6 +187,13 @@ function New-PickerState {
     }
     Set-PickerSelection -State $state -Mode Defaults
     $state
+}
+
+function Test-PickerCompanionDefault {
+    # Not a companion, or a companion of a package that is on by default.
+    param([Parameter(Mandatory)][object]$State, [Parameter(Mandatory)][string]$Identity)
+    if (-not $State.CompanionOf.ContainsKey($Identity)) { return $true }
+    [bool](@($State.CompanionOf[$Identity] | Where-Object { $State.Defaults.Contains($_) -or $State.Always.Contains($_) }).Count)
 }
 
 function Test-PickerInstalled {
@@ -286,9 +302,11 @@ function Set-PickerSelection {
             'All'      { $true }
             'None'     { $false }
             # An installed config-only manifest is not re-run, matching
-            # Install-Package -Name '*', which never runs manifests.
+            # Install-Package -Name '*', which never runs manifests. A
+            # companion is a default only with a package it accompanies
+            # (#563: Visual Studio's Git settings wait for Visual Studio).
             'Defaults' {
-                $State.Defaults.Contains($id) -or
+                ($State.Defaults.Contains($id) -and (Test-PickerCompanionDefault -State $State -Identity $id)) -or
                     ($State.Leaves[$id].Kind -ne 'Manifest' -and (Test-PickerInstalled -State $State -Identity $id))
             }
         }

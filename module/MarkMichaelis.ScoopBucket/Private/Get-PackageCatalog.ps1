@@ -26,9 +26,10 @@ function ConvertTo-PickerDisplayName {
     # 'OSBasePackages' -> 'OS Base Packages', 'MicrosoftOffice365' -> 'Microsoft
     # Office 365'. A word starts at a capital followed by a lower-case letter
     # (or ending the name), so an acronym such as 'ChatGPT' stays whole.
+    # 'PowerShell' is one word, the product's own spelling (#563).
     [OutputType([string])]
     param([Parameter(Mandatory)][string]$Name)
-    $Name -creplace '([a-z])(?=[A-Z](?:[a-z]|$))', '$1 ' -creplace '([A-Z]+)([A-Z][a-z])', '$1 $2' -creplace '([A-Za-z])(\d)', '$1 $2'
+    $Name -creplace '([a-z])(?=[A-Z](?:[a-z]|$))', '$1 ' -creplace '([A-Z]+)([A-Z][a-z])', '$1 $2' -creplace '([A-Za-z])(\d)', '$1 $2' -creplace '\bPower Shell\b', 'PowerShell'
 }
 
 function Get-PickerIdentity {
@@ -178,8 +179,13 @@ function Get-PackageCatalog {
         $target = Get-PickerLinkTarget -Package $Package
         if ($target -and $bundles.ContainsKey($target)) { "bundle|$target" } else { Get-PickerIdentity -Package $Package -Bundle $Bundle }
     }
+    # When every bundle declaring a package lists it only as a dependency, the
+    # top-level bundles among them keep it as an item and a nested bundle
+    # shows it only under what needs it (#563: Node.js is Developer Base's
+    # item and AI Agents' dependency, though both need it for something).
     $subNames = @{}      # bundle -> names shown only as sub-items
     $ownedBy = @{}       # identity -> bundles that list it as an item of their own
+    $topDependencyOf = @{}   # identity -> top-level bundles that list it only as a dependency
     foreach ($b in $bundles.Values) {
         $companions = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
         $dependencies = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
@@ -189,11 +195,18 @@ function Get-PackageCatalog {
         }
         $subNames[$b.Bundle] = [pscustomobject]@{ Companions = $companions; Dependencies = $dependencies }
         foreach ($p in $b.Packages) {
-            if ($companions.Contains($p.Name) -or $dependencies.Contains($p.Name)) { continue }
+            if ($companions.Contains($p.Name)) { continue }
             $id = Get-SubItemKey $p $b.Bundle
-            if (-not $ownedBy.ContainsKey($id)) { $ownedBy[$id] = [System.Collections.Generic.List[string]]::new() }
-            $ownedBy[$id].Add($b.Bundle)
+            $map = if (-not $dependencies.Contains($p.Name)) { $ownedBy } elseif (& $showsOnTop $b.Bundle) { $topDependencyOf } else { continue }
+            if (-not $map.ContainsKey($id)) { $map[$id] = [System.Collections.Generic.List[string]]::new() }
+            $map[$id].Add($b.Bundle)
         }
+    }
+    # Is a dependency of this bundle shown only under what needs it?
+    $isSubItemOnly = {
+        param([string]$Id, [string]$Bundle)
+        $owners = if ($ownedBy.ContainsKey($Id)) { $ownedBy[$Id] } elseif ($topDependencyOf.ContainsKey($Id)) { $topDependencyOf[$Id] } else { @() }
+        $owners -notcontains $Bundle -and @($owners | Where-Object { $_ -ne $Bundle }).Count -gt 0
     }
     $chocoManifest = if ($manifests.ContainsKey('Chocolatey')) { $manifests['Chocolatey'] } else { $null }
     if ($chocoManifest -and @($bundles.Values | ForEach-Object { $_.Packages } | Where-Object { $_.Installer -eq 'choco' }).Count -gt 0) {
@@ -257,7 +270,7 @@ function Get-PackageCatalog {
             if ($target -and $bundles.ContainsKey($target)) {
                 $sub = $subNames[$Name]
                 if ($sub.Companions.Contains($p.Name)) { continue }
-                if ($sub.Dependencies.Contains($p.Name) -and $ownedBy.ContainsKey("bundle|$target") -and @($ownedBy["bundle|$target"] | Where-Object { $_ -ne $Name }).Count -gt 0) { continue }
+                if ($sub.Dependencies.Contains($p.Name) -and (& $isSubItemOnly "bundle|$target" $Name)) { continue }
                 # A top-level bundle is shown once, at the top.
                 if (-not (& $showsOnTop $target)) { $node.Children.Add((Get-NestedNode $target)) }
                 continue
@@ -266,10 +279,7 @@ function Get-PackageCatalog {
             # there too when another bundle lists it as an item of its own.
             $sub = $subNames[$Name]
             if ($sub.Companions.Contains($p.Name)) { continue }
-            if ($sub.Dependencies.Contains($p.Name)) {
-                $id = Get-SubItemKey $p $Name
-                if ($ownedBy.ContainsKey($id) -and @($ownedBy[$id] | Where-Object { $_ -ne $Name }).Count -gt 0) { continue }
-            }
+            if ($sub.Dependencies.Contains($p.Name) -and (& $isSubItemOnly (Get-SubItemKey $p $Name) $Name)) { continue }
             $node.Children.Add((New-PackageNode $p $Name $null @()))
         }
         foreach ($d in $info.Depends) {

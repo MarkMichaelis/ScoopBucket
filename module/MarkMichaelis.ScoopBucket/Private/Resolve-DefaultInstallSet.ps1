@@ -44,7 +44,8 @@ function Resolve-DefaultInstallSet {
         them, and their packages count as already covered.
 
     .OUTPUTS
-        Hashtable @{ Names = @{ BundlePath -> string[] }; Skipped = PackageResult[];
+        Hashtable @{ Names = @{ BundlePath -> string[] }; Skip = @{ BundlePath ->
+        string[] } (optional companions to leave out); Skipped = PackageResult[];
         Failed = PackageResult[] }. Each Failed result carries its ErrorRecord
         in .Error.
     #>
@@ -99,11 +100,30 @@ function Resolve-DefaultInstallSet {
         }
     }
 
+    # Companions, as the picker treats them (#563): a companion is a default
+    # only with a package it accompanies that is one, and an optional
+    # companion is not installed with its package.
+    foreach ($entry in $loaded) {
+        $of = @{}
+        foreach ($p in $entry.Packages) {
+            foreach ($c in @($p.Companions | Where-Object { $_ })) {
+                if (-not $of.ContainsKey($c)) { $of[$c] = [System.Collections.Generic.List[object]]::new() }
+                $of[$c].Add($p)
+            }
+        }
+        $entry | Add-Member -NotePropertyName CompanionOf -NotePropertyValue $of
+    }
+    $isDefault = {
+        param($entry, $p)
+        $p.Default -and (-not $entry.CompanionOf.ContainsKey($p.Name) -or
+            @($entry.CompanionOf[$p.Name] | Where-Object { $_.Default -or $_.Required }).Count -gt 0)
+    }
+
     # --- Pass 1: defaults. A package is a default if any declaration says so.
     $defaultIds = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
     foreach ($entry in $loaded) {
         foreach ($p in $entry.Packages) {
-            if ($p.Default -and -not (& $isLink $p)) { [void]$defaultIds.Add((& $identityOf $p $entry.Info.Bundle)) }
+            if ((& $isDefault $entry $p) -and -not (& $isLink $p)) { [void]$defaultIds.Add((& $identityOf $p $entry.Info.Bundle)) }
         }
     }
 
@@ -122,14 +142,32 @@ function Resolve-DefaultInstallSet {
 
     # --- Pass 2: what the requested packages pull in comes along. ----------
     $covered = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
+    $skipFor = @{}
     # Iterate a snapshot: a bundle that cannot be planned is removed below.
     foreach ($entry in $loaded.ToArray()) {
         $seed = @($wanted[$entry.Info.BundlePath]) + @($entry.Explicit)
         if ($seed.Count -eq 0) { continue }
+        # An optional companion rides along only when something the seed
+        # needs depends on it, or when it was asked for by name.
+        $byName = @{}
+        foreach ($p in $entry.Packages) { if (-not $byName.ContainsKey($p.Name)) { $byName[$p.Name] = $p } }
+        $needed = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
+        $queue = [System.Collections.Generic.Queue[string]]::new()
+        foreach ($n in $seed) { $queue.Enqueue($n) }
+        while ($queue.Count -gt 0) {
+            $n = $queue.Dequeue()
+            if (-not $byName.ContainsKey($n)) { continue }
+            foreach ($d in @($byName[$n].DependsOn | Where-Object { $_ })) { if ($needed.Add($d)) { $queue.Enqueue($d) } }
+        }
+        $skip = @($entry.CompanionOf.Keys | Where-Object {
+                $byName.ContainsKey($_) -and -not (& $isDefault $entry $byName[$_]) -and
+                    $seed -notcontains $_ -and -not $needed.Contains($_)
+            })
+        $skipFor[$entry.Info.BundlePath] = $skip
         try {
             # Resolve-PackageOrder emits its list as ONE array object; assign it
             # before iterating, as Invoke-PackageInstall does.
-            $closure = Resolve-PackageOrder -Packages $entry.Packages -Name $seed
+            $closure = Resolve-PackageOrder -Packages $entry.Packages -Name $seed -Skip $skip
         } catch {
             & $fail $entry.Info $_.Exception.Message
             [void]$loaded.Remove($entry)
@@ -151,7 +189,10 @@ function Resolve-DefaultInstallSet {
                 continue
             }
             $howTo = "Install it by name: Install-Package -Name '$($p.Name)'"
-            $reason = if ($null -eq $presence.Present) {
+            $reason = if ($p.Default -and $entry.CompanionOf.ContainsKey($p.Name)) {
+                $with = ($entry.CompanionOf[$p.Name] | ForEach-Object { "'$($_.Name)'" }) -join ', '
+                "Installed with $with, which is optional and not installed, so '*' leaves it out. $howTo"
+            } elseif ($null -eq $presence.Present) {
                 "Optional (Default = `$false), and Install-Package could not tell whether it is installed ($($presence.Reason)), so '*' leaves it out. $howTo"
             } else {
                 "Optional (Default = `$false) and not installed, so '*' leaves it out. $howTo"
@@ -170,9 +211,13 @@ function Resolve-DefaultInstallSet {
     }
 
     $names = @{}
+    $skipNames = @{}
     foreach ($entry in $loaded) {
         $list = $wanted[$entry.Info.BundlePath]
         if ($list.Count -gt 0) { $names[$entry.Info.BundlePath] = $list.ToArray() }
+        # An optional companion that pass 3 upgrades is installed after all.
+        $skip = @($skipFor[$entry.Info.BundlePath] | Where-Object { $_ -and $list -notcontains $_ })
+        if ($skip.Count -gt 0) { $skipNames[$entry.Info.BundlePath] = $skip }
     }
-    @{ Names = $names; Skipped = $skipped.ToArray(); Failed = $failed.ToArray() }
+    @{ Names = $names; Skip = $skipNames; Skipped = $skipped.ToArray(); Failed = $failed.ToArray() }
 }
