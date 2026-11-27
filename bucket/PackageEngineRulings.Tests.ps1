@@ -99,18 +99,11 @@ Describe 'Engine ruling: Notion moves to winget' -Tag 'Light','Bundle' {
 
 Describe 'Engine ruling: Node.js deliberately stays on choco' -Tag 'Light','Bundle' {
 
-    It 'declares Node.js in AIAgents, plus at most a completion-less copy in DeveloperBasePackages' {
-        # AIAgents is the authoritative node/npm/npx completion source (#222);
-        # a second entry that also registered completion would make
-        # registration order-dependent. DeveloperBasePackages lists Node.js as
-        # an item of its own (#559) but registers no completion.
-        @($script:node | Where-Object Bundle -eq 'AIAgents').Count | Should -Be 1
-        @($script:node | Where-Object { $_.Bundle -notin 'AIAgents', 'DeveloperBasePackages' }).Count | Should -Be 0
-        foreach ($copy in @($script:node | Where-Object Bundle -eq 'DeveloperBasePackages')) {
-            $copy.Completion | Should -Be 'none'
-            $copy.Installer  | Should -Be 'choco'
-            $copy.Id         | Should -Be 'nodejs'
-        }
+    It 'declares Node.js once, shared by AIAgents and DeveloperBasePackages' {
+        # One declaration in SharedPackages.ps1 (#563), so both bundles write
+        # the same node/npm/npx completion block (#222) and cannot drift.
+        @($script:node.Bundle | Sort-Object) | Should -Be @('AIAgents', 'DeveloperBasePackages')
+        @($script:node | ForEach-Object { "$($_.Installer)|$($_.Id)|$($_.Completion)" } | Sort-Object -Unique) | Should -HaveCount 1
         $script:node = @($script:node | Where-Object Bundle -eq 'AIAgents')
     }
 

@@ -498,31 +498,6 @@ Describe 'Get-PackagesFromScript — real bucket scripts' {
         }
     }
 
-    Context 'GitConfigure.ps1' {
-        BeforeAll {
-            $pkgs = Get-PackagesFromScript -FilePath (Join-Path $bucketPath 'GitConfigure.ps1')
-        }
-
-        It 'should discover standalone choco install commands' {
-            $chocoPackages = $pkgs | Where-Object InstallerType -eq 'choco'
-            ($chocoPackages | Where-Object Name -eq 'git') | Should -Not -BeNullOrEmpty
-            ($chocoPackages | Where-Object Name -match 'git-credential') | Should -Not -BeNullOrEmpty
-            ($chocoPackages | Where-Object Name -eq 'gitextensions') | Should -Not -BeNullOrEmpty
-            ($chocoPackages | Where-Object Name -eq 'gitkraken') | Should -Not -BeNullOrEmpty
-        }
-
-        It 'should discover standalone winget install commands' {
-            $wingetPackages = $pkgs | Where-Object InstallerType -eq 'winget'
-            ($wingetPackages | Where-Object PackageId -eq 'GitKraken.cli') | Should -Not -BeNullOrEmpty
-            ($wingetPackages | Where-Object PackageId -eq 'GitHub.cli') | Should -Not -BeNullOrEmpty
-        }
-
-        It 'should discover Install-Module posh-git' {
-            $psModules = $pkgs | Where-Object InstallerType -eq 'ps-module'
-            ($psModules | Where-Object Name -match 'posh-git') | Should -Not -BeNullOrEmpty
-        }
-    }
-
     Context 'MicrosoftOffice365.ps1' {
         BeforeAll {
             $pkgs = Get-PackagesFromScript -FilePath (Join-Path $bucketPath 'MicrosoftOffice365.ps1')
@@ -551,9 +526,9 @@ Describe 'Get-PackagesFromScript — real bucket scripts' {
         }
     }
 
-    Context 'PowerShell.ps1' {
+    Context 'PowerShellSetup.ps1' {
         BeforeAll {
-            $pkgs = Get-PackagesFromScript -FilePath (Join-Path $bucketPath 'PowerShell.ps1')
+            $pkgs = Get-PackagesFromScript -FilePath (Join-Path $bucketPath 'developer\PowerShellSetup.ps1')
         }
 
         It 'should discover PS modules' {

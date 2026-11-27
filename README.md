@@ -308,7 +308,7 @@ default set in one command, from any starting state:
   when it is already installed, and otherwise leaves it out with a `Skipped`
   row naming the command that installs it. An optional package that a default
   one needs (`DependsOn` / `Companions`) is installed anyway.
-- Config-only manifests (`GitConfigure`, `SetPowerConfiguration`,
+- Config-only manifests (`SetPowerConfiguration`,
   `EnableRemoteDesktop`, `McAfeeUninstall`, `PowerToysSettingsBackup`, ...) are
   never included; run them by name.
 - A package or bundle named explicitly alongside `*` installs regardless of
@@ -643,10 +643,9 @@ See #45 for the tracking issue. Rolling out in three phases:
 
 Every bundle that installs CLI tools registers PowerShell tab completion
 for the CLIs it owns. Per-CLI native-completion commands are co-located
-with their install (e.g. `Register-CliCompletion -Cli gh -NativeCommand
-{ gh completion -s powershell }` next to the `gh` install in
-`GitConfigure.ps1`), so adding or dropping a CLI never requires editing
-the shared module.
+with their install (e.g. `NativeCommandScript = { gh completion -s powershell }`
+on the `GitHub CLI` package in `GitTools.ps1`), so adding or dropping a CLI
+never requires editing the shared module.
 
 Only CLIs whose first-party `<tool> completion powershell` (or
 equivalent) emits a real `Register-ArgumentCompleter` script are wired
@@ -654,7 +653,7 @@ with `-NativeCommand`. The currently-pinned set is:
 
 | CLI | Owning bundle       | Native command                              |
 |-----|---------------------|---------------------------------------------|
-| gh  | `GitConfigure.ps1`  | `gh completion -s powershell`               |
+| gh  | `GitTools.ps1`      | `gh completion -s powershell`               |
 | rg  | `OSBasePackages.ps1`| `rg --generate complete-powershell` (≥ v14) |
 
 CLIs whose `completion` subcommand does **not** support PowerShell
@@ -929,7 +928,7 @@ files when the shape doesn't fit "install + idempotent + verify":
 - `AddLocalRepoBucket.Tests.ps1`, `AddMarkMichaelisScoopBucket.Tests.ps1`
   — `scoop bucket add`, not `scoop install`.
 - `GitConfigBeyondCompare.Tests.ps1`, `GitConfigVSCode.Tests.ps1`,
-  `GitConfigVisualStudio.Tests.ps1`, `GitConfigure.Tests.ps1` —
+  `GitConfigVisualStudio.Tests.ps1` —
   multi-assertion `git config` checks; the VSCode file also carries
   `Light/Unit` coverage for `Resolve-VSCodeCommand` / `Invoke-GitDiffCode`.
 
