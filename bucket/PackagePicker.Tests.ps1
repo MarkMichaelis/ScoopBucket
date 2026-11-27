@@ -14,7 +14,8 @@
 #              RootA.json depends on Dep
 #   RootB.ps1  b1 (DependsOn b2), b2 (optional), shared twin, shared lower
 #              (the same Id in other casing);  RootB.json depends on Tool
-#   RootA also links to RootB, which is top-level itself and so is not nested.
+#   (A top-level bundle installed by another one is covered in
+#   PackagePickerSubItems.Tests.ps1, #559.)
 #   cat1/Child.ps1  c1, c2    cat1/Dep.ps1  d1        cat1/Tool.json (used by a3)
 #   rootb/Loner.ps1 l1 (unused; its folder matches Root B)
 #   misc/Tweak.json (unused; its folder matches no top-level bundle)
@@ -63,7 +64,6 @@ Invoke-PackageInstall -Packages `$Packages -Bundle '$Bundle'
     [Package]@{ Name = 'a3';           Installer = 'scoop';  Id = 'MarkMichaelis/Tool' }
     [Package]@{ Name = 'shared';       Installer = 'winget'; Id = 'Test.Shared' }
     [Package]@{ Name = 'a4';           Installer = 'winget'; Id = 'Test.A4'; Default = $false; DependsOn = @('Child bundle') }
-    [Package]@{ Name = 'Root B bundle'; Installer = 'scoop'; Id = 'MarkMichaelis/RootB' }
 '@
         New-FixtureBundle -Dir $root -Bundle 'RootB' -Depends 'Tool' -PackagesText @'
     [Package]@{ Name = 'b1';           Installer = 'winget'; Id = 'Test.B1'; DependsOn = @('b2') }
@@ -113,12 +113,6 @@ AfterAll {
 Describe 'The picker''s tree is built from the bucket (#543)' -Tag 'Light', 'Module' {
     It 'puts the bundles at the bucket root on top, then folders no bundle matches' {
         $script:catalog.Roots.Name | Should -Be @('Root A', 'Root B', 'Misc')
-    }
-
-    It 'never nests a top-level bundle under another one' {
-        $rootA = $script:catalog.Roots | Where-Object Name -eq 'Root A'
-        $rootA.Children.Name | Should -Not -Contain 'Root B'
-        Find-Node -Nodes $rootA.Children -Name 'b1' | Should -BeNullOrEmpty
     }
 
     It 'nests a bundle that another bundle links to' {
