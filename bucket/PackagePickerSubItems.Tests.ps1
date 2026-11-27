@@ -81,6 +81,14 @@ Invoke-PackageInstall -Packages `$Packages -Bundle '$Bundle'
     New-FixtureBundle -Dir $script:bucket -Bundle 'Inner' -PackagesText "    [Package]@{ Name = 'i1'; Installer = 'winget'; Id = 'Test.I1' }`n    [Package]@{ Name = 'i2'; Installer = 'winget'; Id = 'Test.I2' }"
     New-FixtureBundle -Dir $script:bucket -Bundle 'Ping' -PackagesText "    [Package]@{ Name = 'p1'; Installer = 'winget'; Id = 'Test.P1' }`n    [Package]@{ Name = 'Pong bundle'; Installer = 'scoop'; Id = 'MarkMichaelis/Pong' }"
     New-FixtureBundle -Dir $script:bucket -Bundle 'Pong' -PackagesText "    [Package]@{ Name = 'q1'; Installer = 'winget'; Id = 'Test.Q1' }`n    [Package]@{ Name = 'Ping bundle'; Installer = 'scoop'; Id = 'MarkMichaelis/Ping' }"
+    # A chain: Chain1 installs Chain2, which installs Chain3. And Shared is
+    # installed by both Left and Right.
+    New-FixtureBundle -Dir $script:bucket -Bundle 'Chain1' -PackagesText "    [Package]@{ Name = 'x1'; Installer = 'winget'; Id = 'Test.X1' }`n    [Package]@{ Name = 'Chain2 bundle'; Installer = 'scoop'; Id = 'MarkMichaelis/Chain2' }"
+    New-FixtureBundle -Dir $script:bucket -Bundle 'Chain2' -PackagesText "    [Package]@{ Name = 'x2'; Installer = 'winget'; Id = 'Test.X2' }`n    [Package]@{ Name = 'Chain3 bundle'; Installer = 'scoop'; Id = 'MarkMichaelis/Chain3' }"
+    New-FixtureBundle -Dir $script:bucket -Bundle 'Chain3' -PackagesText "    [Package]@{ Name = 'x3'; Installer = 'winget'; Id = 'Test.X3' }`n    [Package]@{ Name = 'x4'; Installer = 'winget'; Id = 'Test.X4' }"
+    New-FixtureBundle -Dir $script:bucket -Bundle 'Left' -PackagesText "    [Package]@{ Name = 'left1'; Installer = 'winget'; Id = 'Test.Left1' }`n    [Package]@{ Name = 'Shared bundle'; Installer = 'scoop'; Id = 'MarkMichaelis/Shared' }"
+    New-FixtureBundle -Dir $script:bucket -Bundle 'Right' -PackagesText "    [Package]@{ Name = 'right1'; Installer = 'winget'; Id = 'Test.Right1' }`n    [Package]@{ Name = 'Shared bundle'; Installer = 'scoop'; Id = 'MarkMichaelis/Shared' }"
+    New-FixtureBundle -Dir $script:bucket -Bundle 'Shared' -PackagesText "    [Package]@{ Name = 's1'; Installer = 'winget'; Id = 'Test.S1' }`n    [Package]@{ Name = 's2'; Installer = 'winget'; Id = 'Test.S2' }"
     $dev = Join-Path $script:bucket 'dev'
     New-Item -ItemType Directory -Path $dev | Out-Null
     New-FixtureManifest -Dir $dev -Name 'Chocolatey' -Script "Write-Host 'choco'"
@@ -105,6 +113,25 @@ Describe 'A top-level bundle another one installs (#559)' -Tag 'Light', 'Module'
         $inner = ($script:catalog.Roots | Where-Object Name -eq 'Outer').Children | Where-Object Name -eq 'Inner'
         $inner.Kind | Should -Be 'Group'
         $inner.Children.Name | Should -Be @('i1', 'i2')
+    }
+
+    It 'nests a whole chain: each bundle inside the one that installs it' {
+        # Display names split a trailing digit: Chain2 shows as 'Chain 2'.
+        $script:catalog.Roots.Name | Should -Contain 'Chain 1'
+        $script:catalog.Roots.Name | Should -Not -Contain 'Chain 2'
+        $script:catalog.Roots.Name | Should -Not -Contain 'Chain 3'
+        $chain2 = ($script:catalog.Roots | Where-Object Name -eq 'Chain 1').Children | Where-Object Name -eq 'Chain 2'
+        $chain3 = $chain2.Children | Where-Object Name -eq 'Chain 3'
+        $chain3.Children.Name | Should -Be @('x3', 'x4')
+    }
+
+    It 'shows a bundle installed by two bundles inside both, as one set of checkboxes' {
+        $script:catalog.Roots.Name | Should -Not -Contain 'Shared'
+        foreach ($parent in 'Left', 'Right') {
+            (($script:catalog.Roots | Where-Object Name -eq $parent).Children | Where-Object Name -eq 'Shared').Children.Name | Should -Be @('s1', 's2')
+        }
+        $state = & $script:M { param($c) New-PickerState -Catalog $c -Installed @{} } $script:catalog
+        @($state.TopGroups['winget|Test.S1']) | Should -Be @('Left', 'Right')
     }
 
     It 'stays on top when two bundles install each other, so neither disappears' {
