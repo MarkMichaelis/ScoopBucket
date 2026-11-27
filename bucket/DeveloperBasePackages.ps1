@@ -333,9 +333,146 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
         # No CliCommands: the commands, and their completion, belong to AIAgents' entry.
         Completion  = 'none'
         Notes       = 'Same package as AIAgents'' Node.js; completion is registered by that entry only (#222, #559).'
-    }    # Adds this repository as a second scoop bucket named LocalRepo; off by
+    }
+    # Adds this repository as a second scoop bucket named LocalRepo; off by
     # default (#559, owner's N9).
     [Package]@{ Name = 'AddLocalRepoBucket'; Installer = 'scoop'; Id = 'MarkMichaelis/AddLocalRepoBucket'; Default = $false }
+    [Package]@{
+        Name        = 'GoDaddy CLI'
+        Installer   = 'custom'
+        Scope       = 'user'
+        # Owner's call (#527): opt-in. Only machines that manage GoDaddy DNS
+        # need it, it needs a GoDaddy sign-in, and installing it also registers
+        # the GoDaddy MCP server with that machine's agents.
+        Default     = $false
+        CliCommands = @('gddy')
+        Completion  = 'native'
+        NativeCompletionKind = 'native'
+        NativeCommandScript = { gddy completion powershell }
+        ExpectedCompletions = @{ gddy = @('auth','dns','domain','update') }
+        Notes       = 'GoDaddy''s official, agent-first CLI (github.com/godaddy/cli): domains, DNS records (dns list/add/set/delete), hosting, and raw API calls. Neither winget nor scoop carries it, so this runs GoDaddy''s documented Windows installer (releases/latest/download/install.ps1), which downloads the release zip, verifies its SHA-256 against the release checksums file, and copies gddy.exe to %LOCALAPPDATA%\Programs\gddy. -SkipPathUpdate stops that installer from appending its folder to the user PATH; a scoop shim exposes gddy instead (README: shim over PATH). Updates: gddy update apply (same checksum-verified download, replaces the binary in place). Completion is the binary''s own clap completer (gddy completion powershell). Sign-in is separate and interactive: gddy auth login (browser OAuth; the token is stored in Windows Credential Manager) or a PAT via gddy pat add / GDDY_PAT. Uninstall leaves those credentials in place; run gddy auth logout first to clear them. The AIAgents bundle wires the GoDaddy DNS MCP server (bucket/ai/GoDaddyDnsMcp.ps1) once gddy is present (#527).'
+        CustomInstallScript = {
+            $installDir = Join-Path $env:LOCALAPPDATA 'Programs\gddy'
+            $exe = Join-Path $installDir 'gddy.exe'
+            if (-not (Test-Path -LiteralPath $exe)) {
+                # GoDaddy's documented install is `irm .../install.ps1 | iex`.
+                # Running the same script as a scriptblock lets it take
+                # parameters and needs no temp file for the execution policy
+                # to block.
+                $installer = Invoke-RestMethod -Uri 'https://github.com/godaddy/cli/releases/latest/download/install.ps1' -ErrorAction Stop
+                if ($installer -is [byte[]]) { $installer = [System.Text.Encoding]::UTF8.GetString($installer) }
+                & ([scriptblock]::Create([string]$installer)) -Prefix $installDir -SkipPathUpdate
+                if (-not (Test-Path -LiteralPath $exe)) { throw "GoDaddy CLI installer did not create $exe" }
+            }
+            # Touch the shim only when it is missing or points elsewhere, so a
+            # re-run changes nothing. *>&1 also swallows scoop's Write-Host
+            # chatter ("ERROR Local shim not found"), which reads as a failure.
+            $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $HOME 'scoop' }
+            $shimFile = Join-Path $scoopRoot 'shims\gddy.shim'
+            $shimTarget = if (Test-Path -LiteralPath $shimFile) { Get-Content -LiteralPath $shimFile -Raw } else { '' }
+            if ($shimTarget -notmatch [regex]::Escape($exe)) {
+                if (Test-Path -LiteralPath $shimFile) { & scoop shim rm gddy *>&1 | Out-Null }
+                & scoop shim add gddy $exe *>&1 | Out-Null
+            }
+            if (-not (Get-Command gddy -CommandType Application -ErrorAction SilentlyContinue)) {
+                throw 'gddy is installed but not on PATH: scoop shim add gddy failed.'
+            }
+        }
+        VerifyScript = {
+            $exe = Join-Path $env:LOCALAPPDATA 'Programs\gddy\gddy.exe'
+            (Test-Path -LiteralPath $exe) -and ("$(& $exe --version 2>$null)" -match '^gddy version \d')
+        }
+        PostUpdateScript = {
+            $exe = Join-Path $env:LOCALAPPDATA 'Programs\gddy\gddy.exe'
+            if (-not (Test-Path -LiteralPath $exe)) { throw "GoDaddy CLI is missing: $exe" }
+            $result = & $exe update apply --output json 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "gddy update apply failed (exit $LASTEXITCODE): $result" }
+            $data = ($result | Out-String | ConvertFrom-Json -ErrorAction SilentlyContinue).data
+            if ($data) { Write-Host "  gddy $($data.previousVersion) -> $($data.newVersion) ($($data.status))" }
+        }
+        # gddy's OAuth token (~3.5 KB) is larger than Windows Credential
+        # Manager's 2560-byte per-entry limit, so `gddy auth login` saves it
+        # to gddy's file store (%APPDATA%\gddy\credentials) -- but the default
+        # 'auto' store reads only Credential Manager, so every later command
+        # acts signed out and opens a browser. Point gddy at the file store,
+        # unless the user already chose a store deliberately (#527).
+        ConfigScript = {
+            if (-not (Get-Command gddy -CommandType Application -ErrorAction SilentlyContinue)) { return }
+            # The token folder otherwise inherits %APPDATA%'s ACL, which can
+            # grant read to other principals (e.g. CodexSandboxUsers, so a
+            # sandboxed shell could read the GoDaddy token). Restrict the
+            # FOLDER to the user and SYSTEM, inheritable, so every token file
+            # gddy writes there -- now or after a refresh -- is private too.
+            # Best-effort hardening: a failure here (redirected AppData, a share
+            # that refuses ACL edits) warns instead of failing the install.
+            try {
+                $credDir = Join-Path $env:APPDATA 'gddy\credentials'
+                if (-not (Test-Path -LiteralPath $credDir)) { New-Item -ItemType Directory -Path $credDir -Force | Out-Null }
+                $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+                $system = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+                $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+                $acl = Get-Acl -LiteralPath $credDir
+                $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+                # Private = protected, and exactly one FullControl/inheritable/no-propagation allow rule for each of the two SIDs.
+                $actual = @($rules | ForEach-Object { '{0}|{1}|{2}|{3}|{4}' -f $_.IdentityReference.Value, $_.AccessControlType, $_.FileSystemRights, $_.InheritanceFlags, $_.PropagationFlags } | Sort-Object)
+                $expected = @(@($me.Value, $system.Value) | ForEach-Object { '{0}|Allow|FullControl|{1}|None' -f $_, $inherit } | Sort-Object)
+                # Files already inside keep any EXPLICIT entries they were created
+                # with (e.g. BUILTIN\Administrators on a token written from an
+                # elevated `gddy auth login`); those must go too.
+                $children = @(Get-ChildItem -LiteralPath $credDir -Force -Recurse -ErrorAction SilentlyContinue)
+                $loose = @($children | Where-Object {
+                    $c = Get-Acl -LiteralPath $_.FullName
+                    $c.AreAccessRulesProtected -or @($c.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])).Count })
+                $private = $acl.AreAccessRulesProtected -and (($actual -join ';') -eq ($expected -join ';')) -and -not $loose.Count
+                if (-not $private) {
+                    $new = [System.Security.AccessControl.DirectorySecurity]::new()
+                    $new.SetAccessRuleProtection($true, $false)
+                    foreach ($sid in $me, $system) {
+                        $new.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', $inherit, 'None', 'Allow'))
+                    }
+                    Set-Acl -LiteralPath $credDir -AclObject $new
+                    foreach ($child in $children) {
+                        $c = Get-Acl -LiteralPath $child.FullName
+                        foreach ($rule in @($c.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) { [void]$c.RemoveAccessRuleSpecific($rule) }
+                        $c.SetAccessRuleProtection($false, $false)
+                        Set-Acl -LiteralPath $child.FullName -AclObject $c
+                    }
+                    Write-Host "  gddy: token folder $credDir restricted to the current user ($($me.Value)) and SYSTEM"
+                }
+            }
+            catch { Write-Warning "gddy: could not restrict the token folder's permissions: $($_.Exception.Message)" }
+            $current =(gddy config get credentials.store --output json 2>$null | Out-String | ConvertFrom-Json -ErrorAction SilentlyContinue).data
+            if (-not $current -or $current.source -ne 'default') { return }
+            # Never strand a sign-in the default store already holds (e.g. a
+            # Credential Manager login from a gddy build that fits there).
+            $status = @((gddy auth status --output json 2>$null | Out-String | ConvertFrom-Json -ErrorAction SilentlyContinue).data)
+            if ($status | Where-Object { $_ -and ((-not $_.expired) -or $_.refreshable) }) { return }
+            gddy config set credentials.store file --output json *>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "gddy config set credentials.store file failed (exit $LASTEXITCODE)" }
+            Write-Host '  gddy: credentials.store = file (Windows Credential Manager cannot hold its OAuth token)'
+        }
+        CustomUninstallScript = {
+            $installDir = Join-Path $env:LOCALAPPDATA 'Programs\gddy'
+            $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $HOME 'scoop' }
+            if (Test-Path -LiteralPath (Join-Path $scoopRoot 'shims\gddy.shim')) { & scoop shim rm gddy *>&1 | Out-Null }
+            if (Test-Path -LiteralPath $installDir) { Remove-Item -LiteralPath $installDir -Recurse -Force }
+            # Undo the PATH entry GoDaddy's one-liner adds when it was used
+            # directly (this package never adds one). Only the exact folder.
+            # Edited raw in the registry so other entries keep their %VARS%
+            # and the value stays REG_EXPAND_SZ.
+            $envKey = Get-Item -LiteralPath 'HKCU:\Environment'
+            $userPath = $envKey.GetValue('Path', $null, 'DoNotExpandEnvironmentNames')
+            if ($userPath) {
+                $entries = @($userPath -split ';' | Where-Object { $_ })
+                $kept = @($entries | Where-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ine $installDir.TrimEnd('\') })
+                if ($kept.Count -ne $entries.Count) {
+                    $kind = $envKey.GetValueKind('Path')
+                    if ($kind -ne [Microsoft.Win32.RegistryValueKind]::String) { $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString }
+                    Set-ItemProperty -LiteralPath 'HKCU:\Environment' -Name 'Path' -Value ($kept -join ';') -Type $kind
+                }
+            }
+        }
+    }
 )
 
 Invoke-PackageInstall -Packages $Packages -Bundle 'DeveloperBasePackages'
