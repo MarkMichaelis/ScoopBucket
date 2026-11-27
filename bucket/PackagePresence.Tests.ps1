@@ -17,7 +17,8 @@ Describe 'Get-PackagePresence (#454)' -Tag 'Light', 'Module' {
     Context 'winget' {
         It 'reports installed when the winget probe finds the package' {
             Mock -ModuleName MarkMichaelis.ScoopBucket Test-WingetPackageInstalled {
-                @{ Installed = $true; ExitCode = 0; Command = 'winget list --id Test.App --exact' }
+                @{ Installed = $true; Id = 'Test.App'; ExitCode = 0; Command = 'winget list --id Test.App --exact'
+                   Reason = 'winget list --id Test.App --exact returned 0.' }
             }
             $r = & $script:Probe -Package ([Package]@{ Name = 'app'; Installer = 'winget'; Id = 'Test.App' })
             $r.Present | Should -BeTrue
@@ -26,7 +27,8 @@ Describe 'Get-PackagePresence (#454)' -Tag 'Light', 'Module' {
 
         It 'reports not installed when the winget probe does not' {
             Mock -ModuleName MarkMichaelis.ScoopBucket Test-WingetPackageInstalled {
-                @{ Installed = $false; ExitCode = -1978335212; Command = 'winget list --id Test.App --exact' }
+                @{ Installed = $false; Id = ''; ExitCode = -1978335212; Command = 'winget list --id Test.App'
+                   Reason = 'winget list --id Test.App returned -1978335212.' }
             }
             $r = & $script:Probe -Package ([Package]@{ Name = 'app'; Installer = 'winget'; Id = 'Test.App' })
             $r.Present | Should -BeFalse

@@ -25,18 +25,26 @@ because Microsoft Defender blocks an elevated command that downloads and runs a
 script.
 
 It installs Chocolatey, installs Scoop, registers this bucket
-plus `extras`, installs PowerShell 7 if it is missing, then installs
-`OSBasePackages` under PowerShell 7, whichever shell you started from. Re-running
-it re-applies the bundle. If the machine has no git, it
-first installs a temporary one from Scoop, because adding a bucket needs git.
-`OSBasePackages` replaces that copy with the `Git` package, which `Update-Package`
-keeps current like any other package. Other bundles
-(`DeveloperBasePackages`, `ClientBasePackages`, `AIAgents`) are opt-in:
+plus `extras`, and installs PowerShell 7 if it is missing. Then, under
+PowerShell 7 whichever shell you started from, it opens the **package list**:
+every installable item in the bucket as a tree, with the default set and
+anything already installed pre-checked. Check what this machine should have,
+press Enter to review, and `y` to install (see
+[Choosing what to install](#choosing-what-to-install-install-package-with-no-arguments)).
+Nothing beyond the engines is installed without your say-so, and re-running the
+bootstrap opens the list again with what is installed already checked.
+
+If the machine has no git, the bootstrap first installs a temporary one from
+Scoop, because adding a bucket needs git. The `Git` package in OS Base Packages
+replaces that copy and `Update-Package` keeps it current like any other package.
+
+Without an interactive console the bootstrap stops after the engines and names
+the commands instead. From PowerShell 7 you can install the default set, or
+open the list again, at any time:
 
 ```powershell
-scoop install MarkMichaelis/DeveloperBasePackages
-scoop install MarkMichaelis/ClientBasePackages
-scoop install MarkMichaelis/AIAgents
+Install-Package -Name '*'   # the default set, no questions
+Install-Package             # choose from the list
 ```
 
 ## Idempotency contract
