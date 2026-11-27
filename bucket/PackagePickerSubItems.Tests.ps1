@@ -17,7 +17,11 @@
 #              (optional), agent (DependsOn runtime), runtime (choco),
 #              core (Required)
 #   RootD.ps1  runtime (the same package, a top-level item here)
+#              svc (Companions 'svc cfg', installed by this bucket's own
+#              manifest SvcCfg), kit user (DependsOn 'Kit bundle', a link)
+#   RootD.ps1  also links 'Kit bundle'
 #   dev/Chocolatey.json  the bare manifest that installs choco
+#   dev/SvcCfg.json, dev/Kit.ps1 (k1)
 
 BeforeAll {
     $script:repoRoot = Split-Path -Parent $PSScriptRoot
@@ -61,13 +65,20 @@ Invoke-PackageInstall -Packages `$Packages -Bundle '$Bundle'
     [Package]@{ Name = 'agent';   Installer = 'winget'; Id = 'Test.Agent'; DependsOn = @('runtime') }
     [Package]@{ Name = 'runtime'; Installer = 'choco';  Id = 'test-runtime' }
     [Package]@{ Name = 'core';    Installer = 'winget'; Id = 'Test.Core'; Required = $true }
+    [Package]@{ Name = 'svc';     Installer = 'winget'; Id = 'Test.Svc'; Companions = @('svc cfg') }
+    [Package]@{ Name = 'svc cfg'; Installer = 'scoop';  Id = 'MarkMichaelis/SvcCfg' }
+    [Package]@{ Name = 'kit user';    Installer = 'winget'; Id = 'Test.KitUser'; DependsOn = @('Kit bundle') }
+    [Package]@{ Name = 'Kit bundle';  Installer = 'scoop';  Id = 'MarkMichaelis/Kit' }
 '@
     New-FixtureBundle -Dir $script:bucket -Bundle 'RootD' -PackagesText @'
     [Package]@{ Name = 'runtime'; Installer = 'choco';  Id = 'test-runtime' }
+    [Package]@{ Name = 'Kit bundle';  Installer = 'scoop';  Id = 'MarkMichaelis/Kit' }
 '@
     $dev = Join-Path $script:bucket 'dev'
     New-Item -ItemType Directory -Path $dev | Out-Null
     New-FixtureManifest -Dir $dev -Name 'Chocolatey' -Script "Write-Host 'choco'"
+    New-FixtureManifest -Dir $dev -Name 'SvcCfg' -Script "Write-Host 'svc cfg'"
+    New-FixtureBundle -Dir $dev -Bundle 'Kit' -PackagesText "    [Package]@{ Name = 'k1'; Installer = 'winget'; Id = 'Test.K1' }"
 
     $script:catalog = & $script:M { param($b) Get-PackageCatalog -BucketPath $b } $script:bucket
     $script:rootC = $script:catalog.Roots | Where-Object Name -eq 'Root C'
@@ -86,6 +97,20 @@ Describe 'Picker sub-items in the tree (#559)' -Tag 'Light', 'Module' {
         $app.Children | ForEach-Object { $_.Role | Should -Be 'Companion' }
         $script:rootC.Children.Name | Should -Not -Contain 'app cfg'
         $script:rootC.Children.Name | Should -Not -Contain 'app cli'
+    }
+
+    It 'lists a companion installed by one of this bucket''s manifests' {
+        $svc = & $script:child $script:rootC 'svc'
+        (& $script:child $svc 'svc cfg').Role | Should -Be 'Companion'
+        $script:rootC.Children.Name | Should -Not -Contain 'svc cfg'
+    }
+
+    It 'lists a dependency that is another bundle under the package that needs it' {
+        $kitUser = & $script:child $script:rootC 'kit user'
+        (& $script:child $kitUser 'k1').Role | Should -Be 'Dependency'
+        $script:rootC.Children.Name | Should -Not -Contain 'k1'
+        $script:rootD.Children.Name | Should -Contain 'k1'
+        (& $script:child $script:rootD 'k1').Role | Should -BeNullOrEmpty -Because 'the copy under kit user carries the role, not the shared node'
     }
 
     It 'lists a dependency under the package that needs it' {
@@ -229,5 +254,13 @@ Describe 'Picker sub-item behaviour (#559)' -Tag 'Light', 'Module' {
         $lines = (& $script:M { param($s) Format-PickerScreen -State $s -Width 100 -Height 30 } $script:state).Text
         ($lines | Where-Object { $_ -match '\] app\b' }) | Should -Match '\] app\s+\+'
         ($lines | Where-Object { $_ -match '\] core\b' }) | Should -Not -Match '\+'
+    }
+
+    It 'says a Required package is required' {
+        $rows = & $script:M { param($s) Get-PickerRows -State $s } $script:state
+        [void]$script:state.Expanded.Add(($rows | Where-Object { $_.Node.Name -eq 'Root C' }).Path)
+        $lines = (& $script:M { param($s) Format-PickerScreen -State $s -Width 100 -Height 30 } $script:state).Text
+        ($lines | Where-Object { $_ -match '\] core\b' }) | Should -Match 'required'
+        ($lines | Where-Object { $_ -match '\] agent\b' }) | Should -Not -Match 'required'
     }
 }

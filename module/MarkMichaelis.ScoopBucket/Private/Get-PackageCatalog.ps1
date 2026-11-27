@@ -136,6 +136,12 @@ function Get-PackageCatalog {
     # its group too, unless another bundle lists the same package as an item
     # of its own -- Node.js is AIAgents' dependency but DeveloperBasePackages'
     # item. Every choco package needs Chocolatey, shown as its dependency.
+    # One key per thing a package installs: a link to another bundle is keyed
+    # by that bundle (two bundles linking it list the same thing).
+    function Get-SubItemKey([object]$Package, [string]$Bundle) {
+        $target = Get-PickerLinkTarget -Package $Package
+        if ($target -and $bundles.ContainsKey($target)) { "bundle|$target" } else { Get-PickerIdentity -Package $Package -Bundle $Bundle }
+    }
     $subNames = @{}      # bundle -> names shown only as sub-items
     $ownedBy = @{}       # identity -> bundles that list it as an item of their own
     foreach ($b in $bundles.Values) {
@@ -147,9 +153,8 @@ function Get-PackageCatalog {
         }
         $subNames[$b.Bundle] = [pscustomobject]@{ Companions = $companions; Dependencies = $dependencies }
         foreach ($p in $b.Packages) {
-            if (Get-PickerLinkTarget -Package $p) { continue }
             if ($companions.Contains($p.Name) -or $dependencies.Contains($p.Name)) { continue }
-            $id = Get-PickerIdentity -Package $p -Bundle $b.Bundle
+            $id = Get-SubItemKey $p $b.Bundle
             if (-not $ownedBy.ContainsKey($id)) { $ownedBy[$id] = [System.Collections.Generic.List[string]]::new() }
             $ownedBy[$id].Add($b.Bundle)
         }
@@ -171,11 +176,21 @@ function Get-PackageCatalog {
             Children = [System.Collections.Generic.List[object]]::new()
         }
         $here = @($Path) + $Package.Name
-        $byName = { param($n) $info.Packages | Where-Object { $_.Name -eq $n -and -not (Get-PickerLinkTarget -Package $_) } | Select-Object -First 1 }
+        $byName = { param($n) $info.Packages | Where-Object { $_.Name -eq $n } | Select-Object -First 1 }
         foreach ($pair in @(@(@($Package.Companions), 'Companion'), @(@($Package.DependsOn), 'Dependency'))) {
             foreach ($n in $pair[0]) {
                 $sub = if ($n -and $here -notcontains $n) { & $byName $n }
-                if ($sub) { $node.Children.Add((New-PackageNode $sub $Bundle $pair[1] $here)) }
+                if (-not $sub) { continue }
+                $target = Get-PickerLinkTarget -Package $sub
+                if ($target -and $bundles.ContainsKey($target)) {
+                    # A sub-item that is another bundle: shown as that bundle
+                    # (a copy, so the role is not written onto the shared node).
+                    $linked = (Get-NestedNode $target).PSObject.Copy()
+                    $linked | Add-Member -NotePropertyName Role -NotePropertyValue $pair[1] -Force
+                    $node.Children.Add($linked)
+                } else {
+                    $node.Children.Add((New-PackageNode $sub $Bundle $pair[1] $here))
+                }
             }
         }
         if ($Package.Installer -eq 'choco' -and $chocoManifest) {
@@ -204,6 +219,9 @@ function Get-PackageCatalog {
         foreach ($p in $info.Packages) {
             $target = Get-PickerLinkTarget -Package $p
             if ($target -and $bundles.ContainsKey($target)) {
+                $sub = $subNames[$Name]
+                if ($sub.Companions.Contains($p.Name)) { continue }
+                if ($sub.Dependencies.Contains($p.Name) -and $ownedBy.ContainsKey("bundle|$target") -and @($ownedBy["bundle|$target"] | Where-Object { $_ -ne $Name }).Count -gt 0) { continue }
                 # A top-level bundle is shown once, at the top.
                 if (-not $bundles[$target].IsRoot) { $node.Children.Add((Get-NestedNode $target)) }
                 continue
@@ -213,7 +231,7 @@ function Get-PackageCatalog {
             $sub = $subNames[$Name]
             if ($sub.Companions.Contains($p.Name)) { continue }
             if ($sub.Dependencies.Contains($p.Name)) {
-                $id = Get-PickerIdentity -Package $p -Bundle $Name
+                $id = Get-SubItemKey $p $Name
                 if ($ownedBy.ContainsKey($id) -and @($ownedBy[$id] | Where-Object { $_ -ne $Name }).Count -gt 0) { continue }
             }
             $node.Children.Add((New-PackageNode $p $Name $null @()))

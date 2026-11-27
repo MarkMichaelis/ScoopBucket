@@ -99,11 +99,19 @@ Describe 'Engine ruling: Notion moves to winget' -Tag 'Light','Bundle' {
 
 Describe 'Engine ruling: Node.js deliberately stays on choco' -Tag 'Light','Bundle' {
 
-    It 'declares exactly one Node.js entry, in AIAgents' {
+    It 'declares Node.js in AIAgents, plus at most a completion-less copy in DeveloperBasePackages' {
         # AIAgents is the authoritative node/npm/npx completion source (#222);
-        # a duplicate in another bundle would make registration order-dependent.
-        $script:node.Count     | Should -Be 1
-        $script:node[0].Bundle | Should -Be 'AIAgents'
+        # a second entry that also registered completion would make
+        # registration order-dependent. DeveloperBasePackages lists Node.js as
+        # an item of its own (#559) but registers no completion.
+        @($script:node | Where-Object Bundle -eq 'AIAgents').Count | Should -Be 1
+        @($script:node | Where-Object { $_.Bundle -notin 'AIAgents', 'DeveloperBasePackages' }).Count | Should -Be 0
+        foreach ($copy in @($script:node | Where-Object Bundle -eq 'DeveloperBasePackages')) {
+            $copy.Completion | Should -Be 'none'
+            $copy.Installer  | Should -Be 'choco'
+            $copy.Id         | Should -Be 'nodejs'
+        }
+        $script:node = @($script:node | Where-Object Bundle -eq 'AIAgents')
     }
 
     It 'installs from choco as nodejs -- NOT winget' {
