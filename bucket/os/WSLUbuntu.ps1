@@ -20,3 +20,4 @@ if ($installed -match "(?m)^\s*$([regex]::Escape($distro))\s*$") {
 }
 & wsl.exe --install --distribution $distro --no-launch
 if ($LASTEXITCODE -ne 0) { throw "WSL Ubuntu: wsl --install --distribution $distro failed (exit $LASTEXITCODE)." }
+Write-Host "  WSL Ubuntu: $distro is installed. If WSL itself was just enabled, restart Windows before running `wsl -d $distro`; the first run asks for a Linux user name."

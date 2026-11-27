@@ -74,6 +74,11 @@ Describe "Install-Package -Name '*' and companions (#563)" -Tag 'Light', 'Module
         @($plan.Skip[$script:bundle.BundlePath]) | Should -Not -Contain 'app opt'
     }
 
+    It 'installs the default companion of an optional package that is named' {
+        $plan = & $script:resolve -Requested @{ $script:bundle.BundlePath = @('ide') }
+        @($plan.Skip[$script:bundle.BundlePath]) | Should -Not -Contain 'ide cfg'
+    }
+
     It 'installs an optional companion that is named' {
         $plan = & $script:resolve -Requested @{ $script:bundle.BundlePath = @('app opt') }
         @($plan.Skip[$script:bundle.BundlePath]) | Should -Not -Contain 'app opt'
@@ -87,5 +92,23 @@ Describe "Install-Package -Name '*' hands the skip list to the installer (#563)"
         @($rows | Where-Object Name -eq 'app').Status | Should -Not -Contain 'Skipped'
         @($rows | Where-Object Name -eq 'app opt').Status | Should -Be @('Skipped')
         @($rows | Where-Object Name -eq 'ide cfg').Status | Should -Be @('Skipped')
+    }
+}
+
+Describe 'Install-Package -Name <package> and its optional companions (#563)' -Tag 'Light', 'Module' {
+    It 'leaves out an optional companion of a package named on its own' {
+        $rows = @(Install-Package -Name 'app' -DryRun -SkipCompletion -IncludeUnchanged -BucketPath $script:bucket 3>$null 6>$null)
+        $rows.Name | Should -Contain 'app cfg'
+        $rows.Name | Should -Not -Contain 'app opt'
+    }
+
+    It 'installs the default companion of an optional package named on its own' {
+        $rows = @(Install-Package -Name 'ide' -DryRun -SkipCompletion -IncludeUnchanged -BucketPath $script:bucket 3>$null 6>$null)
+        $rows.Name | Should -Contain 'ide cfg'
+    }
+
+    It 'installs an optional companion named alongside its package' {
+        $rows = @(Install-Package -Name 'app', 'app opt' -DryRun -SkipCompletion -IncludeUnchanged -BucketPath $script:bucket 3>$null 6>$null)
+        $rows.Name | Should -Contain 'app opt'
     }
 }

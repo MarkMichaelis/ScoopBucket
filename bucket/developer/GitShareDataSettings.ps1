@@ -32,7 +32,9 @@ if ($sharedItem -and $sharedItem.LinkType -eq 'HardLink') {
 }
 
 $included = @(git config --global --get-all include.path 2>$null)
-if ($included | Where-Object { $_ -and [IO.Path]::GetFullPath($_) -ieq [IO.Path]::GetFullPath($shared) }) {
+# Compare full paths; a value that is not a path at all cannot be this one.
+$sameAs = { param($path) try { [IO.Path]::GetFullPath($path) -ieq [IO.Path]::GetFullPath($shared) } catch { $false } }
+if ($included | Where-Object { $_ -and (& $sameAs $_) }) {
     return
 }
 git config --global --add include.path $shared

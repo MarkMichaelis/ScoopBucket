@@ -8,4 +8,4 @@
 
 Install-Module posh-git -Scope AllUsers -Force -AllowClobber -ErrorAction Stop
 Import-Module posh-git -ErrorAction Stop
-Add-PoshGitToProfile -AllHosts -AllUsers -StartSshAgent
+Add-PoshGitToProfile -AllHosts -AllUsers -StartSshAgent -ErrorAction Stop

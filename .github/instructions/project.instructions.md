@@ -144,7 +144,7 @@ enforces this and CI fails without it. Versions are `M.NN.000`.
 
 There is no single template. Three shapes recur, and about a third of the
 scripts under `bucket/*/` are one-offs matching none of them cleanly
-(`GitConfigure.ps1`, `Invoke-GitDiffCode.ps1`, `PowerShell.ps1`,
+(`Invoke-GitDiffCode.ps1`, `PowerShellSetup.ps1`,
 `PowerToysSettingsBackup.ps1`, `SetPowerConfiguration.ps1`). **Copy the nearest
 sibling in the category you are adding to** rather than applying a shape from
 elsewhere.
@@ -188,7 +188,7 @@ All three shapes share:
 - **Configurator** -- a single-purpose script that configures an already-installed
   tool rather than installing it (e.g. `GitConfigVSCode`, `GitConfigVisualStudio`).
 - **Companion** -- a configurator dot-sourced by a parent script, following the
-  parent's naming prefix (`GitConfigure` -> `GitConfig*`).
+  parent's naming prefix (`GitConfigVSCode` beside `Invoke-GitDiffCode`).
 - **Sidecar** -- a generated completion script written alongside a registered CLI
   completion.
 - **Light / Heavy / Install** -- Pester tags. `Light` is side-effect-free and is

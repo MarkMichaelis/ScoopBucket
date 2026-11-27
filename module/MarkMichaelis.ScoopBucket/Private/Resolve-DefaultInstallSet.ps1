@@ -24,6 +24,51 @@
 # Config-only bare manifests are never part of the set: only declarative
 # bundles are walked.
 
+function Get-OptionalCompanionSkip {
+    <#
+    .SYNOPSIS
+        The companions to leave out when a bundle installs -Name (#563): an
+        optional companion (Default = $false), and the companion of an
+        optional package that is not being installed. Never one that is
+        named, or that a named package needs through DependsOn.
+    #>
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Packages,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Name
+    )
+    $ignoreCase = [System.StringComparer]::OrdinalIgnoreCase
+    $byName = @{}
+    foreach ($p in $Packages) { if (-not $byName.ContainsKey($p.Name)) { $byName[$p.Name] = $p } }
+    $companionOf = @{}
+    foreach ($p in $Packages) {
+        foreach ($c in @($p.Companions | Where-Object { $_ })) {
+            if (-not $companionOf.ContainsKey($c)) { $companionOf[$c] = [System.Collections.Generic.List[object]]::new() }
+            $companionOf[$c].Add($p)
+        }
+    }
+    # What the named packages need through DependsOn.
+    $named = [System.Collections.Generic.HashSet[string]]::new([string[]]@($Name | Where-Object { $_ }), $ignoreCase)
+    $needed = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
+    $queue = [System.Collections.Generic.Queue[string]]::new()
+    foreach ($n in $named) { $queue.Enqueue($n) }
+    while ($queue.Count -gt 0) {
+        $n = $queue.Dequeue()
+        if (-not $byName.ContainsKey($n)) { continue }
+        foreach ($d in @($byName[$n].DependsOn | Where-Object { $_ })) { if ($needed.Add($d)) { $queue.Enqueue($d) } }
+    }
+    $installing = { param($p) $named.Contains($p.Name) -or $needed.Contains($p.Name) }
+    foreach ($c in $companionOf.Keys) {
+        $pkg = $byName[$c]
+        if (-not $pkg -or (& $installing $pkg)) { continue }
+        if (-not $pkg.Default) { $c; continue }
+        # A default companion comes with a package being installed, or with
+        # one that is a default itself.
+        $owners = @($companionOf[$c] | Where-Object { (& $installing $_) -or $_.Default -or $_.Required })
+        if ($owners.Count -eq 0) { $c }
+    }
+}
+
 function Resolve-DefaultInstallSet {
     <#
     .SYNOPSIS
@@ -147,22 +192,7 @@ function Resolve-DefaultInstallSet {
     foreach ($entry in $loaded.ToArray()) {
         $seed = @($wanted[$entry.Info.BundlePath]) + @($entry.Explicit)
         if ($seed.Count -eq 0) { continue }
-        # An optional companion rides along only when something the seed
-        # needs depends on it, or when it was asked for by name.
-        $byName = @{}
-        foreach ($p in $entry.Packages) { if (-not $byName.ContainsKey($p.Name)) { $byName[$p.Name] = $p } }
-        $needed = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
-        $queue = [System.Collections.Generic.Queue[string]]::new()
-        foreach ($n in $seed) { $queue.Enqueue($n) }
-        while ($queue.Count -gt 0) {
-            $n = $queue.Dequeue()
-            if (-not $byName.ContainsKey($n)) { continue }
-            foreach ($d in @($byName[$n].DependsOn | Where-Object { $_ })) { if ($needed.Add($d)) { $queue.Enqueue($d) } }
-        }
-        $skip = @($entry.CompanionOf.Keys | Where-Object {
-                $byName.ContainsKey($_) -and -not (& $isDefault $entry $byName[$_]) -and
-                    $seed -notcontains $_ -and -not $needed.Contains($_)
-            })
+        $skip = @(Get-OptionalCompanionSkip -Packages $entry.Packages -Name $seed)
         $skipFor[$entry.Info.BundlePath] = $skip
         try {
             # Resolve-PackageOrder emits its list as ONE array object; assign it

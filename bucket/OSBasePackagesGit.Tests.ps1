@@ -20,20 +20,22 @@ BeforeAll {
         Import-Module MarkMichaelis.ScoopBucket -Force
     }
     $script:mod = Get-Module MarkMichaelis.ScoopBucket
-    $script:git = Get-Package -BucketPath $PSScriptRoot -Name 'Git'
+    # One declaration (SharedPackages.ps1, #563) that OS Base and Git Tools include.
+    $script:allGit = @(Get-Package -BucketPath $PSScriptRoot -Name 'Git')
+    $script:git = $script:allGit | Where-Object Bundle -eq 'OSBasePackages'
     # Get-Package's view omits the predecessor pair; the install driver reads this.
     $script:gitDeclaration = & $script:mod {
         param($BundlePath)
         Get-BundlePackageObjects -BundlePath $BundlePath | Where-Object Name -EQ 'Git'
     } (Join-Path $PSScriptRoot 'OSBasePackages.ps1')
     $script:installSource = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..\install.ps1')
-    $script:bundleSource = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'OSBasePackages.ps1')
+    $script:bundleSource = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'SharedPackages.ps1')
 }
 
 Describe 'OSBasePackages: Git' -Tag 'Light','Bundle' {
 
-    It 'declares the Git package exactly once' {
-        @($script:git | Where-Object { $_ }).Count | Should -Be 1
+    It 'declares the Git package once in each bundle that shows it: OS Base and Git Tools' {
+        @($script:allGit.Bundle | Sort-Object) | Should -Be @('GitTools', 'OSBasePackages')
     }
 
     It 'is declared in the OSBasePackages bundle' {

@@ -484,8 +484,13 @@ function Install-Package {
     # Bundle-name order keeps a '*' sweep's transcript stable run to run.
     foreach ($entry in @($byBundle.Values | Sort-Object { $_.Bundle })) {
         $pkgObjects = @(Get-BundlePackageObjects -BundlePath $entry.BundlePath)
-        # A companion the picker's owner unchecked is skipped (#559).
-        $skip = if ($entry.PSObject.Properties['Skip'] -or ($entry -is [hashtable] -and $entry.ContainsKey('Skip'))) { @($entry.Skip | Where-Object { $_ }) } else { @() }
+        # A companion the picker's owner unchecked is skipped (#559). Named
+        # packages leave out the optional companions nobody asked for (#563).
+        $skip = if ($entry.PSObject.Properties['Skip'] -or ($entry -is [hashtable] -and $entry.ContainsKey('Skip'))) {
+            @($entry.Skip | Where-Object { $_ })
+        } else {
+            @(Get-OptionalCompanionSkip -Packages $pkgObjects -Name @($entry.Names))
+        }
         # -ErrorAction/-ErrorVariable only tame the driver's NON-terminating
         # PackageInstallFailed records. A *terminating* error raised inside the
         # driver (#451: a torn-down module session state made the driver's own

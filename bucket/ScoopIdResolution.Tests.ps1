@@ -114,6 +114,9 @@ Describe 'Declared scoop Ids resolve to a real manifest (issue #466)' -Tag 'Ligh
         $unverified = @()
         $offenders = foreach ($pkg in $script:scoopPkgs) {
             $bucket, $name = $pkg.Id -split '/', 2
+            # Bucket-owned ids are layer 1's: the local clone of this bucket is
+            # main, which never has the manifests a branch adds (#563).
+            if ($bucket -eq 'MarkMichaelis') { continue }
             # An EMPTY index means the clone exists but its manifest directory
             # is empty or unreadable (interrupted clone, ACL, odd layout).
             # That is an unverifiable environment, not a missing manifest --

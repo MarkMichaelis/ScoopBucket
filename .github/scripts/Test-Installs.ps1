@@ -891,7 +891,7 @@ function Get-AllPackages {
     }
 
     # --- Source 1: legacy text-parsing for bundles not yet migrated ---------
-    $scriptFiles = Get-ChildItem (Join-Path $BucketPath '*') -Include '*.ps1' -Exclude 'Utils.ps1', '*.Tests.ps1' |
+    $scriptFiles = Get-ChildItem (Join-Path $BucketPath '*') -Include '*.ps1' -Exclude 'Utils.ps1', 'SharedPackages.ps1', '*.Tests.ps1' |
         Where-Object {
             $stem = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
             -not $declarativeBundles.ContainsKey($stem)
