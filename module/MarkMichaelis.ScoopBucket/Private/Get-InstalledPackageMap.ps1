@@ -26,8 +26,10 @@ function Get-InstalledPackageMap {
         foreach ($n in $list) {
             if ($n.Kind -eq 'Group') {
                 if ($seen.Add($n.Key)) { & $walk $n.Children }
-            } elseif (-not $nodes.ContainsKey($n.Identity)) {
-                $nodes[$n.Identity] = $n
+            } else {
+                if (-not $nodes.ContainsKey($n.Identity)) { $nodes[$n.Identity] = $n }
+                # A package's sub-items (#559) are items too.
+                if ($seen.Add($n.Key)) { & $walk @(Get-PickerSubItems -Node $n) }
             }
         }
     }
@@ -59,6 +61,9 @@ function Get-InstalledPackageMap {
                 (Resolve-PackageVersionInfo -Package $n.Package -Index $index).Present
             }
             'scoop' {
+                # Chocolatey is usually installed by the bootstrap, not by scoop
+                # (#559): choco on PATH is what counts.
+                if ($n.Kind -eq 'Manifest' -and $n.Name -eq 'Chocolatey') { [bool](Get-Command choco -ErrorAction SilentlyContinue); break }
                 if ($null -eq $scoopList) { $null; break }
                 $app = if ($n.Kind -eq 'Manifest') { $n.Name } else { ($n.Package.Id -split '/')[-1] }
                 $scoopList -match "(?im)^\s*$([regex]::Escape($app))\s+\S+"

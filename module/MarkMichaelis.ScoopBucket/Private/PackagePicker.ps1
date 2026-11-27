@@ -145,7 +145,7 @@ function New-PickerState {
         param($n)
         if ($n.Kind -eq 'Group') { if ($seenNodes.Add($n.Key)) { foreach ($c in $n.Children) { & $walkNodes $c } }; return }
         foreach ($c in (Get-PickerSubItems -Node $n)) {
-            if ($c.Role -eq 'Companion') {
+            if ($c.Role -eq 'Companion' -and $c.PSObject.Properties['Identity'] -and $c.Identity) {
                 if (-not $companions.ContainsKey($n.Identity)) { $companions[$n.Identity] = [System.Collections.Generic.HashSet[string]]::new($ignoreCase) }
                 [void]$companions[$n.Identity].Add($c.Identity)
             }
@@ -221,12 +221,32 @@ function Get-PickerSkippedCompanions {
     # The companions in one bundle that are not checked: installing their
     # package leaves them out (#559).
     param([Parameter(Mandatory)][object]$State, [Parameter(Mandatory)][string]$Bundle)
-    $names = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $ignoreCase = [System.StringComparer]::OrdinalIgnoreCase
+    # What the checked packages of this bundle need through DependsOn is
+    # never skipped, even when it is also some package's unchecked companion.
+    $info = $State.Catalog.Bundles[$Bundle]
+    $needed = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
+    if ($info) {
+        $byName = @{}
+        foreach ($p in $info.Packages) { if (-not $byName.ContainsKey($p.Name)) { $byName[$p.Name] = $p } }
+        $queue = [System.Collections.Generic.Queue[string]]::new()
+        foreach ($id in @($State.Selected) + @($State.Always)) {
+            $o = $State.Owner[$id]
+            if ($o -and $o.Bundle -eq $Bundle) { $queue.Enqueue($o.Name) }
+        }
+        $seen = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
+        while ($queue.Count -gt 0) {
+            $n = $queue.Dequeue()
+            if (-not $seen.Add($n) -or -not $byName.ContainsKey($n)) { continue }
+            foreach ($d in @($byName[$n].DependsOn)) { if ($d) { [void]$needed.Add($d); $queue.Enqueue($d) } }
+        }
+    }
+    $names = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
     foreach ($set in $State.Companions.Values) {
         foreach ($id in $set) {
             if ($State.Selected.Contains($id)) { continue }
             $o = $State.Owner[$id]
-            if ($o -and $o.Bundle -eq $Bundle) { [void]$names.Add($o.Name) }
+            if ($o -and $o.Bundle -eq $Bundle -and -not $needed.Contains($o.Name)) { [void]$names.Add($o.Name) }
         }
     }
     @($names)
@@ -464,10 +484,12 @@ function Get-PickerPlan {
     $manifests = [System.Collections.Generic.List[string]]::new()
     $wanted = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($id in @($State.Selected) + @($State.Always)) { [void]$wanted.Add($id) }
-    # A needed bare manifest (Chocolatey) is installed when it is missing.
-    foreach ($id in $State.Required) {
+    # A needed bare manifest (Chocolatey) is installed when it is missing, and
+    # FIRST: the packages that need it are installed with it.
+    $first = [System.Collections.Generic.List[string]]::new()
+    foreach ($id in @($State.Required | Sort-Object)) {
         $leaf = $State.Leaves[$id]
-        if ($leaf -and $leaf.Kind -eq 'Manifest' -and -not $State.Owner[$id] -and -not (Test-PickerInstalled -State $State -Identity $id)) { [void]$wanted.Add($id) }
+        if ($leaf -and $leaf.Kind -eq 'Manifest' -and -not $State.Owner[$id] -and -not (Test-PickerInstalled -State $State -Identity $id)) { $first.Add($leaf.Name) }
     }
     foreach ($id in @($wanted | Sort-Object)) {
         # A package goes to the bundle that declares it -- even when it was
@@ -502,6 +524,7 @@ function Get-PickerPlan {
     }
     [pscustomobject]@{
         ByBundle  = $byBundle
+        First     = $first.ToArray()
         Manifests = $manifests.ToArray()
         New       = @($new | Sort-Object)
         Upgrade   = @($upgrade | Sort-Object)

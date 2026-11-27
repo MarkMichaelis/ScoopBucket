@@ -138,6 +138,7 @@ function Install-Package {
     $byBundle      = @{}
     $fullBundles   = New-Object System.Collections.Generic.List[object]
     $manifestNames = New-Object System.Collections.Generic.List[string]
+    $firstManifests = @()
     $starSeen      = $false
 
     foreach ($needed in $Name) {
@@ -216,7 +217,8 @@ function Install-Package {
             return
         }
         foreach ($entry in $plan.ByBundle.Values) { $byBundle[$entry.BundlePath] = $entry }
-        foreach ($m in $plan.Manifests) { $manifestNames.Add($m) }
+        foreach ($m in @($plan.First) + @($plan.Manifests)) { if ($m) { $manifestNames.Add($m) } }
+        $firstManifests = @($plan.First | Where-Object { $_ })
     }
 
     # --- '*': every default package, plus optional ones already installed ---
@@ -268,60 +270,13 @@ function Install-Package {
         }
     }
 
-    # --- Dispatch (a): Package.Name flow with -Name filter -----------------
-    # In-process: reconstruct real [Package] objects from the bundle and call
-    # the driver directly (same model Update-Package uses), so results flow
-    # back as live PackageResult objects rendered once by the format view.
-    # Bundle-name order keeps a '*' sweep's transcript stable run to run.
-    foreach ($entry in @($byBundle.Values | Sort-Object { $_.Bundle })) {
-        $pkgObjects = @(Get-BundlePackageObjects -BundlePath $entry.BundlePath)
-        # -ErrorAction/-ErrorVariable only tame the driver's NON-terminating
-        # PackageInstallFailed records. A *terminating* error raised inside the
-        # driver (#451: a torn-down module session state made the driver's own
-        # Write-UpdateStatus teardown throw) propagates regardless and used to
-        # abort the whole sweep, discarding every result collected so far. Keep
-        # each bundle's blast radius to that bundle. See also #272.
-        try {
-            Assert-BundleFileExists -BundlePath $entry.BundlePath
-            $results.AddRange([object[]]@(
-                # A companion the picker's owner unchecked is skipped (#559).
-                $skip = if ($entry.PSObject.Properties['Skip'] -or ($entry -is [hashtable] -and $entry.ContainsKey('Skip'))) { @($entry.Skip | Where-Object { $_ }) } else { @() }
-                Invoke-PackageInstall -Packages $pkgObjects -Bundle $entry.Bundle `
-                    -Name @($entry.Names) -Skip $skip -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
-                    -NoUpgrade:$NoUpgrade `
-                    -ErrorAction Continue -ErrorVariable +pkgErrors))
-        } catch [System.Management.Automation.PipelineStoppedException] {
-            # An interrupt must stop the sweep, not be filed as a bundle failure.
-            throw
-        } catch {
-            $failure = New-BundleDispatchFailure -Bundle $entry.Bundle -Message $_.Exception.Message
-            $pkgErrors.Add($failure.Error)
-            $PSCmdlet.WriteError($failure.Error)
-            $results.Add($failure)
-        }
-    }
-
-    # --- Dispatch (b): full-bundle install (no -Name filter) ---------------
-    foreach ($b in $fullBundles) {
-        Write-UpdateStatus -Activity 'Install-Package' "Install-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
-        $pkgObjects = @(Get-BundlePackageObjects -BundlePath $b.BundlePath)
-        try {
-            Assert-BundleFileExists -BundlePath $b.BundlePath
-            $results.AddRange([object[]]@(
-                Invoke-PackageInstall -Packages $pkgObjects -Bundle $b.Bundle `
-                    -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
-                    -NoUpgrade:$NoUpgrade `
-                    -ErrorAction Continue -ErrorVariable +pkgErrors))
-        } catch [System.Management.Automation.PipelineStoppedException] {
-            throw
-        } catch {
-            $failure = New-BundleDispatchFailure -Bundle $b.Bundle -Message $_.Exception.Message
-            $pkgErrors.Add($failure.Error)
-            $PSCmdlet.WriteError($failure.Error)
-            $results.Add($failure)
-        }
-    }
-
+    # Bare manifests (dispatch (c) below) run in two passes: the ones the
+    # picker's plan needs before anything else (Chocolatey, which the choco
+    # packages install with, #559), then the rest after the bundles.
+    $manifestPackagesToImport = New-Object System.Collections.Generic.List[object]
+    $manifestEngineRoots = $null
+    $dispatchManifests = {
+        param([string[]]$Names)
     # --- Dispatch (c): scoop install fallback for bare manifests -----------
     # Some bare `<name>.json` manifests are ALSO declared by a [Package] in a
     # bundle via its Id (with the owner prefix stripped -- e.g. the package
@@ -333,10 +288,8 @@ function Install-Package {
     # *manifest* name registers the same completers path (a) does. Manifests
     # with no declaring [Package] are genuinely metadata-less and dispatch as a
     # plain `scoop install` with no completion (#291).
-    $manifestPackagesToImport = New-Object System.Collections.Generic.List[object]
     # Engine ownership map for the cross-engine gate below (#464), resolved once.
-    $manifestEngineRoots = $null
-    if ($manifestNames.Count -gt 0) {
+    if (@($Names).Count -gt 0 -and $null -eq $manifestEngineRoots) {
         try {
             $manifestEngineRoots = Get-EngineRootMap
         } catch {
@@ -344,7 +297,7 @@ function Install-Package {
         }
     }
 
-    foreach ($n in $manifestNames) {
+    foreach ($n in @($Names)) {
         # --- Cross-engine gate for the manifest path (#464) ----------------
         # This path dispatches `scoop install <manifest>` directly and never
         # reaches Invoke-PackageInstall, so without its own gate it is a hole
@@ -517,6 +470,65 @@ function Install-Package {
             }
         }
     }
+
+    }
+    . $dispatchManifests @($manifestNames | Where-Object { $firstManifests -contains $_ })
+
+    # --- Dispatch (a): Package.Name flow with -Name filter -----------------
+    # In-process: reconstruct real [Package] objects from the bundle and call
+    # the driver directly (same model Update-Package uses), so results flow
+    # back as live PackageResult objects rendered once by the format view.
+    # Bundle-name order keeps a '*' sweep's transcript stable run to run.
+    foreach ($entry in @($byBundle.Values | Sort-Object { $_.Bundle })) {
+        $pkgObjects = @(Get-BundlePackageObjects -BundlePath $entry.BundlePath)
+        # A companion the picker's owner unchecked is skipped (#559).
+        $skip = if ($entry.PSObject.Properties['Skip'] -or ($entry -is [hashtable] -and $entry.ContainsKey('Skip'))) { @($entry.Skip | Where-Object { $_ }) } else { @() }
+        # -ErrorAction/-ErrorVariable only tame the driver's NON-terminating
+        # PackageInstallFailed records. A *terminating* error raised inside the
+        # driver (#451: a torn-down module session state made the driver's own
+        # Write-UpdateStatus teardown throw) propagates regardless and used to
+        # abort the whole sweep, discarding every result collected so far. Keep
+        # each bundle's blast radius to that bundle. See also #272.
+        try {
+            Assert-BundleFileExists -BundlePath $entry.BundlePath
+            $results.AddRange([object[]]@(
+                Invoke-PackageInstall -Packages $pkgObjects -Bundle $entry.Bundle `
+                    -Name @($entry.Names) -Skip $skip -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
+                    -NoUpgrade:$NoUpgrade `
+                    -ErrorAction Continue -ErrorVariable +pkgErrors))
+        } catch [System.Management.Automation.PipelineStoppedException] {
+            # An interrupt must stop the sweep, not be filed as a bundle failure.
+            throw
+        } catch {
+            $failure = New-BundleDispatchFailure -Bundle $entry.Bundle -Message $_.Exception.Message
+            $pkgErrors.Add($failure.Error)
+            $PSCmdlet.WriteError($failure.Error)
+            $results.Add($failure)
+        }
+    }
+
+    # --- Dispatch (b): full-bundle install (no -Name filter) ---------------
+    foreach ($b in $fullBundles) {
+        Write-UpdateStatus -Activity 'Install-Package' "Install-Package: dispatching bundle '$($b.Bundle)' (all packages)..."
+        $pkgObjects = @(Get-BundlePackageObjects -BundlePath $b.BundlePath)
+        try {
+            Assert-BundleFileExists -BundlePath $b.BundlePath
+            $results.AddRange([object[]]@(
+                Invoke-PackageInstall -Packages $pkgObjects -Bundle $b.Bundle `
+                    -DryRun:$isWhatIf -SkipCompletion:$SkipCompletion `
+                    -NoUpgrade:$NoUpgrade `
+                    -ErrorAction Continue -ErrorVariable +pkgErrors))
+        } catch [System.Management.Automation.PipelineStoppedException] {
+            throw
+        } catch {
+            $failure = New-BundleDispatchFailure -Bundle $b.Bundle -Message $_.Exception.Message
+            $pkgErrors.Add($failure.Error)
+            $PSCmdlet.WriteError($failure.Error)
+            $results.Add($failure)
+        }
+    }
+
+    . $dispatchManifests @($manifestNames | Where-Object { $firstManifests -notcontains $_ })
 
     # --- Post-install: register completers in the caller's session ---------
     # Register-PackageCompletion writes sentinel blocks to
