@@ -46,19 +46,20 @@ function Test-WingetPackageInstalled {
         }
 
         $listed = ConvertFrom-WingetVersionTable $output
-        if ($listed.Count -eq 0) {
-            # No table to check (an output layout the parser does not know):
-            # trust the exit code, as this probe did before #553. Callers name
-            # the declared id with --exact, so they still cannot act on a
-            # different package.
-            return @{ Installed = $true; Id = [string]$Package.Id; ExitCode = $exit; Command = $command; Reason = $reason }
-        }
         $row = $listed[([string]$Package.Id).ToLowerInvariant()]
         if ($row) {
             return @{ Installed = $true; Id = $row.Id; ExitCode = $exit; Command = $command; Reason = $reason }
         }
+        # No row carries the id. With no table at all (an output layout the
+        # parser does not read), the exit code alone is the pre-#553 false
+        # positive again, and a later `upgrade --exact` miss would then read
+        # as AlreadyLatest; reporting NotInstalled keeps the miss visible.
         $others = @($listed.Values | ForEach-Object { $_.Id } | Sort-Object)
-        $reason = "$command listed only $($others -join ', '), not $($Package.Id)."
+        $reason = if ($others) {
+            "$command listed only $($others -join ', '), not $($Package.Id)."
+        } else {
+            "$command returned $exit, but its output had no table row to confirm $($Package.Id)."
+        }
     }
     return @{ Installed = $false; Id = ''; ExitCode = $exit; Command = $command; Reason = $reason }
 }

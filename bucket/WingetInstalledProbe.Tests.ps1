@@ -136,8 +136,10 @@ Describe 'winget installed probe (#516)' -Tag 'Light', 'Module' {
     }
 
     Context 'a non-exact list that exits 0 with output that is not a table' {
-        # Without a table there is no row to check, so the probe keeps its
-        # pre-#553 behaviour and trusts the exit code.
+        # Without a table there is no row to confirm the id, and the exact list
+        # has already missed, so exit 0 alone is not evidence: trusting it is
+        # the #553 false positive, and the later `upgrade --exact` miss would
+        # then read as AlreadyLatest.
         BeforeEach {
             Mock -ModuleName MarkMichaelis.ScoopBucket winget {
                 $script:calls.Add(($args -join ' '))
@@ -151,15 +153,17 @@ Describe 'winget installed probe (#516)' -Tag 'Light', 'Module' {
             $script:pkg = [Package]@{ Name = 'Widget'; Installer = 'winget'; Id = 'Vendor.Widget' }
         }
 
-        It 'install reports AlreadyInstalled' {
-            $r = & $script:module { param($p) Install-WingetPackage -Package $p } $script:pkg
-            $r.State | Should -Be 'AlreadyInstalled'
+        It 'update reports NotInstalled, saying the output could not confirm the id, and runs no upgrade' {
+            $r = & $script:module { param($p) Update-WingetPackage -Package $p -TimeoutMinutes 0 } $script:pkg
+            $r.State  | Should -Be 'NotInstalled'
+            $r.Reason | Should -Match 'no table row'
+            @($script:calls | Where-Object { $_ -like 'upgrade *' }).Count | Should -Be 0
         }
 
-        It 'update names the declared id with --exact' {
-            $r = & $script:module { param($p) Update-WingetPackage -Package $p -TimeoutMinutes 0 } $script:pkg
-            $r.State | Should -Be 'Updated'
-            @($script:calls | Where-Object { $_ -like 'upgrade *' })[0] | Should -Match '--id Vendor\.Widget --exact'
+        It 'uninstall reports NotInstalled and runs no uninstall' {
+            $r = & $script:module { param($p) Uninstall-WingetPackage -Package $p } $script:pkg 6>$null
+            $r.State | Should -Be 'NotInstalled'
+            @($script:calls | Where-Object { $_ -like 'uninstall *' }).Count | Should -Be 0
         }
     }
 
