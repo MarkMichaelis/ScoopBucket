@@ -21,18 +21,7 @@ Describe 'CliCompletion pinned contract -- per-bundle native registration' -Tag 
         $script:allPkgs = @(Get-Package -BucketPath $PSScriptRoot)
     }
 
-    # gh is still wired through the legacy procedural Register-CliCompletion
-    # path in GitConfigure.ps1 (the install block lives inside a function, not
-    # a declarative [Package]). Keep the original pattern assertion for it.
-    It 'gh is registered with -NativeCommand in GitConfigure.ps1' {
-        $path = Join-Path $PSScriptRoot 'GitConfigure.ps1'
-        Test-Path $path | Should -BeTrue
-        $content = Get-Content -Raw -Path $path
-        $pattern = "(?ms)Register-CliCompletion\b[^\r\n]*?-Cli\s+['`"]?gh['`"]?\b[^\r\n]*?-NativeCommand"
-        $content | Should -Match $pattern -Because "GitConfigure.ps1 must call Register-CliCompletion -Cli gh -NativeCommand { ... }"
-    }
-
-    # rg, bw, gcloud, and the sysinternals shims live in declarative [Package]
+    # rg, bw, gcloud, gh, gk (#563) and the sysinternals shims live in declarative [Package]
     # manifests. Their wiring is asserted at the manifest level: each Package
     # owning <Cli> must declare both NativeCommandScript and ExpectedCompletions
     # (so CompletionEndToEnd.Tests.ps1 can verify Tab actually returns those).
@@ -41,6 +30,8 @@ Describe 'CliCompletion pinned contract -- per-bundle native registration' -Tag 
         @{ Cli = 'bw';     Bundle = 'ClientBasePackages' }
         @{ Cli = 'gcloud'; Bundle = 'OSBasePackages' }
         @{ Cli = 'ffmpeg'; Bundle = 'OSBasePackages' }
+        @{ Cli = 'gh';     Bundle = 'GitTools' }
+        @{ Cli = 'gk';     Bundle = 'GitTools' }
     ) {
         param($Cli, $Bundle)
 

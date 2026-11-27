@@ -13,7 +13,7 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 
 Function Invoke-GitConfigVisualStudio {
     if(-not (test-command vswhere)) {
-        choco install vswhere
+        choco install vswhere -y
     }
 
     $vsInstallPath=vswhere -prerelease -latest -property installationPath

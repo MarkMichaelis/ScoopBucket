@@ -75,6 +75,8 @@ Describe 'Bundle ConfigScript snapshot hooks under the scoop app-dir layout' -Ta
                 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $snapshot) | Out-Null
                 Set-Content -LiteralPath $snapshot -Value '{}' -Encoding utf8
             }
+            # Every base bundle's manifest ships SharedPackages.ps1 beside it (#563).
+            Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'SharedPackages.ps1') -Destination $appDir
             $staged = Join-Path $appDir "$BundleName.ps1"
             Set-Content -LiteralPath $staged -Value $assignment.Extent.Text -Encoding utf8
             return $staged

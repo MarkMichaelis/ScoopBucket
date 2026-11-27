@@ -4,8 +4,8 @@
 #
 # Shell aliases (`!`-prefixed) are executed by gh through a POSIX `sh`. On
 # Windows gh locates Git for Windows' sh.exe itself, so `sh` does not need to
-# be on PATH; git does need to be installed, which GitConfigure.ps1 guarantees
-# by running before this configurator.
+# be on PATH; git does need to be installed, which Git Tools guarantees: Git is
+# required, and this configurator is the GitHub CLI's companion.
 #
 # Block scalars (`|-`) are used deliberately: the expansions are shell
 # one-liners dense with quotes and `$`, and a block scalar keeps them literal

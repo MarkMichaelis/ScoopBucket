@@ -70,8 +70,8 @@ function Get-PackageNameSuggestion {
         #     bundle name itself is installable via Install-Package and
         #     fans out to every package in the bundle.
         #   - Bare-json manifests (no .ps1, or .ps1 with no [Package]) —
-        #     DbxCli, dotnet, Chocolatey, Gemini, ClaudeExcel, GitConfigure,
-        #     WSL-Ubuntu-*, McAfeeUninstall, ... — installable by passing
+        #     DbxCli, dotnet, Chocolatey, Gemini, ClaudeExcel, GitConfigVSCode,
+        #     WSLUbuntu, McAfeeUninstall, ... — installable by passing
         #     the manifest through to `scoop install`.
         foreach ($f in $manifestFiles) {
             $null = $names.Add($f.BaseName)

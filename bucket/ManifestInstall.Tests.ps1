@@ -15,15 +15,14 @@
 
     Manifests NOT covered here:
       * Declarative bundles (OSBasePackages, DeveloperBasePackages,
-        ClientBasePackages, MicrosoftOffice365, AIAgents) — exercised by
+        ClientBasePackages, MicrosoftOffice365, AIAgents, GitTools, PowerShell) — exercised by
         Bundles.Tests.ps1.
       * Manifests with bespoke Pester files that don't fit the
         install + idempotent + verify shape: McAfeeUninstall (uninstaller
         flow), AddLocalRepoBucket / AddMarkMichaelisScoopBucket (scoop
         bucket-add rather than scoop-install), GitConfigBeyondCompare /
-        GitConfigGitHubCli / GitConfigVSCode / GitConfigVisualStudio /
-        GitConfigure (multi-assertion git-config tests, some with Light unit
-        coverage).
+        GitConfigGitHubCli / GitConfigVSCode / GitConfigVisualStudio
+        (multi-assertion git-config tests, some with Light unit coverage).
 
     Light-tag drift tests check the skip lists and hints against the
     manifests on disk, and fail if discovery finds no harness cases.
@@ -50,13 +49,13 @@ BeforeDiscovery {
     # Manifests handled elsewhere — see comment block above.
     $bundleNames = @(
         'OSBasePackages','DeveloperBasePackages','ClientBasePackages',
-        'MicrosoftOffice365','AIAgents'
+        'MicrosoftOffice365','AIAgents','GitTools','PowerShell'
     )
     $bespokeNames = @(
         'McAfeeUninstall',
         'AddLocalRepoBucket','AddMarkMichaelisScoopBucket',
         'GitConfigBeyondCompare','GitConfigGitHubCli','GitConfigVSCode',
-        'GitConfigVisualStudio','GitConfigure'
+        'GitConfigVisualStudio'
     )
 
     $hints = & (Join-Path $bucketRoot 'ManifestTestHints.ps1')

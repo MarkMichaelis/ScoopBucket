@@ -17,7 +17,7 @@ function Resolve-BucketManifestPath {
         grouped layout (`bucket/os/`, `bucket/client/`, `bucket/developer/`,
         `bucket/ai/`, `bucket/admin/` — see #302/#300), every config-only
         manifest — the ones with no sibling `[Package[]]` declaration, e.g.
-        `developer/GitConfigure.json`, `os/EnableRemoteDesktop.json` — became
+        `developer/GitConfigVSCode.json`, `os/EnableRemoteDesktop.json` — became
         unreachable by name, even though `scoop` itself and this module's own
         tab completion (Get-PackageNameSuggestion) both search recursively.
         That mismatch is #452: completion offered a name the cmdlet then

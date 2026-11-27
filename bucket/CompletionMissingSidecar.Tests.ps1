@@ -306,7 +306,7 @@ Describe 'Update-PackageCompletion gap-fill repairs a block whose sidecar is mis
         Set-Content -Path (Join-Path $bucket 'CompletionCoverage.psd1') -Encoding UTF8 -Value @"
 @{
     Clis = @(
-        @{ Cli = '$cli'; Status = 'Registered'; Script = 'developer\PowerShell.ps1'; Switches = @('-NoProfile','-Command') }
+        @{ Cli = '$cli'; Status = 'Registered'; Script = 'developer\PowerShellSetup.ps1'; Switches = @('-NoProfile','-Command') }
     )
 }
 "@

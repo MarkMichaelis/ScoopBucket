@@ -90,7 +90,9 @@ Describe 'Completion coverage catalog is honoured' -Tag 'Light','CompletionCover
     }
 
     It 'all originally-requested + audited CLIs are covered' {
-        $required = @('gh','gk','pwsh','powershell','wsl','git','choco','scoop')
+        # gh and gk left the catalog in #563: GitTools.ps1 declares them as
+        # packages, which Package.Validate holds to a Completion mode.
+        $required = @('pwsh','powershell','wsl','git','choco','scoop')
         $catalogued = @($script:entries | ForEach-Object { $_.Cli })
         foreach ($cli in $required) {
             $catalogued | Should -Contain $cli -Because "$cli was in scope for #278 and must be catalogued"
@@ -98,10 +100,10 @@ Describe 'Completion coverage catalog is honoured' -Tag 'Light','CompletionCover
     }
 }
 
-Describe 'PowerShell.ps1 hand-curated host completers' -Tag 'Light','CompletionCoverage' {
+Describe 'PowerShellSetup.ps1 hand-curated host completers' -Tag 'Light','CompletionCoverage' {
 
     BeforeAll {
-        $psScriptPath = Get-ChildItem -Path $PSScriptRoot -Filter 'PowerShell.ps1' -File -Recurse |
+        $psScriptPath = Get-ChildItem -Path $PSScriptRoot -Filter 'PowerShellSetup.ps1' -File -Recurse |
             Select-Object -First 1 -ExpandProperty FullName
         $script:psInstallSource = Get-Content -Raw -Path $psScriptPath
     }

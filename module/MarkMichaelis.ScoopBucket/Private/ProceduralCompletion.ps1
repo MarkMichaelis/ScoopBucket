@@ -12,7 +12,7 @@
 #
 # Those five were unreachable from any repair path: Get-BundlePackages does
 # not see them, and re-running the owning script is not an option because
-# those scripts also install software (GitConfigure.ps1 installs GitKraken).
+# those scripts also install software (PowerShellSetup.ps1 installs modules).
 # So once a profile was lost -- or migrated, as in #397 -- they stayed dead
 # and the one command documented to fix that silently skipped them.
 #

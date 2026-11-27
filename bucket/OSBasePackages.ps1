@@ -58,6 +58,9 @@ Register-ArgumentCompleter -Native -CommandName wt -ScriptBlock {
 "@
         }
     }
+    # PowerShell 7, its preview and the Windows PowerShell 5.1 modules, shown
+    # as one group (os\PowerShell.ps1, #563).
+    [Package]@{ Name = 'PowerShell'; Installer = 'scoop'; Id = 'MarkMichaelis/PowerShell' }
     [Package]@{
         Name        = '7-Zip'
         Installer   = 'winget'
@@ -94,39 +97,10 @@ Register-ArgumentCompleter -Native -CommandName 7z -ScriptBlock {
 "@
         }
     }
-    [Package]@{
-        Name              = 'Git'
-        Installer         = 'winget'
-        Id                = 'Git.Git'
-        # The bucket itself needs git: always installed, never unchecked (#559).
-        Required          = $true
-        # install.ps1 needs git before any bucket exists, so it installs this
-        # predecessor; declaring it is what hands the machine over to this
-        # package. Winget also recognizes a Program Files install from any
-        # other source (#498).
-        PreviousInstaller = 'scoop'
-        PreviousId        = 'main/mingit'
-        CliCommands       = @('git')
-        Completion        = 'auto'
-        Notes             = 'Git for Windows, machine scope. git has no PowerShell completion command. GitConfigure.ps1 activates posh-git, which is far richer, so the hand-curated subcommand list below stands aside wherever posh-git is available; registering over it would make the profile order decide which completer wins.'
-        ExpectedCompletions = @{ git = @('status','commit','push') }
-        NativeCommandScript = {
-            @"
-if (-not (`$env:PSModulePath -split ';' | Where-Object { `$_ -and (Test-Path -LiteralPath (Join-Path `$_ 'posh-git')) })) {
-    Register-ArgumentCompleter -Native -CommandName git -ScriptBlock {
-        param(`$wordToComplete, `$commandAst, `$cursorPosition)
-        @(
-            'add','bisect','branch','checkout','cherry-pick','clone','commit','config','diff',
-            'fetch','grep','init','log','merge','mv','pull','push','rebase','remote','reset',
-            'restore','revert','rm','show','stash','status','switch','tag','worktree'
-        ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
-            [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
-        }
-    }
-}
-"@
-        }
-    }
+    [Package]@{ Name = 'TotalCommander'; Installer = 'scoop'; Id = 'MarkMichaelis/TotalCommander' }
+    # Git and VS Code are declared once, in SharedPackages.ps1: Developer
+    # Base's Git Tools and Developer Base show the same packages (#563).
+    & "$PSScriptRoot\SharedPackages.ps1" -Name 'Git'
     [Package]@{ Name = 'Everything';                    Installer = 'winget'; Id = 'voidtools.Everything'
                 Companions = @('Everything CLI') }
     [Package]@{
@@ -249,54 +223,9 @@ Register-ArgumentCompleter -Native -CommandName gcloud -ScriptBlock {
         }
     }
 
-    # Editor included in the OS baseline so a freshly imaged box has a
-    # text editor available before DeveloperBasePackages runs. The winget
-    # engine's AlreadyInstalled probe makes the duplicate declaration in
-    # DeveloperBasePackages a no-op on a second pass.
-    # Git's diff and merge tool settings for VS Code; installed with VS Code as
-    # its companion, and can be turned off on its own (#559).
-    [Package]@{ Name = 'Git settings for VS Code'; Installer = 'scoop'; Id = 'MarkMichaelis/GitConfigVSCode' }
-    [Package]@{
-        Name        = 'Visual Studio Code'
-        Installer   = 'winget'
-        Id          = 'Microsoft.VisualStudioCode'
-        Companions  = @('Git settings for VS Code')
-        CliCommands = @('code')
-        Completion  = 'auto'
-        Notes       = '`code --help` lists CLI switches but `code` has no completion subcommand and no PSCompletions catalog entry. Hand-curated flag list shared with DeveloperBasePackages.'
-        ExpectedCompletions = @{ code = @('--help','--diff','--new-window') }
-        NativeCommandScript = {
-            @"
-Register-ArgumentCompleter -Native -CommandName code -ScriptBlock {
-    param(`$wordToComplete, `$commandAst, `$cursorPosition)
-    @(
-        '--help','--version','--diff','--merge','--add','--goto','--new-window','--reuse-window',
-        '--wait','--locale','--user-data-dir','--profile','--extensions-dir','--list-extensions',
-        '--install-extension','--uninstall-extension','--enable-proposed-api','--status',
-        '--prof-startup','--disable-extensions','--disable-extension','--sync','--inspect-extensions',
-        '--inspect-brk-extensions','--verbose','--log','--telemetry'
-    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
-        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
-    }
-}
-"@
-        }
-        # EDITOR is the fallback every CLI tool reaches for when it needs the
-        # user to edit a file: git with no core.editor, npm, gh, and most
-        # POSIX-minded tooling. ConfigScript rather than PostInstallScript so
-        # it is re-applied on updates too, not just first install.
-        #
-        # The decision (claim EDITOR only when unset or already pointing at
-        # VS Code; never revert a deliberately chosen editor; warn rather than
-        # throw when a machine-scope write needs elevation) lives in
-        # Set-DefaultEditorVariable, next to the other desired-state hooks.
-        # Keeping it there rather than inline is what lets the OSBasePackages
-        # and DeveloperBasePackages copies be identical by construction:
-        # Update-Package resolves a -Name to the FIRST bundle declaring it, so
-        # two copies that drift would change behavior depending on which
-        # declaration won (the hazard fixed for Playwright in #417).
-        ConfigScript = { Set-DefaultEditorVariable | Out-Null }
-    }
+    # Editor included in the OS baseline so a freshly imaged box has a text
+    # editor before Developer Base runs.
+    & "$PSScriptRoot\SharedPackages.ps1" -Name 'Visual Studio Code'
 
     # scoop replacements for winget entries with upstream drift
     [Package]@{
@@ -392,6 +321,8 @@ Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
     # the MarkMichaelis bucket registered (#559, owner's N9).
     [Package]@{ Name = 'RegisterBucketModule';        Installer = 'scoop'; Id = 'MarkMichaelis/RegisterBucketModule' }
     [Package]@{ Name = 'AddMarkMichaelisScoopBucket'; Installer = 'scoop'; Id = 'MarkMichaelis/AddMarkMichaelisScoopBucket' }
+    # Removes the McAfee trial OEM images ship with (#563).
+    [Package]@{ Name = 'McAfeeUninstall'; Installer = 'scoop'; Id = 'MarkMichaelis/McAfeeUninstall' }
 )
 
 Invoke-PackageInstall -Packages $Packages -Bundle 'OSBasePackages'

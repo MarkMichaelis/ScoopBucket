@@ -26,7 +26,7 @@
     #   * Declarative bundles (OSBasePackages, DeveloperBasePackages, etc.) —
     #     exercised by Bundles.Tests.ps1.
     #   * Bespoke manifests with one-off Pester files (McAfeeUninstall, Git
-    #     Configure*, AddLocalRepoBucket, AddMarkMichaelisScoopBucket).
+    #     Config*, AddLocalRepoBucket, AddMarkMichaelisScoopBucket).
     #   * Manifests whose only signal is "scoop reports it installed" — they
     #     pick up the default Verify='Scoop' behaviour without an entry.
 
@@ -38,7 +38,6 @@
 
     # --- Cluster B: Get-Program '*pattern*' --------------------------------
     SmugMug                    = @{ Verify = 'GetProgram'; Pattern = '*SmugMug*' }
-    Overdrive                  = @{ Verify = 'GetProgram'; Pattern = '*OverDrive*' }
     Epubor                     = @{ Verify = 'GetProgram'; Pattern = '*Epubor*' }
     AdobeLightroomClassic      = @{ Verify = 'GetProgram'; Pattern = '*Lightroom*' }
 
@@ -51,8 +50,6 @@
     # --- Cluster D: Custom one-liner verification --------------------------
     EnableHybernate            = @{ Verify = 'Custom'; Script = { ((powercfg /AVAILABLESLEEPSTATES) -join "`n") -match 'Hibernate' } }
     SetPowerConfiguration      = @{ Verify = 'Custom'; Script = { ((powercfg /GETACTIVESCHEME) -join "`n") -match 'Power Scheme GUID' } }
-    WindowsPowerShell          = @{ Verify = 'Custom'; Script = { Test-Path "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" }
-                                    Reason = "Manifest runs `choco install PowerShell` which is a no-op on a normal Windows host. Assert the in-box Windows PowerShell binary exists rather than trying to resolve `powershell` on PATH." }
     RemapShiftLockToWindowsKey = @{ Verify = 'Custom'; Script = {
                                         $key = 'HKLM:\SYSTEM\CurrentControlSet\Control\Keyboard Layout'
                                         $value = (Get-ItemProperty -Path $key -Name 'Scancode Map' -ErrorAction Ignore).'Scancode Map'
@@ -82,18 +79,21 @@
                                         }
                                     }
                                     Reason = "Uninstalling Visual Studio is destructive; if already installed, skip the install assertion (idempotency check still validates re-run)." }
-    'WSL-Ubuntu-2004'          = @{ Verify = 'Custom'; Manual = $true; PreserveIfInstalled = $true
+    WSLUbuntu                  = @{ Verify = 'Custom'; Manual = $true; PreserveIfInstalled = $true
                                     Script = {
-                                        # `wsl --list --quiet` emits UTF-16; pipe through Out-String so
-                                        # -match operates on a single normalized string.
-                                        $distros = (& wsl.exe --list --quiet 2>$null) | Out-String
-                                        [bool]($distros -match 'Ubuntu-20\.04')
+                                        # `wsl --list --quiet` emits UTF-16; drop the NULs so -match
+                                        # operates on plain text.
+                                        $distros = ((& wsl.exe --list --quiet 2>$null) | Out-String) -replace "`0", ''
+                                        [bool]($distros -match 'Ubuntu-24\.04')
                                     }
                                     Reason = "Uninstalling a WSL distro is destructive; if already installed, skip the install assertion (idempotency check still validates re-run)." }
-    'WSL-Ubuntu-1804'          = @{ Verify = 'Custom'; Manual = $true; PreserveIfInstalled = $true
-                                    Script = {
-                                        $distros = (& wsl.exe --list --quiet 2>$null) | Out-String
-                                        [bool]($distros -match 'Ubuntu-18\.04')
-                                    }
-                                    Reason = "Uninstalling a WSL distro is destructive; if already installed, skip the install assertion (idempotency check still validates re-run)." }
+
+    # --- Git set-up items (#563) -------------------------------------------
+    GitSshAgent                = @{ Verify = 'Custom'; Script = { (Get-Service ssh-agent -ErrorAction SilentlyContinue).StartType -ne 'Disabled' } }
+    GitGlobalSettings          = @{ Verify = 'Custom'; Script = { (git config --global --get core.autocrlf) -eq 'input' } }
+    GitDebugDiffTools          = @{ Verify = 'Custom'; Script = { [bool](git config --global --get difftool.debug-powershell.cmd) } }
+    GitCommitIdentity          = @{ Verify = 'Custom'; Script = { [bool](git config --global --get user.email) } }
+    PoshGit                    = @{ Verify = 'Custom'; Script = { [bool](Get-Module -ListAvailable -Name posh-git) } }
+    GitLinkSshToData           = @{ Verify = 'Scoop'; Manual = $true
+                                    Reason = "Links ~\.ssh to the synced Data folder when ~\.ssh does not exist yet; run it only on a machine meant to share its SSH keys." }
 }

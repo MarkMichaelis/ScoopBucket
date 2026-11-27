@@ -4,7 +4,7 @@
 # ----------------------------------------------------------------------------
 # Procedural completion repair (#397).
 #
-# gh, gk, pwsh, powershell and wsl are registered by a bare
+# pwsh, powershell and wsl are registered by a bare
 # Register-CliCompletion call inside their install script rather than by a
 # [Package], so Update-PackageCompletion's bundle walk cannot see them. They
 # were therefore unreachable from any repair path, and re-running the owning
@@ -13,6 +13,7 @@
 # CompletionCoverage.psd1 now carries the recipe needed to re-register them.
 # That duplicates values which also live in the install scripts, so the drift
 # guard below is load-bearing: it is the only thing keeping the catalog honest.
+# (gh and gk were procedural too, until #563 declared them in GitTools.ps1.)
 # ----------------------------------------------------------------------------
 
 BeforeAll {
@@ -52,9 +53,7 @@ Describe 'Completion catalog carries a usable repair recipe' -Tag 'Light','Compl
         }
     }
 
-    It 'covers the five known procedural CLIs' {
-        @($script:registered.Cli) | Should -Contain 'gh'
-        @($script:registered.Cli) | Should -Contain 'gk'
+    It 'covers the three known procedural CLIs' {
         @($script:registered.Cli) | Should -Contain 'pwsh'
         @($script:registered.Cli) | Should -Contain 'powershell'
         @($script:registered.Cli) | Should -Contain 'wsl'
@@ -63,20 +62,10 @@ Describe 'Completion catalog carries a usable repair recipe' -Tag 'Light','Compl
 
 Describe 'Catalog recipe matches the owning install script (drift guard)' -Tag 'Light','Completion' {
 
-    It '<Cli> NativeCommand still matches <Script>' -ForEach @(
-        @{ Cli = 'gh'; Script = 'developer\GitConfigure.ps1' }
-        @{ Cli = 'gk'; Script = 'developer\GitConfigure.ps1' }
-    ) {
-        $entry = $script:registered | Where-Object Cli -EQ $Cli
-        $src = Get-Content -Raw -Path (Join-Path $script:bucketDir $Script)
-        # The script passes the same command inside -NativeCommand { ... }.
-        $src | Should -Match ([regex]::Escape($entry.NativeCommand)) -Because "catalog recipe for $Cli must be the command $Script actually runs"
-    }
-
     It '<Cli> Switches still match <Script>' -ForEach @(
-        @{ Cli = 'pwsh';       Variable = 'pwshSwitches';       Script = 'developer\PowerShell.ps1' }
-        @{ Cli = 'powershell'; Variable = 'powershellSwitches'; Script = 'developer\PowerShell.ps1' }
-        @{ Cli = 'wsl';        Variable = 'wslSwitches';        Script = 'developer\PowerShell.ps1' }
+        @{ Cli = 'pwsh';       Variable = 'pwshSwitches';       Script = 'developer\PowerShellSetup.ps1' }
+        @{ Cli = 'powershell'; Variable = 'powershellSwitches'; Script = 'developer\PowerShellSetup.ps1' }
+        @{ Cli = 'wsl';        Variable = 'wslSwitches';        Script = 'developer\PowerShellSetup.ps1' }
     ) {
         $entry = $script:registered | Where-Object Cli -EQ $Cli
         $fromScript = script:Get-SwitchArray -Path (Join-Path $script:bucketDir $Script) -VariableName $Variable
@@ -91,7 +80,7 @@ Describe 'Get-ProceduralCompletionDefinition' -Tag 'Light','Completion' {
 
     It 'returns only Registered entries, never ModuleActivated ones' {
         $defs = & $script:mod { param($b) Get-ProceduralCompletionDefinition -BucketPath $b } $script:bucketDir
-        @($defs.Cli) | Should -Contain 'gh'
+        @($defs.Cli) | Should -Contain 'pwsh'
         # git/choco/scoop get completion from an upstream module the install
         # script activates -- there is no sentinel block here to repair.
         @($defs.Cli) | Should -Not -Contain 'git'

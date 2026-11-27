@@ -7,7 +7,7 @@
 
 .DESCRIPTION
     Enforces the group-folder organisation introduced in #300:
-      - exactly the four aggregator manifests live at the bucket root;
+      - exactly the aggregator manifests live at the bucket root;
       - every other manifest lives directly under a known group folder
         (os / client / developer / ai / admin).
     A manifest dropped loosely at root, or filed under an unknown or nested
@@ -16,17 +16,17 @@
 
 BeforeAll {
     $script:bucketDir       = $PSScriptRoot
-    $script:rootAggregators = @('AIAgents', 'ClientBasePackages', 'DeveloperBasePackages', 'OSBasePackages')
+    $script:rootAggregators = @('AIAgents', 'ClientBasePackages', 'DeveloperBasePackages', 'GitTools', 'OSBasePackages')
     $script:knownGroups     = @('admin', 'ai', 'client', 'developer', 'os')
 }
 
 Describe 'Bucket group-folder structure' -Tag 'Light', 'Bucket' {
 
-    It 'keeps only the four aggregator manifests at bucket root' {
+    It 'keeps only the aggregator manifests at bucket root' {
         $rootManifests = Get-ChildItem -Path $script:bucketDir -Filter '*.json' -File |
             ForEach-Object { $_.BaseName } | Sort-Object
         $rootManifests | Should -Be ($script:rootAggregators | Sort-Object) `
-            -Because 'only the four group aggregators may sit at bucket root'
+            -Because 'only the group aggregators may sit at bucket root'
     }
 
     It 'files every member manifest directly under a known group folder' {

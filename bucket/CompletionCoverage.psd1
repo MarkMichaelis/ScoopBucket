@@ -22,7 +22,7 @@
     # Repair recipe (#397). A 'Registered' entry also carries enough
     # information to RE-register the CLI without re-running its install
     # script -- which matters because those scripts also install software
-    # (GitConfigure.ps1 installs GitKraken), so they are not usable as a
+    # (PowerShellSetup.ps1 installs modules), so they are not usable as a
     # completion-repair vector. Update-PackageCompletion reads these:
     #
     #   NativeCommand -- shell command emitting a PowerShell completer
@@ -36,30 +36,28 @@
     # owning Script actually registers, so the two cannot silently diverge.
     # ------------------------------------------------------------------------
     Clis = @(
-        @{ Cli = 'gh';         Status = 'Registered';      Script = 'GitConfigure.ps1'; NativeCommand = 'gh completion -s powershell' }
-        @{ Cli = 'gk';         Status = 'Registered';      Script = 'GitConfigure.ps1'; NativeCommand = 'gk completion powershell' }
-        @{ Cli = 'pwsh';       Status = 'Registered';      Script = 'PowerShell.ps1'
+        @{ Cli = 'pwsh';       Status = 'Registered';      Script = 'PowerShellSetup.ps1'
            Switches = @(
                '-File', '-Command', '-EncodedCommand', '-ConfigurationName', '-CustomPipeName',
                '-ExecutionPolicy', '-InputFormat', '-OutputFormat', '-Login', '-MTA', '-STA',
                '-NoExit', '-NoLogo', '-NoProfile', '-NoProfileLoadTime', '-NonInteractive',
                '-SettingsFile', '-Version', '-WindowStyle', '-WorkingDirectory', '-Help'
            ) }
-        @{ Cli = 'powershell'; Status = 'Registered';      Script = 'PowerShell.ps1'
+        @{ Cli = 'powershell'; Status = 'Registered';      Script = 'PowerShellSetup.ps1'
            Switches = @(
                '-File', '-Command', '-EncodedCommand', '-ConfigurationName', '-ExecutionPolicy',
                '-InputFormat', '-OutputFormat', '-Mta', '-Sta', '-NoExit', '-NoLogo', '-NoProfile',
                '-NonInteractive', '-PSConsoleFile', '-Version', '-WindowStyle', '-Help'
            ) }
-        @{ Cli = 'wsl';        Status = 'Registered';      Script = 'PowerShell.ps1'
+        @{ Cli = 'wsl';        Status = 'Registered';      Script = 'PowerShellSetup.ps1'
            Switches = @(
                '--install', '--list', '-l', '--set-default', '-s', '--set-version',
                '--set-default-version', '--shutdown', '--terminate', '-t', '--unregister',
                '--import', '--export', '--distribution', '-d', '--user', '-u', '--exec', '-e',
                '--status', '--update', '--help'
            ) }
-        @{ Cli = 'git';        Status = 'ModuleActivated'; Script = 'GitConfigure.ps1'; Module = 'posh-git';          Activation = 'Add-PoshGitToProfile' }
+        @{ Cli = 'git';        Status = 'ModuleActivated'; Script = 'PoshGit.ps1';      Module = 'posh-git';          Activation = 'Add-PoshGitToProfile' }
         @{ Cli = 'choco';      Status = 'ModuleActivated'; Script = 'Chocolatey.ps1';   Module = 'chocolateyProfile'; Activation = 'Import-Module.*chocolateyProfile\.psm1' }
-        @{ Cli = 'scoop';      Status = 'ModuleActivated'; Script = 'PowerShell.ps1';   Module = 'scoop-completion';  Activation = 'Import-Module\s+scoop-completion' }
+        @{ Cli = 'scoop';      Status = 'ModuleActivated'; Script = 'PowerShellSetup.ps1';   Module = 'scoop-completion';  Activation = 'Import-Module\s+scoop-completion' }
     )
 }

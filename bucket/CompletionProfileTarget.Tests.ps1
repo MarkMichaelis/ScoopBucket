@@ -39,8 +39,8 @@ Describe 'Completion profile target' -Tag 'Light','Completion' {
             return
         }
         # Register-PackageCompletion (declarative, the bundle CliCommands path)
-        # and Register-CliCompletion (procedural, e.g. gh/gk from
-        # GitConfigure.ps1) must write to the same file or half the CLIs land
+        # and Register-CliCompletion (procedural, e.g. pwsh/wsl from
+        # PowerShellSetup.ps1) must write to the same file or half the CLIs land
         # somewhere the user's shell never reads.
         $declarative = & $script:mod { Get-PackageCompletionProfilePath }
         $legacy      = & $script:mod { Get-CompletionProfilePath }

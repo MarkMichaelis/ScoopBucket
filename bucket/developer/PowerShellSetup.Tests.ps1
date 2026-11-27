@@ -2,9 +2,9 @@
 #requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
 # ----------------------------------------------------------------------------
-# PowerShell Gallery modules installed by PowerShell.ps1 (#541).
+# PowerShell Gallery modules installed by PowerShellSetup.ps1 (#541).
 #
-# PowerShell.ps1 is shipped by PowerShellCore.json and PowerShellWindows.json
+# PowerShellSetup.ps1 is shipped by PowerShellCore.json and PowerShellWindows.json
 # and is the bucket's one place that installs PSGallery modules: one
 # `Install-Module` line per module. Each line is bound with PowerShell's own
 # StaticParameterBinder, so a positional module name resolves to -Name exactly
@@ -13,9 +13,9 @@
 # Tagged 'Light' -- parses the script only; no install side effects.
 # ----------------------------------------------------------------------------
 
-Describe 'PowerShell.ps1 PowerShell Gallery modules' -Tag 'Light' {
+Describe 'PowerShellSetup.ps1 PowerShell Gallery modules' -Tag 'Light' {
     BeforeAll {
-        $scriptPath = Join-Path $PSScriptRoot 'PowerShell.ps1'
+        $scriptPath = Join-Path $PSScriptRoot 'PowerShellSetup.ps1'
         $parseErrors = $null
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$null, [ref]$parseErrors)
         $script:ParseErrors = $parseErrors
@@ -45,9 +45,9 @@ Describe 'PowerShell.ps1 PowerShell Gallery modules' -Tag 'Light' {
         # Az.Accounts, Az.Compute, Az.Resources and Az.Security all come from
         # the rollup, at matching versions.
         $az = @($script:ModuleInstalls | Where-Object Name -eq 'Az')
-        $az | Should -HaveCount 1 -Because 'PowerShell.ps1 must install the Az rollup module exactly once'
+        $az | Should -HaveCount 1 -Because 'PowerShellSetup.ps1 must install the Az rollup module exactly once'
         $az[0].Repository | Should -Be 'PSGallery'
-        $az[0].Scope | Should -Be 'AllUsers' -Because 'every other module in PowerShell.ps1 installs for all users'
+        $az[0].Scope | Should -Be 'AllUsers' -Because 'every other module in PowerShellSetup.ps1 installs for all users'
     }
 
     It 'does not force-reinstall Az on every run' {

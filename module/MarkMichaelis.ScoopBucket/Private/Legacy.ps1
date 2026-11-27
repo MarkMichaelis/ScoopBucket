@@ -614,8 +614,8 @@ function Install-BucketApp {
 $script:CompletionSentinelVersion = 'v1'
 
 function Get-CompletionProfilePath {
-    # Procedural registration path (Register-CliCompletion, e.g. gh/gk from
-    # GitConfigure.ps1). Shares one target resolver with the declarative path
+    # Procedural registration path (Register-CliCompletion, e.g. pwsh/wsl from
+    # PowerShellSetup.ps1). Shares one target resolver with the declarative path
     # so both land in the same profile -- see Resolve-CompletionProfileTarget
     # in Register-PackageCompletion.ps1 for why it is CurrentUserAllHosts
     # rather than AllUsersAllHosts (#397).

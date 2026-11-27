@@ -103,7 +103,7 @@ Function Set-GitHubCliAlias {
     # Applies this bucket's per-user `gh` aliases. gh keeps aliases in
     # %APPDATA%\GitHub CLI\config.yml -- per-user state, so this runs
     # unelevated and is deliberately NOT machine-scoped like the CLI install
-    # itself (`winget install --scope machine GitHub.cli` in GitConfigure.ps1).
+    # itself (winget GitHub.cli, Git Tools' GitHub CLI package, #563).
     if (-not (Get-Command gh -ErrorAction Ignore)) {
         Write-Warning "gh not found. Skipping GitHub CLI alias configuration."
         return
@@ -139,10 +139,7 @@ Function Invoke-GitConfigGitHubCli {
     # its own known failures and warns rather than throwing; the try/catch pairs
     # below cover the unforeseen ones, so the steps are genuinely independent: a
     # missing gh-aliases.yml must not cost you the credential helper, and an
-    # unauthenticated gh must not cost you the aliases. It also keeps a surprise
-    # here from aborting the rest of GitConfigure.ps1, which dot-sources this
-    # script mid-run -- the same reason the Register-CliCompletion calls on either
-    # side of that dot-source are wrapped.
+    # unauthenticated gh must not cost you the aliases.
     [CmdletBinding()]
     param()
     try { Set-GitHubCliAlias } catch {

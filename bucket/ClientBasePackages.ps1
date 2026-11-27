@@ -76,7 +76,8 @@ Register-ArgumentCompleter -Native -CommandName dbxcli -ScriptBlock {
     [Package]@{ Name = 'AIAgents bundle';  Installer = 'scoop';  Id = 'MarkMichaelis/AIAgents'
                 Notes = 'Pulls every AI agent + Claude Desktop and configures MCP servers; see AIAgents.ps1.' }
 
-    [Package]@{ Name = 'Handy';            Installer = 'winget'; Id = 'cjpais.Handy'; Scope = 'user'
+    # Owner's outline (#563): Handy and eSpeak NG are installed only when asked for.
+    [Package]@{ Name = 'Handy';            Installer = 'winget'; Id = 'cjpais.Handy'; Scope = 'user'; Default = $false
                 WingetExtraArgs = @('--skip-dependencies')
                 Notes = 'Free open-source local speech-to-text (https://handy.computer). Runs Whisper/Parakeet locally; no cloud. User-scope only. Declares a KhronosGroup.VulkanRT dependency winget cannot resolve on most machines (already present via GPU drivers), so we skip dependency processing.' }
 
@@ -84,6 +85,7 @@ Register-ArgumentCompleter -Native -CommandName dbxcli -ScriptBlock {
         Name        = 'eSpeak NG'
         Installer   = 'scoop'
         Id          = 'main/espeak-ng'
+        Default     = $false
         CliCommands = @('espeak-ng')
         Completion  = 'auto'
         Notes       = 'Stays on scoop: winget eSpeak-NG.eSpeak-NG carries the same version (1.52.0) and the same espeak-ng.msi, but `winget show --id eSpeak-NG.eSpeak-NG --exact --scope machine` returns "No applicable installer found" -- there is no machine-scope installer, and the manifest also declares a Microsoft.VCRedist.2015+.x64 dependency. README rule 2 applies (winget lacks a usable package). #6 still holds; re-confirmed in #465. espeak-ng has no completion subcommand and no PSCompletions entry. Hand-curated flag list.'
@@ -222,6 +224,11 @@ Register-ArgumentCompleter -Native -CommandName sox -ScriptBlock {
         }
         VerifyScript = { [bool](Get-AppxPackage -Name '*Readwise*' -ErrorAction SilentlyContinue) }
     }
+
+    # Bare manifests of this bucket the owner's outline makes defaults (#563).
+    [Package]@{ Name = 'AdobeLightroomClassic'; Installer = 'scoop'; Id = 'MarkMichaelis/AdobeLightroomClassic' }
+    [Package]@{ Name = 'Epubor';                Installer = 'scoop'; Id = 'MarkMichaelis/Epubor' }
+    [Package]@{ Name = 'SmugMug';               Installer = 'scoop'; Id = 'MarkMichaelis/SmugMug' }
 )
 
 Invoke-PackageInstall -Packages $Packages -Bundle 'ClientBasePackages'
