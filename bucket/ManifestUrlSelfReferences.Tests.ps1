@@ -58,7 +58,7 @@ BeforeDiscovery {
     # entries FLAT in $dir, which is exactly where a $PSScriptRoot-relative
     # sibling path looks, so listing it is the whole fix.
     #
-    # Don't assume a script's manifest shares its basename: PowerShell.ps1 is
+    # Don't assume a script's manifest shares its basename: PowerShellSetup.ps1 is
     # the one installer script behind three differently-named manifests
     # (PowerShellCore/CorePreview/Windows.json). Instead parse each manifest's
     # own `installer.script` for the .ps1 it actually invokes, and key off
@@ -68,7 +68,7 @@ BeforeDiscovery {
         try { $json = Get-Content -Raw -LiteralPath $_.FullName | ConvertFrom-Json } catch { return }
         # installer.script is either one string or an array of strings (e.g.
         # PowerShellCore.json winget-upgrades first, THEN dot-invokes
-        # PowerShell.ps1) -- join so either shape is searched uniformly.
+        # PowerShellSetup.ps1) -- join so either shape is searched uniformly.
         $invoke = @($json.installer.script) -join "`n"
         if (-not $invoke) { return }
         $entryMatch = [regex]::Match($invoke, '(?<name>[\w.-]+\.ps1)')
@@ -83,7 +83,7 @@ BeforeDiscovery {
     # Sibling-reference idioms seen in this repo: Join-Path $PSScriptRoot
     # '<name>.ps1' (single-quoted literal) and the double-quoted interpolated
     # form "$PSScriptRoot\<name>.ps1" / "$PSScriptRoot/<name>.ps1" that
-    # GitConfigure.ps1 uses for its three dot-sources.
+    # the base bundles use for SharedPackages.ps1.
     $script:SiblingRefPattern = "PSScriptRoot\s+'(?<sib>[^']+\.ps1)'|" +
         '\$PSScriptRoot[\\/](?<sib>[\w.-]+\.ps1)'
 

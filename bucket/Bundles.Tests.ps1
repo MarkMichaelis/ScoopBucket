@@ -69,12 +69,11 @@ Describe 'Declarative bundles (data-driven)' -Tag 'Light','Bundle' {
 
     It 'has unique Name within each bundle (cross-bundle duplicates are allowed by design)' {
         # Cross-bundle duplicate names are legitimate — e.g.
-        #   * Visual Studio Code is declared in both OSBasePackages
-        #     (baseline editor) and DeveloperBasePackages (developer
-        #     surface) so either bundle works standalone.
-        #   * Node.js / GitHub Copilot CLI / ChatGPT are declared in
-        #     AIAgents (so AIAgents stands on its own) AND in
-        #     DeveloperBasePackages / ChatGPT.ps1 (their canonical home).
+        #   * Visual Studio Code is in both OSBasePackages (baseline editor)
+        #     and DeveloperBasePackages (developer surface) so either bundle
+        #     works standalone -- one declaration, in SharedPackages.ps1,
+        #     that both include (#563).
+        #   * ChatGPT is declared in AIAgents and in its own ChatGPT.ps1.
         # The contract we actually need is that no single bundle's
         # `$Packages` array declares the same Name twice — i.e. the
         # bundle author never lost track of which entries are in their
@@ -333,7 +332,7 @@ Describe 'Specific cross-bundle placement contracts' -Tag 'Light','Bundle' {
         $collisions | Should -BeNullOrEmpty -Because "within-bundle CLI duplicates: $(($collisions | ForEach-Object { "$($_.Bundle):$($_.Cli) -> $($_.Packages -join '+')" }) -join '; ')"
     }
 
-    It 'node, npm, and npx are claimed as a completion source by exactly one bundle entry' {
+    It 'node, npm, and npx are claimed as a completion source by one declaration' {
         # Regression guard for issue #222: a stale Node.js entry in
         # DeveloperBasePackages declared CliCommands=@('node','npm') with
         # Completion='pscompletions' while AIAgents already owns
@@ -348,9 +347,10 @@ Describe 'Specific cross-bundle placement contracts' -Tag 'Light','Bundle' {
         # in more than one bundle because the Visual Studio install
         # workflow needs them visible from multiple bundles. Those are
         # validated by their own dedicated tests. Here we narrowly
-        # assert the node/npm/npx ownership contract: AIAgents alone
-        # owns the Node.js runtime CLIs because it ships the only
-        # NativeCommandScript that registers all three uniformly.
+        # assert the node/npm/npx ownership contract: one Node.js
+        # declaration owns the runtime CLIs. Since #563 AIAgents and
+        # DeveloperBasePackages both include it from SharedPackages.ps1, so
+        # every bundle entry claiming them writes the same block.
         $targets = @('node','npm','npx')
         $ownership = @{}
         foreach ($p in $script:allPkgs) {
@@ -364,8 +364,11 @@ Describe 'Specific cross-bundle placement contracts' -Tag 'Light','Bundle' {
         }
         foreach ($cli in $targets) {
             $claimers = @($ownership[$cli])
-            $claimers.Count | Should -Be 1 -Because "exactly one bundle entry must claim '$cli' as a completion source; got: $($claimers -join ', ')"
-            $claimers[0] | Should -BeLike 'AIAgents/Node.js*' -Because "AIAgents is the authoritative source for node/npm/npx completion (see comment near the AIAgents.ps1 Node.js entry)"
+            $claimers | Should -Not -BeNullOrEmpty -Because "a bundle entry must claim '$cli' as a completion source"
+            @($claimers | Where-Object { $_ -notlike '*/Node.js*' }) | Should -BeNullOrEmpty -Because "only the Node.js declaration may claim '$cli'; got: $($claimers -join ', ')"
+            $blocks = @($script:allPkgs | Where-Object { $_.Name -eq 'Node.js' -and @($_.CliCommands) -contains $cli } |
+                ForEach-Object { [string]$_.NativeCommandOutputs.$cli } | Sort-Object -Unique)
+            $blocks | Should -HaveCount 1 -Because "every bundle entry claiming '$cli' must write the same completion block"
         }
     }
 

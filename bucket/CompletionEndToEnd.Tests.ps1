@@ -86,7 +86,7 @@ Describe 'Completion end-to-end (real Tab, no mocks)' -Tag 'Heavy','Completion' 
         # Load the two profiles every host loads, in the engine's order:
         # AllUsersAllHosts, then CurrentUserAllHosts. Some CLIs complete from
         # a module the machine profile imports rather than from a block of
-        # ours -- git stands aside for posh-git, which GitConfigure.ps1 adds
+        # ours -- git stands aside for posh-git, which PoshGit.ps1 adds
         # to AllUsersAllHosts. Host-specific profiles are deliberately left
         # out: they carry interactive, per-user startup work.
         $profileList = (@($PROFILE.AllUsersAllHosts, $script:profilePath) |

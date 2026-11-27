@@ -157,7 +157,7 @@ Describe 'Remove-PackageCompletionBlock: deletes the sidecar .ps1 alongside the 
 
     It 'public Register-CliCompletion also routes Native payloads through the sidecar (#218 Copilot review)' {
         # Regression: the legacy public path `Register-CliCompletion`
-        # (called e.g. from bucket/GitConfigure.ps1) was still using the
+        # (called e.g. from bucket/developer/PowerShellSetup.ps1) was still using the
         # v1 inline writer, so a manual call with a `using namespace`
         # payload would re-introduce the parse error. The fix routes
         # Native sources through the same sidecar logic as

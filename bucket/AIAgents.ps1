@@ -40,102 +40,15 @@ $Packages = [Package[]]@(
     # actually resolve at agent start-up. DependsOn pulls these in
     # transitively when -Name selects an agent.
     #
-    # AIAgents is the AUTHORITATIVE completion source for node/npm/npx
-    # across every bundle in this repo. The hand-curated NativeCommandScript
-    # below registers all three CLIs uniformly. Do NOT add a Node.js entry
-    # to any other bundle (e.g. DeveloperBasePackages) -- a duplicate
-    # would write a competing profile block for the same CLIs and the
-    # registration outcome would become order-dependent. See issue #222.
-    [Package]@{
-        Name        = 'Node.js'
-        Installer   = 'choco'
-        Id          = 'nodejs'
-        CliCommands = @('node','npm','npx')
-        Completion  = 'auto'
-        Notes       = 'STAYS ON CHOCO DELIBERATELY -- do not "correct" this to winget without re-checking the versions below (#465). README rule 1 prefers winget, and winget does carry Node.js from the OpenJS Foundation with a machine-scope wix MSI, but rule 2''s "when winget lacks the package" extends to materially lagging it, and it does lag: as observed 2026-10-03, choco nodejs was 26.10.0 while winget OpenJS.NodeJS was 26.7.0 (three minors behind) and OpenJS.NodeJS.LTS was 24.19.0. Moving would be a downgrade, and every npx-based MCP server below depends on this entry, so the owner ruled it stays. Re-check those four numbers before revisiting; if winget catches up, the exception expires -- that is exactly how ripgrep''s own version-based exception expired and had to be corrected in #465. Required for every npx-based MCP server (context7, playwright, filesystem, github). node/npm have PSCompletions entries but npx does not, so ship a shared hand-curated NativeCommandScript that registers all three uniformly here.'
-        ExpectedCompletions = @{
-            node = @('--help','--version','--eval')
-            npm  = @('install','run','version')
-            npx  = @('--help','--version','--package')
-        }
-        NativeCommandScript = {
-            @"
-Register-ArgumentCompleter -Native -CommandName node -ScriptBlock {
-    param(`$wordToComplete, `$commandAst, `$cursorPosition)
-    @(
-        '--help','--version','--eval','--print','--check','--interactive','--require','--inspect',
-        '--inspect-brk','--enable-source-maps','--experimental-modules','--experimental-vm-modules',
-        '--unhandled-rejections','--use-openssl-ca','--no-warnings','--trace-warnings'
-    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
-        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
-    }
-}
-Register-ArgumentCompleter -Native -CommandName npm -ScriptBlock {
-    param(`$wordToComplete, `$commandAst, `$cursorPosition)
-    @(
-        'install','uninstall','update','run','start','test','version','init','publish','pack',
-        'config','cache','audit','outdated','ls','list','link','unlink','search','view','prune',
-        'rebuild','restart','stop','adduser','login','logout','whoami','--help','--version'
-    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
-        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
-    }
-}
-Register-ArgumentCompleter -Native -CommandName npx -ScriptBlock {
-    param(`$wordToComplete, `$commandAst, `$cursorPosition)
-    @(
-        '--help','--version','--package','--call','--no-install','--ignore-existing','--yes','--no',
-        '--shell','--cache','--prefer-offline','--prefer-online','--offline','--quiet','--verbose'
-    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
-        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
-    }
-}
-"@
-        }
-    }
+    # Node.js, Playwright and GitHub Copilot CLI are Developer Base's too, so
+    # each is declared once, in SharedPackages.ps1 (#563). Node.js is the one
+    # source of node/npm/npx completion (#222).
+    & "$PSScriptRoot\SharedPackages.ps1" -Name 'Node.js'
 
     # Playwright is a runtime prerequisite, not an agent: the `playwright` MCP
     # server (@playwright/mcp, wired below) drives a real Chromium instance,
     # and the npm package alone ships no browser binaries.
-    #
-    # The CLI/completion block below is a twin of the DeveloperBasePackages
-    # entry and of the Playwright member manifest -- identical modulo each
-    # file's own line-ending convention -- which is what keeps it safe under
-    # #222: that rule forbids two bundles writing *competing* profile blocks
-    # for the same CLI, and blocks with the same content cannot compete
-    # (same shape as the 'GitHub Copilot CLI' duplicate both bundles carry).
-    # Declaring it here is not optional bookkeeping: Update-Package and
-    # Uninstall-Package resolve a -Name to the FIRST bundle declaring it, and
-    # AIAgents sorts ahead of DeveloperBasePackages. An install-only entry here
-    # would therefore make `Uninstall-Package Playwright` leave the completer
-    # orphaned in the profile, and `Update-Package Playwright` stop refreshing
-    # it. Keep all three declarations in sync.
-    [Package]@{
-        Name        = 'Playwright'
-        Installer   = 'scoop'
-        Id          = 'MarkMichaelis/Playwright'
-        CliCommands = @('playwright')
-        DependsOn   = @('Node.js')
-        Completion  = 'auto'
-        Notes       = 'Browser automation runtime for the playwright MCP server; the member manifest performs the global npm install and the Chromium download. playwright has no completion subcommand and no PSCompletions entry; hand-curated command/flag list, kept identical to the DeveloperBasePackages entry and the Playwright member manifest so name-resolution order cannot change uninstall/update behavior.'
-        ExpectedCompletions = @{ playwright = @('test','install','codegen','show-report') }
-        NativeCommandScript = {
-            @"
-Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
-    param(`$wordToComplete, `$commandAst, `$cursorPosition)
-    @(
-        'open','codegen','install','install-deps','uninstall','screenshot','pdf',
-        'show-trace','trace','cli','mcp','test','show-report','merge-reports',
-        'clear-cache','init-agents','init-skills','help',
-        '--help','-h','--version','-V',
-        '--browser','--headed','--project','--reporter','--workers','--debug','--ui','--grep',
-        '--list','--repeat-each','--retries','--timeout','--update-snapshots','--trace','--config'
-    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
-        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
-    }
-}
-"@
-        }
-    }
+    & "$PSScriptRoot\SharedPackages.ps1" -Name 'Playwright'
 
     # Agent apps.
     [Package]@{
@@ -461,37 +374,7 @@ Register-ArgumentCompleter -Native -CommandName agy -ScriptBlock {
 "@
         }
     }
-    [Package]@{
-        Name        = 'GitHub Copilot CLI'
-        # #547: declared under winget like the DeveloperBasePackages copy, for
-        # the same reason as 'Claude Code CLI' above -- the retired
-        # MarkMichaelis/GitHubCopilotCli scoop manifest only wrapped winget
-        # GitHub.Copilot (a portable copilot.exe), so the wrapper declaration
-        # hid new versions and made the #464 gate refuse the real install.
-        Installer   = 'winget'
-        Id          = 'GitHub.Copilot'
-        PreviousInstaller = 'scoop'
-        PreviousId  = 'MarkMichaelis/GitHubCopilotCli'
-        CliCommands = @('copilot')
-        DependsOn   = @('Node.js')
-        Completion  = 'auto'
-        Notes       = '`copilot completion` only supports bash/zsh/fish; not in PSCompletions catalog (#73). Hand-curated top-level flag/command list (mirrors DeveloperBasePackages winget GitHub.Copilot package).'
-        ExpectedCompletions = @{ copilot = @('--help','--version','--model') }
-        NativeCommandScript = {
-            @"
-Register-ArgumentCompleter -Native -CommandName copilot -ScriptBlock {
-    param(`$wordToComplete, `$commandAst, `$cursorPosition)
-    @(
-        '--help','--version','--model','--prompt','--allow-tool','--deny-tool',
-        '--allow-all-tools','--add-dir','--no-color','--banner','--resume','--continue',
-        '--screen-reader','--log-level','--log-dir','-p','--allow-all-paths'
-    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
-        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
-    }
-}
-"@
-        }
-    }
+    & "$PSScriptRoot\SharedPackages.ps1" -Name 'GitHub Copilot CLI'
     # Grok Bot (winget xAI.GrokBot), xAI's Windows desktop app, is
     # deliberately NOT installed here (owner decision, #507). As checked on
     # 2026-11-08, x.ai/grok offers only iOS, Android and Grok Bot downloads

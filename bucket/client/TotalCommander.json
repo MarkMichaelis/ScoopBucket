@@ -4,7 +4,7 @@
     "url": ["https://raw.githubusercontent.com/MarkMichaelis/ScoopBucket/main/bucket/_placeholder"],
     "installer": {
         "script": [
-            "choco install TotalCommander"
+            "choco install TotalCommander -y"
         ]
     }
 }

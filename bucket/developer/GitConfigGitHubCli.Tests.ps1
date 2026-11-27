@@ -477,9 +477,8 @@ Describe "Behaviour $sut (unit)" -Tag 'Light', 'Unit' {
         It 'still configures credentials when the alias step throws unexpectedly' {
             # Independence has to survive the failures neither step anticipated,
             # not just the guarded ones -- the credential helper is the whole
-            # point of #434, and this script is dot-sourced mid-run by
-            # GitConfigure.ps1, so an escaping exception would take the rest of
-            # that script down with it.
+            # point of #434, and an escaping exception would fail the GitHub
+            # CLI settings install outright.
             Mock Set-GitHubCliAlias -MockWith { throw 'unexpected' }
             Mock Set-GitCredentialHelperFromGitHubCli -MockWith { }
 

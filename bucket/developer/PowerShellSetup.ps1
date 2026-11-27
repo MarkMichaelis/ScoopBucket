@@ -1,0 +1,157 @@
+
+Write-Verbose 'Installing and configuring PowerShell...'
+#region MarkMichaelis.ScoopBucket bundle module import (scoop-portable; see README)
+$scoopBucketModule = 'MarkMichaelis.ScoopBucket'
+$scoopBucketPsd1 = Join-Path $PSScriptRoot "..\..\module\$scoopBucketModule\$scoopBucketModule.psd1"
+if (-not (Test-Path $scoopBucketPsd1)) {
+    $scoopBucketRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $PSScriptRoot '..\..\..' }
+    $scoopBucketFound = Get-ChildItem -Path (Join-Path $scoopBucketRoot "buckets\*\module\$scoopBucketModule\$scoopBucketModule.psd1") -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($scoopBucketFound) { $scoopBucketPsd1 = $scoopBucketFound.FullName }
+}
+if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else { Import-Module $scoopBucketModule -Force }
+#endregion MarkMichaelis.ScoopBucket bundle module import
+
+# Remove the Microsoft Store / MSIX build of PowerShell 7 so the first-party
+# MSI build (C:\Program Files\PowerShell\7) is the resolved `pwsh` and its
+# AllUsersAllHosts profile is admin-writable (#281). Only relevant when this
+# script runs under PowerShell 7+ (the PowerShellCore install path); skipped
+# under Windows PowerShell 5.1 (the PowerShellWindows path). Best-effort:
+# Remove-StorePwsh warns instead of throwing when the Store build is absent.
+if ($IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
+    try {
+        Remove-StorePwsh -Confirm:$false | Out-Null
+    } catch {
+        Write-Warning "Skipping Store PowerShell removal: $($_.Exception.Message)"
+    }
+}
+
+Update-Help -ErrorAction Ignore
+if((Get-PSRepository PSGallery).InstallationPolicy -ne 'Trusted') {
+    Set-PSRepository -Name PSGallery -InstallationPolicy 'Trusted'
+}
+Install-Module PowershellGet -Repository PSGallery -Scope AllUsers  # Updated to allow support for -AllowPrerelease
+Install-Module Pscx -AllowClobber -AllowPrerelease -Scope AllUsers  # Both Pscx and IntelliTect.File support Edit-File. 
+                                                                    # IntelliTect.File will get priority once if it appears first in the PSModulePath
+                                                                    # or it is installed after Pscx (if not using source code)
+Install-Module ZLocation -Repository PSGallery -Scope AllUsers
+Install-Module PSReadLine -Force -Scope AllUsers   # Update the version of PSReadline
+Install-Module Microsoft.PowerShell.SecretManagement -Scope AllUsers
+Install-Module WinGet-Essentials -Repository PSGallery -Scope AllUsers
+Install-Module Microsoft.PowerShell.ConsoleGuiTools -Repository PSGallery -Scope AllUsers
+Install-Module Az -Repository PSGallery -Scope AllUsers  # Azure PowerShell rollup (Az.Accounts, Az.Compute, Az.Resources, ...). No -Force: about 80 sub-modules.
+choco install Pester -y
+
+# Install Scott Hanselman's Windows Terminal Copilot CLI skill
+# (sets tab title/color from inside Copilot CLI via !tab commands).
+# Repo: https://github.com/shanselman/windows-terminal-copilot-skill
+if (Get-Command git -ErrorAction Ignore) {
+    $skillPath = Join-Path $env:USERPROFILE '.copilot\skills\windows-terminal'
+    if (Test-Path (Join-Path $skillPath '.git')) {
+        git -C $skillPath pull --quiet
+    } else {
+        New-Item -ItemType Directory -Path (Split-Path $skillPath -Parent) -Force | Out-Null
+        git clone --quiet https://github.com/shanselman/windows-terminal-copilot-skill.git $skillPath
+    }
+    $importLine = 'Import-Module "$env:USERPROFILE\.copilot\skills\windows-terminal\WindowsTerminalSkill.psd1"'
+    if (-not (Test-Path $PROFILE)) {
+        New-Item -ItemType File -Path $PROFILE -Force | Out-Null
+    }
+    if (-not (Select-String -Path $PROFILE -Pattern 'WindowsTerminalSkill\.psd1' -SimpleMatch -Quiet)) {
+        Add-Content -Path $PROFILE -Value $importLine
+    }
+} else {
+    Write-Warning 'git not found; skipping windows-terminal-copilot-skill install.'
+}
+
+# ----------------------------------------------------------------------------
+# Native PowerShell tab-completion for the PowerShell hosts and wsl (#278).
+#
+# Neither `pwsh`, `powershell`, nor `wsl` ships a `<cli> completion powershell`
+# subcommand, so each gets a hand-curated completer covering its documented
+# top-level switches. Registration flows through Register-CliCompletion's
+# self-healing path (Resolve-SelfHealingCompleter): if any of these CLIs later
+# gains a real native helper, it is adopted automatically and a low-priority
+# advisory notes this block can be removed. Best-effort -- skipped with a
+# warning when the AllUsersAllHosts profile is not writable (e.g. not elevated),
+# matching gh.
+# ----------------------------------------------------------------------------
+function New-StaticNativeCompleter {
+    # Build a scriptblock that emits a hand-curated `Register-ArgumentCompleter
+    # -Native` here-string for $Cli over a fixed $Switches list. Returned as a
+    # closure so Register-CliCompletion captures the rendered text verbatim.
+    param([string]$Cli, [string[]]$Switches)
+    $switchLiteral = ($Switches | ForEach-Object { "'$_'" }) -join ','
+    $completerText = @"
+Register-ArgumentCompleter -Native -CommandName $Cli -ScriptBlock {
+    param(`$wordToComplete, `$commandAst, `$cursorPosition)
+    @($switchLiteral) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
+    }
+}
+"@
+    return { $completerText }.GetNewClosure()
+}
+
+$pwshSwitches = @(
+    '-File', '-Command', '-EncodedCommand', '-ConfigurationName', '-CustomPipeName',
+    '-ExecutionPolicy', '-InputFormat', '-OutputFormat', '-Login', '-MTA', '-STA',
+    '-NoExit', '-NoLogo', '-NoProfile', '-NoProfileLoadTime', '-NonInteractive',
+    '-SettingsFile', '-Version', '-WindowStyle', '-WorkingDirectory', '-Help'
+)
+try {
+    Register-CliCompletion -Cli pwsh -NativeCommand (New-StaticNativeCompleter -Cli pwsh -Switches $pwshSwitches) -Force -Confirm:$false -ErrorAction Stop | Out-Null
+} catch {
+    Write-Warning "Skipping pwsh tab-completion registration: $($_.Exception.Message)"
+}
+
+$powershellSwitches = @(
+    '-File', '-Command', '-EncodedCommand', '-ConfigurationName', '-ExecutionPolicy',
+    '-InputFormat', '-OutputFormat', '-Mta', '-Sta', '-NoExit', '-NoLogo', '-NoProfile',
+    '-NonInteractive', '-PSConsoleFile', '-Version', '-WindowStyle', '-Help'
+)
+try {
+    Register-CliCompletion -Cli powershell -NativeCommand (New-StaticNativeCompleter -Cli powershell -Switches $powershellSwitches) -Force -Confirm:$false -ErrorAction Stop | Out-Null
+} catch {
+    Write-Warning "Skipping powershell tab-completion registration: $($_.Exception.Message)"
+}
+
+$wslSwitches = @(
+    '--install', '--list', '-l', '--set-default', '-s', '--set-version',
+    '--set-default-version', '--shutdown', '--terminate', '-t', '--unregister',
+    '--import', '--export', '--distribution', '-d', '--user', '-u', '--exec', '-e',
+    '--status', '--update', '--help'
+)
+try {
+    Register-CliCompletion -Cli wsl -NativeCommand (New-StaticNativeCompleter -Cli wsl -Switches $wslSwitches) -Force -Confirm:$false -ErrorAction Stop | Out-Null
+} catch {
+    Write-Warning "Skipping wsl tab-completion registration: $($_.Exception.Message)"
+}
+
+# scoop tab-completion via the upstream `scoop-completion` module (#278). scoop
+# has no `scoop completion powershell` subcommand; its completer is shipped as a
+# PowerShell module installed through scoop itself. Install (best-effort),
+# import it into the current session so completion works immediately, and add an
+# idempotent import to the CurrentUserAllHosts profile so it loads in every host.
+try {
+    if (-not (Get-Module -ListAvailable -Name scoop-completion)) {
+        scoop install scoop-completion
+    }
+    Import-Module scoop-completion -ErrorAction SilentlyContinue
+    $allHostsProfile = $PROFILE.CurrentUserAllHosts
+    if (-not (Test-Path $allHostsProfile)) {
+        $profileDir = Split-Path -Parent $allHostsProfile
+        if ($profileDir -and -not (Test-Path $profileDir)) {
+            New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+        }
+        New-Item -ItemType File -Path $allHostsProfile -Force | Out-Null
+    }
+    if (-not (Select-String -Path $allHostsProfile -Pattern 'Import-Module\s+scoop-completion' -Quiet)) {
+        Add-Content -Path $allHostsProfile -Value 'Import-Module scoop-completion -ErrorAction SilentlyContinue'
+    }
+} catch {
+    Write-Warning "Skipping scoop-completion activation: $($_.Exception.Message)"
+}
+
+
+
+

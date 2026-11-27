@@ -115,7 +115,7 @@ Invoke-PackageInstall -Packages `$Packages -Bundle 'BootstrapProbe' -DryRun |
 
     Context 'subdir bundle header (developer/PowerShell, branch-1 depth ..\..\module)' {
         BeforeAll {
-            $script:header = Get-BundleImportHeader -BundlePath (Join-Path $script:repoRoot 'bucket\developer\PowerShell.ps1')
+            $script:header = Get-BundleImportHeader -BundlePath (Join-Path $script:repoRoot 'bucket\developer\PowerShellSetup.ps1')
         }
 
         It 'loads from the bucket clone (identical branch 2 despite deeper branch 1)' {

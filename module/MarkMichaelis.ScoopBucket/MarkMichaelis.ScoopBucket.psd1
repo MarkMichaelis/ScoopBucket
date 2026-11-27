@@ -65,8 +65,8 @@
         'Import-ClaudeCodeSettings',
         'Set-DefaultEditorVariable',
         'Set-ScoopExternal7Zip',
-        # Called by the plain-script installers Chocolatey.ps1 and
-        # GitConfigure.ps1, which see only exported functions (#524).
+        # Called by the plain-script installer Chocolatey.ps1, which sees only
+        # exported functions (#524).
         'Import-ChocolateyModule',
         'Install-DbxProviderModule',
         'Set-DbxDriveProfile'

@@ -19,6 +19,10 @@ if (Test-Path $scoopBucketPsd1) { Import-Module $scoopBucketPsd1 -Force } else {
 #   #73      copilot completion via PSCompletions (no native PS completion command)
 
 $Packages = [Package[]]@(
+    # Git, its set-up, and the Git clients, shown as one group (#563).
+    [Package]@{ Name = 'Git Tools'; Installer = 'scoop'; Id = 'MarkMichaelis/GitTools' }
+    # Also in OS Base: declared once, in SharedPackages.ps1 (#563).
+    & "$PSScriptRoot\SharedPackages.ps1" -Name 'Visual Studio Code'
     [Package]@{
         Name        = 'dotnet'
         Installer   = 'winget'
@@ -42,10 +46,16 @@ Register-ArgumentCompleter -Native -CommandName dotnet -ScriptBlock {
 "@
         }
     }
+    # Git's diff and merge tool settings for Visual Studio; installed with
+    # Visual Studio as its companion (#563).
+    [Package]@{ Name = 'Git settings for Visual Studio'; Installer = 'scoop'; Id = 'MarkMichaelis/GitConfigVisualStudio' }
     [Package]@{
         Name        = 'Visual Studio'
         Installer   = 'scoop'
         Id          = 'MarkMichaelis/VisualStudio2026Enterprise'
+        # Owner's outline (#563): a multi-GB IDE, installed only when asked for.
+        Default     = $false
+        Companions  = @('Git settings for Visual Studio')
         CliCommands = @('devenv')
         Completion  = 'auto'
         Notes       = 'devenv has no completion subcommand and no PSCompletions entry; hand-curated common-options list from `devenv /?`.'
@@ -115,98 +125,8 @@ Register-ArgumentCompleter -Native -CommandName devenv -ScriptBlock {
         }
     }
 
-    [Package]@{
-        Name        = 'Lazygit'
-        Installer   = 'winget'
-        Id          = 'JesseDuffield.lazygit'
-        CliCommands = @('lazygit')
-        Completion  = 'auto'
-        Notes       = 'lazygit is a terminal UI for git; its CLI surface is a small set of setup flags (no `lazygit completion powershell` subcommand and no PSCompletions catalog entry). Hand-curated flag list mirrors bat/fzf/code in the bucket.'
-        ExpectedCompletions = @{ lazygit = @('--help','--version','--config') }
-        NativeCommandScript = {
-            @"
-Register-ArgumentCompleter -Native -CommandName lazygit -ScriptBlock {
-    param(`$wordToComplete, `$commandAst, `$cursorPosition)
-    @(
-        '--help','-h','--version','-v','--debug','-d','--config','-c',
-        '--print-config-dir','-cd','--use-config-dir','-ucd','--path','-p',
-        '--filter','-f','--git-dir','-g','--work-tree','-w','--screen-mode','-sm',
-        '--profile','-pf','--tail','-t'
-    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
-        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
-    }
-}
-"@
-        }
-    }
 
-    # Git's diff and merge tool settings for VS Code; installed with VS Code as
-    # its companion, and can be turned off on its own (#559).
-    [Package]@{ Name = 'Git settings for VS Code'; Installer = 'scoop'; Id = 'MarkMichaelis/GitConfigVSCode' }
-    [Package]@{
-        Name        = 'Visual Studio Code'
-        Installer   = 'winget'
-        Id          = 'Microsoft.VisualStudioCode'
-        Companions  = @('Git settings for VS Code')
-        CliCommands = @('code')
-        Completion  = 'auto'
-        Notes       = '`code --help` lists CLI switches but `code` has no completion subcommand and no PSCompletions catalog entry. Hand-curated flag list (mirrors OSBasePackages).'
-        ExpectedCompletions = @{ code = @('--help','--diff','--new-window') }
-        NativeCommandScript = {
-            @"
-Register-ArgumentCompleter -Native -CommandName code -ScriptBlock {
-    param(`$wordToComplete, `$commandAst, `$cursorPosition)
-    @(
-        '--help','--version','--diff','--merge','--add','--goto','--new-window','--reuse-window',
-        '--wait','--locale','--user-data-dir','--profile','--extensions-dir','--list-extensions',
-        '--install-extension','--uninstall-extension','--enable-proposed-api','--status',
-        '--prof-startup','--disable-extensions','--disable-extension','--sync','--inspect-extensions',
-        '--inspect-brk-extensions','--verbose','--log','--telemetry'
-    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
-        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
-    }
-}
-"@
-        }
-        # EDITOR is the fallback every CLI tool reaches for when it needs the
-        # user to edit a file: git with no core.editor, npm, gh, and most
-        # POSIX-minded tooling. ConfigScript rather than PostInstallScript so
-        # it is re-applied on updates too, not just first install.
-        #
-        # The decision (claim EDITOR only when unset or already pointing at
-        # VS Code; never revert a deliberately chosen editor; warn rather than
-        # throw when a machine-scope write needs elevation) lives in
-        # Set-DefaultEditorVariable, next to the other desired-state hooks.
-        # Keeping it there rather than inline is what lets the OSBasePackages
-        # and DeveloperBasePackages copies be identical by construction:
-        # Update-Package resolves a -Name to the FIRST bundle declaring it, so
-        # two copies that drift would change behavior depending on which
-        # declaration won (the hazard fixed for Playwright in #417).
-        ConfigScript = { Set-DefaultEditorVariable | Out-Null }
-    }
-    [Package]@{
-        Name        = 'GitHub Copilot CLI'
-        Installer   = 'winget'
-        Id          = 'GitHub.Copilot'
-        CliCommands = @('copilot')
-        Completion  = 'auto'
-        Notes       = '`copilot completion` only supports bash/zsh/fish; not in PSCompletions catalog (#73). Hand-curated top-level flag/command list.'
-        ExpectedCompletions = @{ copilot = @('--help','--version','--model') }
-        NativeCommandScript = {
-            @"
-Register-ArgumentCompleter -Native -CommandName copilot -ScriptBlock {
-    param(`$wordToComplete, `$commandAst, `$cursorPosition)
-    @(
-        '--help','--version','--model','--prompt','--allow-tool','--deny-tool',
-        '--allow-all-tools','--add-dir','--no-color','--banner','--resume','--continue',
-        '--screen-reader','--log-level','--log-dir','-p','--allow-all-paths'
-    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
-        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
-    }
-}
-"@
-        }
-    }
+    & "$PSScriptRoot\SharedPackages.ps1" -Name 'GitHub Copilot CLI'
     [Package]@{
         Name        = 'Python'
         Installer   = 'winget'
@@ -235,6 +155,8 @@ Register-ArgumentCompleter -Native -CommandName python -ScriptBlock {
         Name        = 'Android Platform Tools'
         Installer   = 'winget'
         Id          = 'Google.PlatformTools'
+        # Owner's outline (#563): only for machines that talk to Android devices.
+        Default     = $false
         CliCommands = @('adb','fastboot')
         Completion  = 'auto'
         Notes       = 'Android SDK platform-tools (adb/fastboot). winget per the README engine preference (winget first for CLIs); this entry was scoop main/adb with no recorded justification, the same defect #462/#463 corrected for rclone (audited in #465). Google.PlatformTools is the identical artifact at the identical version (platform-tools_r37.0.1-win.zip), InstallerType zip / NestedInstallerType portable with a PortableCommandAlias for BOTH binaries (platform-tools/adb.exe -> adb, platform-tools/fastboot.exe -> fastboot) plus ArchiveBinariesDependOnPath, and --scope machine resolves. Neither adb nor fastboot ships a `completions powershell` subcommand, so the completer is hand-curated (curated, not native -- #289/#293). (data/PSCompletionsCatalog.json does list adb -- though not fastboot -- but that fallback stopped being a dependency in #241, so it is not an option either way.) Subcommand lists drawn from `adb --help` and `fastboot --help`.'
@@ -294,46 +216,8 @@ Register-ArgumentCompleter -Native -CommandName aspire -ScriptBlock {
         }
     }
 
-    [Package]@{
-        Name        = 'Playwright'
-        Installer   = 'scoop'
-        Id          = 'MarkMichaelis/Playwright'
-        CliCommands = @('playwright')
-        Completion  = 'auto'
-        Notes       = 'Bundle manifest invokes `npm install --global @playwright/test` and downloads the Chromium browser binaries. Requires Node.js/npm on PATH (the AIAgents bundle installs Node.js; on a developer-only machine install Node.js first). playwright has no completion subcommand and no PSCompletions entry; hand-curated command/flag list (mirrors the Playwright bundle).'
-        ExpectedCompletions = @{ playwright = @('test','install','codegen','show-report') }
-        NativeCommandScript = {
-            @"
-Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
-    param(`$wordToComplete, `$commandAst, `$cursorPosition)
-    @(
-        'open','codegen','install','install-deps','uninstall','screenshot','pdf',
-        'show-trace','trace','cli','mcp','test','show-report','merge-reports',
-        'clear-cache','init-agents','init-skills','help',
-        '--help','-h','--version','-V',
-        '--browser','--headed','--project','--reporter','--workers','--debug','--ui','--grep',
-        '--list','--repeat-each','--retries','--timeout','--update-snapshots','--trace','--config'
-    ) | Where-Object { `$_ -like "`$wordToComplete*" } | ForEach-Object {
-        [System.Management.Automation.CompletionResult]::new(`$_, `$_, 'ParameterValue', `$_)
-    }
-}
-"@
-        }
-    }
-    # Node.js is a developer tool in its own right and a dependency of the AI
-    # agents (#559). AIAgents keeps its own copy (DependsOn is same-bundle
-    # only), shows it under the agents that need it, and stays the ONE source
-    # of node/npm/npx completion (#222), so this copy registers none. Installer
-    # and Id must match AIAgents' (the engine ruling in
-    # PackageEngineRulings.Tests.ps1 explains why it stays on choco).
-    [Package]@{
-        Name        = 'Node.js'
-        Installer   = 'choco'
-        Id          = 'nodejs'
-        # No CliCommands: the commands, and their completion, belong to AIAgents' entry.
-        Completion  = 'none'
-        Notes       = 'Same package as AIAgents'' Node.js; completion is registered by that entry only (#222, #559).'
-    }
+    # Shared with AI Agents, which installs them too: declared once (#563).
+    & "$PSScriptRoot\SharedPackages.ps1" -Name 'Playwright', 'Node.js'
     # Adds this repository as a second scoop bucket named LocalRepo; off by
     # default (#559, owner's N9).
     [Package]@{ Name = 'AddLocalRepoBucket'; Installer = 'scoop'; Id = 'MarkMichaelis/AddLocalRepoBucket'; Default = $false }

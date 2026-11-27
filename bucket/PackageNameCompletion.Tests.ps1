@@ -50,7 +50,7 @@ Describe 'Get-PackageNameSuggestion' -Tag 'Light' {
         # complete so users can `Install-Package <name>` rather than
         # falling back to `scoop install`.
         $names = & (Get-Module MarkMichaelis.ScoopBucket) { Get-PackageNameSuggestion }
-        foreach ($manifest in 'DbxCli','Chocolatey','Gemini','WSL-Ubuntu-2004') {
+        foreach ($manifest in 'DbxCli','Chocolatey','Gemini','WSLUbuntu') {
             $names | Should -Contain $manifest
         }
     }

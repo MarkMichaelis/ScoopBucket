@@ -103,7 +103,7 @@ Describe 'Bare manifest resolution across bucket subfolders' -Tag 'Light', 'Modu
         # A config-only manifest: it lives in a category subfolder, has no
         # sibling .ps1 and therefore no [Package[]] declaration at all. Every
         # real config-only manifest has exactly this shape after the reorg --
-        # GitConfigure (developer/), EnableRemoteDesktop (os/),
+        # GitConfigVSCode (developer/), EnableRemoteDesktop (os/),
         # McAfeeUninstall (os/), ... -- and dispatch case (c) in
         # Install-/Uninstall-/Update-Package is the only path that can reach
         # them. That case probed `<bucket>\<name>.json` only, so every one of
