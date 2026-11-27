@@ -45,12 +45,12 @@ Describe 'Get-PackageNameSuggestion' -Tag 'Light' {
 
     It 'includes bare-json manifest names (no [Package] / imperative .ps1) so they tab-complete' {
         # Manifests with no declarative [Package] entry — bare json
-        # (Codex, ...) and imperative .ps1 bundles
+        # (DbxCli, ...) and imperative .ps1 bundles
         # (Chocolatey, Gemini, ...) — must still tab-
         # complete so users can `Install-Package <name>` rather than
         # falling back to `scoop install`.
         $names = & (Get-Module MarkMichaelis.ScoopBucket) { Get-PackageNameSuggestion }
-        foreach ($manifest in 'Codex','Chocolatey','Gemini','WSL-Ubuntu-2004') {
+        foreach ($manifest in 'DbxCli','Chocolatey','Gemini','WSL-Ubuntu-2004') {
             $names | Should -Contain $manifest
         }
     }

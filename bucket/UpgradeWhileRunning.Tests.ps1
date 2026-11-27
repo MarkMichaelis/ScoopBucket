@@ -450,6 +450,14 @@ Describe 'AIAgents declares ChatGPT under the Store engine that installs it (#55
         $script:agent.Id        | Should -Be $script:canonical.Id
     }
 
+    It 'declares no predecessor, because ai/ChatGPT.json stays a manifest Install-Package installs' {
+        # A PreviousId of MarkMichaelis/ChatGPT would make Install-Package refuse
+        # that manifest as the superseded install (#464), unlike Codex.json,
+        # which this change retires.
+        $script:agent.PreviousInstaller | Should -BeNullOrEmpty
+        $script:agent.PreviousId        | Should -BeNullOrEmpty
+    }
+
     It 'counts the current app (Appx OpenAI.Codex) as installed, and ChatGPT Classic alone as not' {
         foreach ($scope in @{}, @{ ModuleName = 'MarkMichaelis.ScoopBucket' }) {
             Mock Get-AppxPackage @scope -ParameterFilter { $Name -eq 'OpenAI.Codex' } { $null }
