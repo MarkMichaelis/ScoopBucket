@@ -299,6 +299,13 @@ function Invoke-PackageUpdate {
                     } elseif ($verInfo.UpdateAvailable -eq $true) {
                         $to     = $verInfo.Available
                         $result = @{ State = 'Updated'; Reason = '(WhatIf)' }
+                        # Preview the in-use path the real run takes (#547).
+                        if ($pkg.Installer -eq 'winget') {
+                            $inUse = @(Get-InUseFile -Directory @(Get-WingetPortableDirectory -Id $pkg.Id))
+                            if ($inUse.Count -gt 0) {
+                                $result.Reason = "(WhatIf) would be $(Get-InUseUpgradeNote -Count $inUse.Count)"
+                            }
+                        }
                     } elseif ($verInfo.UpdateAvailable -eq $false) {
                         $to     = $from
                         $result = @{ State = 'AlreadyLatest'; Reason = $null }

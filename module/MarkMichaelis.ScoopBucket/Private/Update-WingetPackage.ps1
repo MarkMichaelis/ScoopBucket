@@ -61,6 +61,35 @@ function Update-WingetPackage {
         return @{ State = 'Updated'; Reason = '(WhatIf)' }
     }
 
+    # A portable package's executables are locked while any copy runs, so winget
+    # could not replace them (#547). Set them aside first; running copies keep the
+    # previous version, and the settle below deletes or restores the set-aside files.
+    $aside = @(Move-InUseFileAside -Directory @(Get-WingetPortableDirectory -Id $id))
+    $result = $null
+    try {
+        $result = Invoke-WingetUpgradeCommand -Package $Package -UpgradeArgs $upgradeArgs -TimeoutMinutes $TimeoutMinutes
+    } finally {
+        # Only an upgrade that went through may leave a set-aside file un-restored
+        # (the new version stopped shipping it); anything else puts it back.
+        $settled = Complete-InUseFileAside -Moved $aside -Upgraded:($result.State -eq 'Updated')
+    }
+    if ($result.State -eq 'Updated' -and $settled.Moved -gt $settled.Restored) {
+        $result.Reason = Get-InUseUpgradeNote -Count ($settled.Moved - $settled.Restored)
+    }
+    return $result
+}
+
+function Invoke-WingetUpgradeCommand {
+    # Runs `winget upgrade` for one package and maps the exit code to a result.
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)][object]$Package,
+        [Parameter(Mandatory)][string[]]$UpgradeArgs,
+        [int]$TimeoutMinutes = 5
+    )
+
+    $id = $Package.Id
     Write-UpdateStatus "Updating $($Package.Name) (winget $id)..."
     Write-Verbose "  winget $($upgradeArgs -join ' ')"
     # Per-package override: a bundle can declare UpdateTimeoutMinutes

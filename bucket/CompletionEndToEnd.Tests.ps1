@@ -63,6 +63,12 @@ Describe 'Completion end-to-end (real Tab, no mocks)' -Tag 'Heavy','Completion' 
             Set-ItResult -Skipped -Because "Completion profile missing at $script:profilePath; run Install-Package first."
             return
         }
+        # Registration only writes a block for a CLI that is installed, so an
+        # absent CLI has nothing to assert (mirrors the Tab test below).
+        if (-not (Get-Command $Cli -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because "CLI '$Cli' not on PATH on this host; Install-Package may have been skipped."
+            return
+        }
         $raw = Get-Content -Raw -Path $script:profilePath
         $raw | Should -Match "ScoopBucket:CliCompletion:$([regex]::Escape($Cli)):BEGIN"
     }
@@ -77,33 +83,52 @@ Describe 'Completion end-to-end (real Tab, no mocks)' -Tag 'Heavy','Completion' 
             return
         }
 
+        # Load the two profiles every host loads, in the engine's order:
+        # AllUsersAllHosts, then CurrentUserAllHosts. Some CLIs complete from
+        # a module the machine profile imports rather than from a block of
+        # ours -- git stands aside for posh-git, which GitConfigure.ps1 adds
+        # to AllUsersAllHosts. Host-specific profiles are deliberately left
+        # out: they carry interactive, per-user startup work.
+        $profileList = (@($PROFILE.AllUsersAllHosts, $script:profilePath) |
+            Where-Object { $_ } | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ', '
         $script = @"
 `$ErrorActionPreference = 'Stop'
-. '$($script:profilePath -replace "'","''")'
+foreach (`$p in @($profileList)) { if (Test-Path -LiteralPath `$p) { . `$p } }
 # Profile blocks defer Register-ArgumentCompleter to PowerShell.OnIdle (#212).
-# Drain any pending subscribers in this non-interactive child runspace before
-# asking the completion engine for matches.
-foreach (`$sub in @(Get-EventSubscriber -SourceIdentifier 'PowerShell.OnIdle' -ErrorAction SilentlyContinue)) {
-    try {
-        `$cmd = `$sub.Action.Command
-        if (`$cmd) { & ([scriptblock]::Create(`$cmd)) 2>`$null | Out-Null }
-    } catch { }
+# OnIdle never fires in a non-interactive child, so raise it and let the
+# engine run the subscriber as an interactive shell would. Re-running the
+# Action's text with & would dot-source each sidecar into a throwaway scope
+# and lose the helper functions Cobra-generated completers call (#539).
+# One raise does not run every subscriber, so raise until none is left or
+# the count stops falling (mirrors Test-PackageCompletionWorks).
+`$stalled = 0; `$previous = -1
+for (`$i = 0; `$i -lt 250; `$i++) {
+    `$subs = @(Get-EventSubscriber -SourceIdentifier PowerShell.OnIdle -ErrorAction SilentlyContinue).Count
+    `$pending = if (`$Global:__ScoopBucketCompletionQueue) { `$Global:__ScoopBucketCompletionQueue.Count } else { 0 }
+    if (`$pending -eq 0) {
+        if (`$subs -eq 0) { break }
+        if (`$subs -eq `$previous) { `$stalled++; if (`$stalled -ge 5) { break } } else { `$stalled = 0 }
+    }
+    `$previous = `$subs
+    `$null = New-Event -SourceIdentifier PowerShell.OnIdle
+    Start-Sleep -Milliseconds 20
 }
 `$line = '$Cli '
 `$result = [System.Management.Automation.CommandCompletion]::CompleteInput(`$line, `$line.Length, `$null)
 `$result.CompletionMatches | ForEach-Object { `$_.CompletionText }
 "@
-        $tmp = New-TemporaryFile
-        try {
-            Set-Content -Path $tmp -Value $script -Encoding UTF8
-            $out = & pwsh -NoProfile -NoLogo -File $tmp 2>$null
-        } finally {
-            Remove-Item -Path $tmp -ErrorAction Ignore
-        }
-        $completions = @($out | Where-Object { $_ })
+        # pwsh -File refuses any extension but .ps1, so New-TemporaryFile's
+        # .tmp made every case run nothing (#539).
+        $probeFile = Join-Path $TestDrive ("e2e-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        Set-Content -Path $probeFile -Value $script -Encoding UTF8
+        $raw = @(& pwsh -NoProfile -NoLogo -NonInteractive -File $probeFile 2>&1)
+        # Warnings from the deferred registration (#532) arrive on stdout as
+        # "WARNING: ..." lines; report them, never count them as completions.
+        $childErrors = @($raw | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] -or "$_" -like 'WARNING:*' } | ForEach-Object { "$_" })
+        $completions = @($raw | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] -and "$_" -and "$_" -notlike 'WARNING:*' } | ForEach-Object { "$_" })
 
         foreach ($e in $Expected) {
-            $completions | Should -Contain $e -Because "TabExpansion2 for '$Cli ' must return '$e' per the ExpectedCompletions contract; got: $($completions -join ', ')"
+            $completions | Should -Contain $e -Because "TabExpansion2 for '$Cli ' must return '$e' per the ExpectedCompletions contract; got: $($completions -join ', '); child errors: $($childErrors -join ' | ')"
         }
     }
 }

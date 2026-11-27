@@ -20,6 +20,10 @@
 
 $script:CompletionSentinelVersion = 'v4'
 
+# Characters PowerShell accepts as a single quote: ASCII plus the curly
+# variants. Inside a single-quoted string any of them must be doubled.
+$script:CompletionQuoteChar = "['`u{2018}`u{2019}`u{201A}`u{201B}]"
+
 # Default sidecar root for cached native completer payloads (v3+, #216).
 # Each registered CLI gets <Dir>\<cli>.ps1 holding the raw payload --
 # `.ps1` lets the payload's leading `using namespace ...` parse legally,
@@ -167,6 +171,88 @@ function Remove-PackageCompletionSidecar {
     return $false
 }
 
+function Format-CompletionSidecarLoader {
+    <#
+    .SYNOPSIS
+        Emit the profile code that loads one CLI's sidecar payload.
+    .DESCRIPTION
+        Shared by Register-PackageCompletion (deferred blocks) and the legacy
+        Register-CliCompletion (eager blocks) so the loader exists once.
+
+        The profile roams (OneDrive) but the sidecar does not
+        (%ProgramData%), so a block written on one machine can arrive on
+        another where the CLI is installed but the sidecar was never
+        generated (#532). The loader therefore checks the file exists, and
+        turns a missing file or a load error into a warning that names the
+        repair command. When the CLI itself is absent the block stays a
+        silent no-op, as before.
+
+        Every value is emitted as a single-quoted literal, so an apostrophe
+        or `$` in the path stays inert. PowerShell treats the curly
+        apostrophes as quote characters too, so they are doubled as well.
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Cli,
+        [Parameter(Mandatory)][string]$SidecarPath
+    )
+    $literal = { param($s) "'" + ($s -replace "($script:CompletionQuoteChar)", '$1$1') + "'" }
+    $path    = & $literal $SidecarPath
+    $missing = & $literal "ScoopBucket: tab completion for '$Cli' is not loaded because '$SidecarPath' is missing on this machine. Run Update-PackageCompletion to regenerate it."
+    $failed  = & $literal "ScoopBucket: tab completion for '$Cli' failed to load from '$SidecarPath': "
+    $repair  = & $literal ' Run Update-PackageCompletion -Force to regenerate it.'
+    return @(
+        "if (Get-Command $Cli -ErrorAction SilentlyContinue) {"
+        "    if (Test-Path -LiteralPath $path) {"
+        "        try { . $path }"
+        "        catch { Write-Warning ($failed + `$_.Exception.Message + $repair) }"
+        "    } else {"
+        "        Write-Warning $missing"
+        "    }"
+        "}"
+    ) -join "`r`n"
+}
+
+function Get-PackageCompletionBlockState {
+    <#
+    .SYNOPSIS
+        Classify the profile block for $Cli: 'Absent', 'Intact', or
+        'SidecarMissing' (the block dot-sources a file that does not exist).
+    .DESCRIPTION
+        Lets Update-PackageCompletion's gap-fill repair a block that exists
+        but cannot load, which is what the loader's warning tells the user to
+        run (#532). A block that references no sidecar (older inline
+        payloads) counts as Intact.
+
+        Presence keys on the BEGIN sentinel alone, as it did before: a block
+        whose END was lost (a sync conflict, a hand edit) still counts as
+        present and runs to the next block's BEGIN. Every block for the CLI
+        is checked, so a duplicate pointing at a missing file is caught.
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
+        [Parameter(Mandatory)][string]$Cli
+    )
+    $e = [regex]::Escape($Cli)
+    $blocks = [regex]::Matches($Content,
+        "(?ms)^\# ScoopBucket:CliCompletion:$e`:BEGIN \w+.*?(?=^\# ScoopBucket:CliCompletion:$e`:END|^\# ScoopBucket:CliCompletion:[^:\r\n]+:BEGIN |\z)")
+    if ($blocks.Count -eq 0) { return 'Absent' }
+    # The dot-source operator sits at the start of a line or right after `{`;
+    # anchoring on that keeps the warning text's quoted path from matching.
+    # Delimiters are always ASCII quotes; doubled quote characters inside are
+    # escapes (see Format-CompletionSidecarLoader).
+    foreach ($block in $blocks) {
+        foreach ($m in [regex]::Matches($block.Value, "(?m)(?:^|\{)\s*\.\s+'((?:[^']|'')+)'")) {
+            $path = $m.Groups[1].Value -replace "($script:CompletionQuoteChar)\1", '$1'
+            if (-not (Test-Path -LiteralPath $path)) { return 'SidecarMissing' }
+        }
+    }
+    return 'Intact'
+}
+
 function Format-DeferredCompletionBlock {
     <#
     .SYNOPSIS
@@ -198,7 +284,9 @@ function Format-DeferredCompletionBlock {
     # the bootstrap clause is idempotent so removing any single block
     # never breaks the others. `| Out-Null` keeps the returned
     # PSEventJob off the success stream so dot-sourcing the profile
-    # stays silent.
+    # stays silent. The drain warns rather than discarding an error
+    # (#532): a warning raised inside an engine-event Action reaches the
+    # console, and a silent catch is what hid broken completions.
     return @"
 if (-not `$Global:__ScoopBucketCompletionQueue) {
     `$Global:__ScoopBucketCompletionQueue = [System.Collections.Generic.List[scriptblock]]::new()
@@ -211,7 +299,7 @@ if (-not `$Global:__ScoopBucketCompletionBootstrap) {
     `$null = Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -MaxTriggerCount 1 -Action {
         `$q = `$Global:__ScoopBucketCompletionQueue
         if (`$q) {
-            foreach (`$sb in `$q) { try { . `$sb } catch { } }
+            foreach (`$sb in `$q) { try { . `$sb } catch { Write-Warning "ScoopBucket: a tab-completion registration failed: `$(`$_.Exception.Message)" } }
             `$q.Clear()
         }
     } | Out-Null
@@ -376,6 +464,25 @@ function Read-PackageCompletionProfileContent {
     return ''
 }
 
+function Get-CompletionBlockPattern {
+    <#
+    .SYNOPSIS
+        Regex for one complete completion block for $Cli: its BEGIN line
+        through its own END line.
+    .DESCRIPTION
+        The body may not contain any block's BEGIN line. A lazy BEGIN..END
+        match alone let a block whose END was lost run on to a later END for
+        the same CLI, so replacing or removing it deleted everything in
+        between, the user's own code included (#540). With this rule a
+        truncated block simply does not match.
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Cli)
+    $e = [regex]::Escape($Cli)
+    "(?ms)^\# ScoopBucket:CliCompletion:$e`:BEGIN \w+(?:(?!^\# ScoopBucket:CliCompletion:[^:\r\n]+:BEGIN ).)*?^\# ScoopBucket:CliCompletion:$e`:END\r?\n?"
+}
+
 function Remove-PackageCompletionProfileBlock {
     <#
     .SYNOPSIS
@@ -390,7 +497,7 @@ function Remove-PackageCompletionProfileBlock {
         [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
         [Parameter(Mandatory)][string]$Cli
     )
-    $pattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:BEGIN \w+.*?^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:END\r?\n?"
+    $pattern = Get-CompletionBlockPattern -Cli $Cli
     $match = [regex]::Match($Content, $pattern)
     if (-not $match.Success) {
         return [pscustomobject]@{ Changed = $false; Content = $Content }
@@ -493,7 +600,7 @@ function Set-PackageCompletionProfileBlock {
     $ver = $script:CompletionSentinelVersion
     $begin = "# ScoopBucket:CliCompletion:$Cli`:BEGIN $ver"
     $end   = "# ScoopBucket:CliCompletion:$Cli`:END"
-    $pattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:BEGIN \w+.*?^\# ScoopBucket:CliCompletion:$([regex]::Escape($Cli))`:END\r?\n?"
+    $pattern = Get-CompletionBlockPattern -Cli $Cli
     $newBlock = "$begin`r`n$Block`r`n$end`r`n"
     $match = [regex]::Match($Content, $pattern)
     if ($match.Success) {
@@ -643,13 +750,7 @@ function Register-PackageCompletion {
         # rejects an overwrite (#402).
         $sidecarFallback = Join-Path (Split-Path -Parent $target) 'completions'
         $sidecarPath = Write-PackageCompletionSidecar -Cli $Cli -Payload $resolved.NativePayload -Directory $sidecarDir -FallbackDirectory $sidecarFallback
-        # Single-quote the dot-source path and escape any embedded
-        # apostrophes (PowerShell single-quote strings escape `'` as
-        # `''`). Real-world install paths can contain apostrophes
-        # (e.g. drives mapped under "C:\Users\O'Brien\..."); without
-        # this the generated profile would be a parse error.
-        $escapedPath = $sidecarPath -replace "'", "''"
-        $innerCode = "if (Get-Command $Cli -ErrorAction SilentlyContinue) {`r`n    . '$escapedPath'`r`n}"
+        $innerCode = Format-CompletionSidecarLoader -Cli $Cli -SidecarPath $sidecarPath
     } else {
         $innerCode = $resolved.Code
     }
@@ -687,7 +788,17 @@ function Test-PackageCompletionWorks {
         The profile to load before probing. Defaults to the same profile
         registration writes to (CurrentUserAllHosts, #397).
     .OUTPUTS
-        PSCustomObject with Cli, Verified (bool), MatchCount, FirstMatches.
+        PSCustomObject with Cli, Verified (bool), MatchCount, FirstMatches,
+        Reason. MatchCount and FirstMatches cover only suggestions from a
+        registered completer: the engine's file-name fallback (ProviderItem /
+        ProviderContainer results) is excluded, so a CLI whose completer is
+        missing or broken is not Verified just because the current
+        directory has files in it (#539). The flip side: a completer that
+        only ever offers file paths reads as not Verified too.
+
+        When not Verified, Reason also carries any warning the deferred
+        registration raised (for example a missing completion file, #532)
+        and the count of blocks still queued if the drain did not finish.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -719,45 +830,91 @@ function Test-PackageCompletionWorks {
     # The probe script: dot-source the profile, then ask the completion
     # engine to complete `$Cli ` (trailing space triggers argument
     # completion). Emit JSON so the parent process can deserialize.
+    # Both literals are single-quoted, so double every quote character
+    # PowerShell accepts there (ASCII and curly, as the loader does).
+    $profileLiteral = $ProfilePath -replace "($script:CompletionQuoteChar)", '$1$1'
+    $lineLiteral = "$Cli " -replace "($script:CompletionQuoteChar)", '$1$1'
     $probe = @"
 `$ErrorActionPreference='SilentlyContinue'
-. '$ProfilePath' 2>`$null
+# Record every warning raised while the profile loads and the deferred
+# blocks register (a missing or failing completion file, #532), wherever
+# the host would have sent it: a CI runner's host did not put an event
+# action's warning on stdout. A function outranks the cmdlet of the same
+# name, from the event action and the dot-sourced loaders alike.
+`$Global:__ScoopBucketProbeWarnings = [System.Collections.Generic.List[string]]::new()
+function global:Write-Warning {
+    param([Parameter(Position = 0, ValueFromPipeline)][string]`$Message)
+    process { `$Global:__ScoopBucketProbeWarnings.Add(`$Message) }
+}
+. '$profileLiteral' 2>`$null
 # The profile blocks written by Register-PackageCompletion defer their
 # Register-ArgumentCompleter calls to a single PowerShell.OnIdle
 # subscriber that drains a shared queue (#220). OnIdle does not
-# auto-fire in non-interactive `pwsh -File` runs, so manually invoke
-# the subscriber's Action -- it will drain the queue and register every
-# pending CLI in one pass.
-foreach (`$sub in @(Get-EventSubscriber -SourceIdentifier 'PowerShell.OnIdle' -ErrorAction SilentlyContinue)) {
-    try {
-        `$cmd = `$sub.Action.Command
-        if (`$cmd) { & ([scriptblock]::Create(`$cmd)) 2>`$null | Out-Null }
-    } catch { }
+# auto-fire in non-interactive `pwsh -File` runs, so raise the event
+# ourselves and let the engine run the subscriber, exactly as an
+# interactive shell would. Re-running the Action's text with & instead
+# would dot-source every sidecar into a throwaway scope, losing the
+# helper functions Cobra-generated completers (gh, rclone) call on
+# every Tab (#539). One raise does not run every subscriber, and older
+# profiles register one per block, so raise until none is left or the
+# count stops falling (a permanent subscriber of someone else's).
+`$stalled = 0; `$previous = -1; `$pending = 0
+for (`$i = 0; `$i -lt 250; `$i++) {
+    `$subs = @(Get-EventSubscriber -SourceIdentifier PowerShell.OnIdle -ErrorAction SilentlyContinue).Count
+    `$pending = if (`$Global:__ScoopBucketCompletionQueue) { `$Global:__ScoopBucketCompletionQueue.Count } else { 0 }
+    if (`$pending -eq 0) {
+        if (`$subs -eq 0) { break }
+        if (`$subs -eq `$previous) { `$stalled++; if (`$stalled -ge 5) { break } } else { `$stalled = 0 }
+    }
+    `$previous = `$subs
+    `$null = New-Event -SourceIdentifier PowerShell.OnIdle
+    Start-Sleep -Milliseconds 20
 }
-`$line = '$Cli '
+`$line = '$lineLiteral'
 `$cc = [System.Management.Automation.CommandCompletion]::CompleteInput(`$line, `$line.Length, `$null)
-`$results = @(`$cc.CompletionMatches | Select-Object -First 25 -ExpandProperty CompletionText)
-@{ Count = `$cc.CompletionMatches.Count; Matches = `$results } | ConvertTo-Json -Compress
+# With no completer answering, the engine falls back to file names in the
+# current directory (#539). Those are not evidence of a working completer.
+`$all = @(`$cc.CompletionMatches)
+`$answered = @(`$all | Where-Object { `$_.ResultType -notin 'ProviderItem', 'ProviderContainer' })
+`$results = @(`$answered | Select-Object -First 25 -ExpandProperty CompletionText)
+@{ Count = `$answered.Count; FallbackCount = `$all.Count - `$answered.Count; Pending = `$pending; Matches = `$results; Warnings = @(`$Global:__ScoopBucketProbeWarnings) } | ConvertTo-Json -Compress
 "@
-    $probeFile = Join-Path $env:TEMP "ScoopBucket-completion-probe-$Cli-$PID.ps1"
+    $probeFile = Join-Path $env:TEMP "ScoopBucket-completion-probe-$PID-$([guid]::NewGuid().ToString('N')).ps1"
     try {
         Set-Content -Path $probeFile -Value $probe -Encoding UTF8
-        $json = & $pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probeFile 2>$null
+        # The probe returns the warnings it recorded in its JSON. Any that a
+        # host still prints land on stdout as WARNING: lines; never let
+        # them pass for the JSON.
+        $out = @(& $pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probeFile 2>$null | ForEach-Object { "$_" })
+        $printed = @($out | Where-Object { $_ -like 'WARNING:*' } | ForEach-Object { $_.Substring(8).Trim() })
+        $json = $out | Where-Object { $_.StartsWith('{') } | Select-Object -Last 1
         if (-not $json) {
+            $warned = if ($printed) { " Registration warned: $($printed -join ' | ')" } else { '' }
             return [pscustomobject]@{
                 Cli = $Cli; Verified = $false; MatchCount = 0; FirstMatches = @()
-                Reason = 'Probe produced no output.'
+                Reason = "Probe produced no output.$warned"
             }
         }
         $obj = $json | ConvertFrom-Json -ErrorAction Stop
+        $warnings = @(@($obj.Warnings) + $printed | Where-Object { $_ } | Select-Object -Unique)
+        $warned = if ($warnings) { " Registration warned: $($warnings -join ' | ')" } else { '' }
         $count = [int]$obj.Count
+        $fallback = [int]$obj.FallbackCount
+        $pending = [int]$obj.Pending
         $matches = @($obj.Matches)
+        $reason = if ($count -ge 1) { $null }
+            elseif ($fallback -ge 1) { "No completer answered for '$Cli'; the engine fell back to $fallback file name(s)." }
+            else { 'Completion engine returned 0 matches.' }
+        if ($reason) {
+            if ($pending -gt 0) { $reason += " Deferred registration did not finish: $pending block(s) still queued." }
+            $reason += $warned
+        }
         return [pscustomobject]@{
             Cli = $Cli
             Verified = ($count -ge 1)
             MatchCount = $count
             FirstMatches = $matches
-            Reason = if ($count -ge 1) { $null } else { 'Completion engine returned 0 matches.' }
+            Reason = $reason
         }
     } catch {
         return [pscustomobject]@{

@@ -151,7 +151,7 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
         # which is also Anthropic's actual deployment model (per-user app under
         # %LOCALAPPDATA%\AnthropicClaude). See #85.
         Scope       = 'user'
-        Notes       = 'MCP-capable desktop client. Local Claude.json manifest also installs this via winget; keeping the declarative entry here is the canonical home for the package.'
+        Notes       = 'MCP-capable desktop client. This declarative entry is the only home for the package; the old Claude.json manifest that duplicated it was retired (#550).'
     }
     [Package]@{
         Name      = 'ChatGPT'
@@ -324,8 +324,21 @@ foreach (`$pair in @(
     # rollout for your account. Nothing to install here beyond Claude Code.
     [Package]@{
         Name        = 'Claude Code CLI'
-        Installer   = 'scoop'
-        Id          = 'MarkMichaelis/ClaudeCode'
+        # #547: declared under winget, the engine that actually installs claude.exe
+        # (a per-user portable). The retired MarkMichaelis/ClaudeCode scoop manifest
+        # only wrapped this winget call, so declaring the wrapper made Update-Package
+        # ask scoop -- which re-ran the wrapper only when this bucket bumped its
+        # version, never when Anthropic shipped one -- and made the #464 gate refuse
+        # the real winget install as a foreign copy. PreviousInstaller records the wrapper:
+        # it takes effect when Uninstall-Package removes the CLI (the wrapper puts
+        # nothing on PATH, so the install-time gate never needs it). That uninstall
+        # runs at this entry's user scope, so a wrapper installed with -g keeps an
+        # empty scoop record -- harmless, since the wrapper itself installs nothing.
+        Installer   = 'winget'
+        Id          = 'Anthropic.ClaudeCode'
+        Scope       = 'user'
+        PreviousInstaller = 'scoop'
+        PreviousId  = 'MarkMichaelis/ClaudeCode'
         CliCommands = @('claude')
         DependsOn   = @('Node.js')
         Completion  = 'auto'
@@ -419,8 +432,15 @@ Register-ArgumentCompleter -Native -CommandName agy -ScriptBlock {
     }
     [Package]@{
         Name        = 'GitHub Copilot CLI'
-        Installer   = 'scoop'
-        Id          = 'MarkMichaelis/GitHubCopilotCli'
+        # #547: declared under winget like the DeveloperBasePackages copy, for
+        # the same reason as 'Claude Code CLI' above -- the retired
+        # MarkMichaelis/GitHubCopilotCli scoop manifest only wrapped winget
+        # GitHub.Copilot (a portable copilot.exe), so the wrapper declaration
+        # hid new versions and made the #464 gate refuse the real install.
+        Installer   = 'winget'
+        Id          = 'GitHub.Copilot'
+        PreviousInstaller = 'scoop'
+        PreviousId  = 'MarkMichaelis/GitHubCopilotCli'
         CliCommands = @('copilot')
         DependsOn   = @('Node.js')
         Completion  = 'auto'

@@ -98,9 +98,8 @@ $ExpectedCliOverrides = @{
     'ScooterSoftware.BeyondCompare.4'                      = 'bcompare'
     'extras/beyondcompare'                                 = 'bcompare'
     'calibre.calibre'                                      = 'calibre'
-    'MarkMichaelis/ClaudeCode'                             = 'claude'
+    'Anthropic.ClaudeCode'                                 = 'claude'
     'MarkMichaelis/Codex'                                  = 'codex'
-    'MarkMichaelis/GitHubCopilotCli'                       = 'copilot'
     'MarkMichaelis/Aspire'                                 = 'aspire'
     'VisualStudio2026Enterprise'                           = 'devenv'
 }
@@ -118,8 +117,8 @@ $NoCliPackages = @(
     'gitextensions','gitkraken','git-credential-manager-for-windows',
     'Microsoft.Teams','Office365ProPlus','foxitreader','Foxit.FoxitReader',
     'geosetter','TotalCommander','MarkMichaelis/ChatGPT',
-    'MarkMichaelis/Claude','MarkMichaelis/Gemini','MarkMichaelis/MicrosoftCopilot',
-    'MarkMichaelis/ClaudeExcel','MarkMichaelis/AIAgents',
+    'MarkMichaelis/Gemini','MarkMichaelis/MicrosoftCopilot',
+    'MarkMichaelis/AIAgents',
     # Scoop GUI desktop apps (separate from corresponding CLI packages above)
     'extras/claude','extras/spotify',
     # Bundle of tools (procexp/procmon/psexec/...); availability handled by
@@ -129,7 +128,7 @@ $NoCliPackages = @(
     # PS modules / chocolatey-internal packages without a CLI surface.
     'au','Pester','chocolatey-core.extension',
     # Anthropic.Claude is the desktop GUI; the CLI ships as Anthropic.ClaudeCode
-    # (mapped via MarkMichaelis/ClaudeCode override above).
+    # (mapped via the Anthropic.ClaudeCode override above).
     'Anthropic.Claude',
     # Parser-defense: the .EXAMPLE comment in Utils.ps1 used to slip "VisualStudio"
     # past the choco-install regex.  The Strip-comment-blocks pass below is the

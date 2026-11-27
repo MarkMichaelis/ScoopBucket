@@ -35,12 +35,9 @@
     Codex                      = @{ Verify = 'Cli'; Cli = 'codex' }
     DbxCli                     = @{ Verify = 'Cli'; Cli = 'dbxcli' }
     PowerShellCore             = @{ Verify = 'Cli'; Cli = 'pwsh' }
-    ClaudeCode                 = @{ Verify = 'Cli'; Cli = 'claude' }
-    GitHubCopilotCli           = @{ Verify = 'Cli'; Cli = 'copilot' }
     Chocolatey                 = @{ Verify = 'Cli'; Cli = 'choco' }
 
     # --- Cluster B: Get-Program '*pattern*' --------------------------------
-    Claude                     = @{ Verify = 'GetProgram'; Pattern = '*Claude*' }
     SmugMug                    = @{ Verify = 'GetProgram'; Pattern = '*SmugMug*' }
     Overdrive                  = @{ Verify = 'GetProgram'; Pattern = '*OverDrive*' }
     Epubor                     = @{ Verify = 'GetProgram'; Pattern = '*Epubor*' }
@@ -73,8 +70,6 @@
     Gemini                     = @{ Verify = 'Custom'
                                     Script = { $null = winget list --id Google.GeminiDesktop --exact --accept-source-agreements 2>$null; $LASTEXITCODE -eq 0 }
                                     Reason = "Gemini.ps1 installs Google's Gemini desktop app from winget (Google.GeminiDesktop, user-scope nullsoft). Not the Google app for desktop it installed before #534." }
-    ClaudeExcel                = @{ Verify = 'Scoop'; Manual = $true
-                                    Reason = "Claude for Excel is an Office Web Add-in that Microsoft only allows installing through AppSource's 'Get it now' UI flow (no winget / MS Store / silent installer). Cannot run unattended in CI." }
     MicrosoftCopilot           = @{ Verify = 'Scoop'
                                     Reason = "Manifest is a no-op: it only emits a Write-Warning noting that the consumer Copilot desktop app is built into Windows 11. No external app to verify; post-install assertion is limited to scoop bookkeeping." }
     VisualStudio2026Enterprise = @{ Verify = 'Custom'; Manual = $true; PreserveIfInstalled = $true

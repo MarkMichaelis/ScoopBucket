@@ -18,8 +18,16 @@ function Update-PackageCompletion {
         'pscompletions', 'native', or 'auto' (with or without a
         NativeCommandScript), confirms each CliCommand resolves via
         Get-Command, and calls Register-PackageCompletion when no block
-        exists in the profile. Existing sentinel blocks are preserved
-        unless -Force is passed.
+        exists in the profile, or when the block dot-sources a completion
+        file that is missing on this machine (#532 -- the profile roams,
+        %ProgramData% does not). Other existing sentinel blocks are
+        preserved unless -Force is passed.
+
+        It then removes stale copies from $PROFILE.AllUsersAllHosts: blocks
+        written there before #397 that the per-user profile now supersedes
+        (#540). A machine block with no per-user counterpart is kept. Writing
+        $PSHOME\profile.ps1 needs elevation; an unelevated run removes
+        nothing and warns once with the count and the path.
 
         Native-mode repairs use the NativeCommandOutputs hashtable that
         Get-BundlePackages pre-captures in its child runspace — so the
@@ -53,9 +61,10 @@ function Update-PackageCompletion {
     .OUTPUTS
         PSCustomObject[] — one record per (Cli, Package) candidate,
         with Cli, Package, Bundle, Mode, Action (Registered | Preserved
-        | Skipped | WhatIf), Source (Native | Existing | Skipped |
-        WhatIf — 'Existing' accompanies Action='Preserved', 'WhatIf'
-        accompanies a -WhatIf preview row; PSCompletions was removed in
+        | Removed | Skipped | WhatIf), Source (Native | Existing | Skipped |
+        WhatIf | Superseded — 'Existing' accompanies Action='Preserved', 'WhatIf'
+        accompanies a -WhatIf preview row, 'Superseded' marks a stale
+        AllUsersAllHosts copy (#540); PSCompletions was removed in
         #241), and Reason fields. WhatIf preview rows carry an empty
         Reason — the Action column already says 'WhatIf' — and do NOT
         emit the built-in "What if:" host line (the returned summary
@@ -100,6 +109,7 @@ function Update-PackageCompletion {
     }
 
     $results = New-Object System.Collections.Generic.List[object]
+    $sidecarMissingNote = 'Completion file was missing on this machine; regenerated.'
 
     foreach ($b in $bundles) {
         foreach ($p in $b.Packages) {
@@ -146,9 +156,11 @@ function Update-PackageCompletion {
                     continue
                 }
 
-                $blockPattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($cli))`:BEGIN \w+"
-                $alreadyHas   = [regex]::IsMatch($existingContent, $blockPattern)
-                if ($alreadyHas -and -not $Force) {
+                # A block that dot-sources a missing sidecar is not healthy
+                # (#532): repair it even without -Force.
+                $blockState = Get-PackageCompletionBlockState -Content $existingContent -Cli $cli
+                $repairNote = if ($blockState -eq 'SidecarMissing') { $sidecarMissingNote } else { $null }
+                if ($blockState -eq 'Intact' -and -not $Force) {
                     $results.Add([pscustomobject]@{
                         Cli = $cli; Package = $p.Name; Bundle = $b.Bundle
                         Mode = $displayMode; Action = 'Preserved'; Source = 'Existing'
@@ -239,7 +251,7 @@ function Update-PackageCompletion {
                         Mode = $displayMode
                         Action = $(if ($r.Source -eq 'Skipped') { 'Skipped' } else { 'Registered' })
                         Source = $r.Source
-                        Reason = $r.Reason
+                        Reason = $(if ($r.Reason) { $r.Reason } else { $repairNote })
                     })
                 } catch {
                     $results.Add([pscustomobject]@{
@@ -290,8 +302,9 @@ function Update-PackageCompletion {
             continue
         }
 
-        $blockPattern = "(?ms)^\# ScoopBucket:CliCompletion:$([regex]::Escape($def.Cli))`:BEGIN \w+"
-        if ([regex]::IsMatch($existingContent, $blockPattern) -and -not $Force) {
+        $blockState = Get-PackageCompletionBlockState -Content $existingContent -Cli $def.Cli
+        $repairNote = if ($blockState -eq 'SidecarMissing') { $sidecarMissingNote } else { $null }
+        if ($blockState -eq 'Intact' -and -not $Force) {
             $results.Add([pscustomobject]@{
                 Cli = $def.Cli; Package = $def.Script; Bundle = 'procedural'
                 Mode = 'native'; Action = 'Preserved'; Source = 'Existing'
@@ -322,7 +335,7 @@ function Update-PackageCompletion {
                 Mode = 'native'
                 Action = $(if ($r.Source -eq 'Skipped') { 'Skipped' } else { 'Registered' })
                 Source = $r.Source
-                Reason = $r.Reason
+                Reason = $(if ($r.Reason) { $r.Reason } else { $repairNote })
             })
         } catch {
             $results.Add([pscustomobject]@{
@@ -330,6 +343,18 @@ function Update-PackageCompletion {
                 Mode = 'native'; Action = 'Skipped'; Source = 'Skipped'
                 Reason = "Register-PackageCompletion threw: $($_.Exception.Message)"
             })
+        }
+    }
+
+    # Blocks written before #397 to $PROFILE.AllUsersAllHosts load first and
+    # duplicate the per-user ones (#540). Remove each copy the per-user
+    # profile now supersedes. Never touches the real machine profile when
+    # -ProfilePath redirects the per-user one to a sandbox.
+    $legacyProfile = Resolve-SupersededCompletionProfilePath -OverridePath $ProfilePath
+    if ($legacyProfile) {
+        $currentUserContent = if ($profileTarget) { Read-PackageCompletionProfileContent -Path $profileTarget } else { '' }
+        foreach ($row in @(Remove-SupersededCompletionBlock -CurrentUserContent $currentUserContent -LegacyProfilePath $legacyProfile)) {
+            if ($row) { $results.Add($row) }
         }
     }
 
@@ -363,7 +388,7 @@ function Update-PackageCompletion {
     # the profile) and Skipped (CLI absent / no native source) are the quiet
     # majority; summarize their counts on a host-only line that, unlike the
     # removed #276 tally, never duplicates a visible row.
-    $changed = @('Registered', 'WhatIf')
+    $changed = @('Registered', 'Removed', 'WhatIf')
     $shown = New-Object System.Collections.Generic.List[object]
     $suppressed = @{}
     foreach ($row in $arr) {

@@ -556,4 +556,134 @@ Describe 'Test-PackageCompletionWorks (end-to-end probe)' -Tag 'Light','Module' 
         $r.Verified | Should -BeFalse
         $r.Reason  | Should -Match 'not on PATH'
     }
+
+    Context 'only a completer that answers counts (#539)' {
+        BeforeAll {
+            # With no completer registered, PowerShell completes '<cli> ' with
+            # the file names in the current directory. Give the probe a
+            # directory that has one, so fallback results are guaranteed.
+            $script:probeDir = Join-Path $TestDrive 'probe-cwd'
+            New-Item -ItemType Directory -Path $script:probeDir -Force | Out-Null
+            Set-Content -Path (Join-Path $script:probeDir 'zz-fallback-file.txt') -Value 'x'
+        }
+
+        It 'does not count file names as a working completer' {
+            $emptyProfile = Join-Path $TestDrive 'no-completer-profile.ps1'
+            Set-Content -Path $emptyProfile -Value '# no completion blocks' -Encoding UTF8
+            Push-Location $script:probeDir
+            try {
+                $r = & $script:ProbeFn -Cli 'pwsh' -ProfilePath $emptyProfile
+            } finally { Pop-Location }
+            $r.Verified     | Should -BeFalse -Because 'file names are the engine''s fallback, not a completer answering'
+            $r.MatchCount   | Should -Be 0
+            $r.FirstMatches | Should -Not -Contain 'zz-fallback-file.txt'
+            $r.Reason       | Should -Match 'file'
+        }
+
+        It 'verifies a CLI whose registered completer answers' {
+            $completerProfile = Join-Path $TestDrive 'completer-profile.ps1'
+            Set-Content -Path $completerProfile -Encoding UTF8 -Value @'
+Register-ArgumentCompleter -Native -CommandName pwsh -ScriptBlock {
+    param($wordToComplete, $commandAst, $cursorPosition)
+    'alphaopt', 'betaopt' | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+    }
+}
+'@
+            Push-Location $script:probeDir
+            try {
+                $r = & $script:ProbeFn -Cli 'pwsh' -ProfilePath $completerProfile
+            } finally { Pop-Location }
+            $r.Verified     | Should -BeTrue
+            $r.MatchCount   | Should -Be 2
+            $r.FirstMatches | Should -Contain 'alphaopt'
+            $r.Reason       | Should -BeNullOrEmpty
+        }
+
+        It 'verifies a deferred block whose completer calls a helper function from its sidecar' {
+            # Cobra-generated scripts (gh, rclone) define helper functions at
+            # the top of the sidecar and call them on every Tab. The probe must
+            # drain the deferred queue the way a real PowerShell.OnIdle event
+            # does, or those helpers are lost with a throwaway scope and a
+            # working completer reads as broken.
+            $dir = Join-Path $TestDrive 'helper-fn'
+            $helperProfile = Join-Path $dir 'profile.ps1'
+            $payload = @'
+function __probehelper_values { 'alphaopt', 'betaopt' }
+Register-ArgumentCompleter -Native -CommandName pwsh -ScriptBlock {
+    param($wordToComplete, $commandAst, $cursorPosition)
+    __probehelper_values | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+    }
+}
+'@
+            & (Get-Module MarkMichaelis.ScoopBucket) {
+                param($p, $s, $text)
+                Register-PackageCompletion -Cli 'pwsh' -Mode native -ProfilePath $p -SidecarDirectory $s `
+                    -PreCapturedNative $text -Confirm:$false
+            } $helperProfile (Join-Path $dir 'completions') $payload | Out-Null
+
+            Push-Location $script:probeDir
+            try {
+                $r = & $script:ProbeFn -Cli 'pwsh' -ProfilePath $helperProfile
+            } finally { Pop-Location }
+            $r.Verified     | Should -BeTrue -Because "the helper must survive the drain. Reason: $($r.Reason)"
+            $r.FirstMatches | Should -Contain 'alphaopt'
+        }
+
+        It 'runs every OnIdle subscriber, as legacy profiles with one subscriber per block need' {
+            # Before the shared queue (#220), each block registered its own
+            # one-shot OnIdle subscriber. One raised event does not run them all.
+            $p = Join-Path $TestDrive 'many-subscribers.ps1'
+            $subs = foreach ($n in 1..5) {
+                $body = if ($n -eq 5) {
+                    "Register-ArgumentCompleter -Native -CommandName pwsh -ScriptBlock { [System.Management.Automation.CompletionResult]::new('alphaopt', 'alphaopt', 'ParameterValue', 'alphaopt') }"
+                } else { "`$null = $n" }
+                "`$null = Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -MaxTriggerCount 1 -Action { $body }"
+            }
+            Set-Content -Path $p -Encoding UTF8 -Value ($subs -join "`n")
+            Push-Location $script:probeDir
+            try { $r = & $script:ProbeFn -Cli 'pwsh' -ProfilePath $p } finally { Pop-Location }
+            $r.Verified | Should -BeTrue -Because "the fifth subscriber registers the completer. Reason: $($r.Reason)"
+        }
+
+        It 'reports a warning raised while registering instead of failing to read the probe' {
+            # A block whose completion file is missing warns from the OnIdle
+            # Action (#532); the warning reaches the child's stdout.
+            $p = Join-Path $TestDrive 'warning-profile.ps1'
+            Set-Content -Path $p -Encoding UTF8 -Value @'
+$null = Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -MaxTriggerCount 1 -Action { Write-Warning 'probe-sidecar-missing-warning' }
+'@
+            Push-Location $script:probeDir
+            try { $r = & $script:ProbeFn -Cli 'pwsh' -ProfilePath $p } finally { Pop-Location }
+            $r.Verified | Should -BeFalse
+            $r.Reason   | Should -Match 'probe-sidecar-missing-warning'
+            $r.Reason   | Should -Not -Match 'Probe error'
+        }
+
+        It 'reports a registration warning even when the host does not display it' {
+            # A CI runner's host did not put an event action's warning on
+            # stdout. Silencing the warning stream reproduces that: the probe
+            # must record warnings itself, not scrape what the host printed.
+            $p = Join-Path $TestDrive 'silent-warning-profile.ps1'
+            Set-Content -Path $p -Encoding UTF8 -Value @'
+$WarningPreference = 'SilentlyContinue'
+$null = Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -MaxTriggerCount 1 -Action { Write-Warning 'probe-hidden-warning' }
+'@
+            Push-Location $script:probeDir
+            try { $r = & $script:ProbeFn -Cli 'pwsh' -ProfilePath $p } finally { Pop-Location }
+            $r.Verified | Should -BeFalse
+            $r.Reason   | Should -Match 'probe-hidden-warning'
+        }
+
+        It 'loads a profile whose path contains an apostrophe' {
+            $dir = Join-Path $TestDrive "o'brien"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $p = Join-Path $dir 'profile.ps1'
+            Set-Content -Path $p -Encoding UTF8 -Value "Register-ArgumentCompleter -Native -CommandName pwsh -ScriptBlock { [System.Management.Automation.CompletionResult]::new('alphaopt', 'alphaopt', 'ParameterValue', 'alphaopt') }"
+            Push-Location $script:probeDir
+            try { $r = & $script:ProbeFn -Cli 'pwsh' -ProfilePath $p } finally { Pop-Location }
+            $r.Verified | Should -BeTrue -Because "Reason: $($r.Reason)"
+        }
+    }
 }
