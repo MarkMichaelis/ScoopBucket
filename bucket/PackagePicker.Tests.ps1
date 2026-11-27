@@ -345,7 +345,19 @@ Describe 'The picker''s screen and keys (#543)' -Tag 'Light', 'Module' {
     It 'marks an item that also sits in another top-level group' {
         $null = & $script:press (Key -Key DownArrow)
         $null = & $script:press (Key -Key RightArrow)
-        (& $script:screen) | Where-Object { $_ -match 'shared twin' } | Should -Match 'also in Root A'
+        (& $script:screen) | Where-Object { $_ -match 'shared twin' } | Should -Match '\(also in Root A\)'
+    }
+
+    It 'dims the "also in" note on a row the cursor is not on' {
+        $null = & $script:press (Key -Key DownArrow)
+        $null = & $script:press (Key -Key RightArrow)
+        $all =& $script:M { param($s) Format-PickerScreen -State $s -Width 100 -Height 30 } $script:state
+        $line = @($all | ForEach-Object { $_ } | Where-Object { $_.Text -match 'shared twin' })[0]
+        $line | Should -Not -BeNullOrEmpty
+        $line.Highlight | Should -BeFalse
+        $line.Segments[-1].Text | Should -Match '^\s*\(also in Root A\)\s*$'
+        $line.Segments[-1].Color | Should -Be 'DarkGray'
+        (-join @($line.Segments | ForEach-Object Text)).TrimEnd() | Should -Be $line.Text.TrimEnd()
     }
 
     It 'says what Space will do to the group under the cursor' {
