@@ -99,7 +99,7 @@ $ExpectedCliOverrides = @{
     'extras/beyondcompare'                                 = 'bcompare'
     'calibre.calibre'                                      = 'calibre'
     'Anthropic.ClaudeCode'                                 = 'claude'
-    'MarkMichaelis/Codex'                                  = 'codex'
+    'OpenAI.Codex'                                         = 'codex'
     'MarkMichaelis/Aspire'                                 = 'aspire'
     'VisualStudio2026Enterprise'                           = 'devenv'
 }
