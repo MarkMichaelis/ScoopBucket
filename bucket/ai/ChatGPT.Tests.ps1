@@ -37,9 +37,12 @@ Describe 'ChatGPT: installs the current app, not ChatGPT Classic (#511)' -Tag 'L
         $classic | Should -BeNullOrEmpty -Because "still declared by: $(($classic | ForEach-Object { "$($_.Bundle)/$($_.Name)" }) -join ', ')"
     }
 
+    It 'is listed only in AI Agents, not again in Client Base (#559)' {
+        @($script:pkgs | Where-Object { $_.Bundle -eq 'ClientBasePackages' -and $_.Id -eq '9PLM9XGG6VKS' }).Count | Should -Be 0
+    }
+
     It 'declares the current ChatGPT Store app in <Bundle>' -ForEach @(
         @{ Bundle = 'ChatGPT';            Name = 'ChatGPT' }
-        @{ Bundle = 'ClientBasePackages'; Name = 'ChatGPT' }
     ) {
         $pkg = @($script:pkgs | Where-Object { $_.Bundle -eq $Bundle -and $_.Name -eq $Name })
         $pkg.Count        | Should -Be 1

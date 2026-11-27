@@ -594,7 +594,8 @@ function Format-PickerScreen {
                     $suffix = if ($State.Filter -or $State.Expanded.Contains($row.Path)) { '  -' } else { '  +' }
                 }
                 if ($box -in '[*]', '[=]') { $suffix += '  installed' }
-                elseif ($box -eq '[!]') { $suffix += '  needed' }
+                elseif ($box -eq '[!]' -and -not $State.Always.Contains($row.Node.Identity)) { $suffix += '  needed' }
+                if ($State.Always.Contains($row.Node.Identity)) { $suffix += '  required' }
                 if ($row.Node.Kind -eq 'Manifest') { $suffix += '  (manifest)' }
                 # The same package under another top-level group shares this checkbox.
                 $homeGroup = $State.RootNames[($row.Path -split '/')[1]]

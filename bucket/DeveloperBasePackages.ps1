@@ -66,10 +66,14 @@ Register-ArgumentCompleter -Native -CommandName devenv -ScriptBlock {
 "@
         }
     }
+    # Git's diff and merge tool settings for Beyond Compare; installed with
+    # Beyond Compare as its companion, and can be turned off on its own (#559).
+    [Package]@{ Name = 'Git settings for Beyond Compare'; Installer = 'scoop'; Id = 'MarkMichaelis/GitConfigBeyondCompare' }
     [Package]@{
         Name        = 'Beyond Compare'
         Installer   = 'scoop'
         Id          = 'extras/beyondcompare'
+        Companions  = @('Git settings for Beyond Compare')
         CliCommands = @('bcomp','bcompare')
         Completion  = 'auto'
         Notes       = 'Stays on scoop, but NOT for the reason originally recorded: #14/#46 said winget''s Beyond Compare was a user-scope-only MSIX, and that is stale -- ScooterSoftware.BeyondCompare.5 is now an inno installer at 5.2.6.32774, the same version AND the same artifact (BCompare-5.2.6.32774.exe) extras/beyondcompare ships, and --scope machine resolves. The engine-specific reason that replaces it: the PostInstallScript below calls `scoop prefix beyondcompare` and `scoop shim add bcomp.com`, and CliAvailabilityPinned.Tests.ps1 pins `bcompare` on PATH and `bcomp` -> BComp.com. winget''s inno installer declares no portable aliases, so moving the engine would drop both CLIs off PATH and break the BComp.com remap and the git difftool wiring in developer/GitConfigBeyondCompare.ps1. Audited in #465. Keep scoop default bcomp shim (BComp.exe, GUI launcher). Add a separate bcomp.com shim for BComp.com (console-waiting variant) so git/scripted callers can request blocking semantics on demand. Neither bcomp nor bcompare has a completion subcommand or PSCompletions entry; hand-curated shared flag list.'
@@ -136,10 +140,14 @@ Register-ArgumentCompleter -Native -CommandName lazygit -ScriptBlock {
         }
     }
 
+    # Git's diff and merge tool settings for VS Code; installed with VS Code as
+    # its companion, and can be turned off on its own (#559).
+    [Package]@{ Name = 'Git settings for VS Code'; Installer = 'scoop'; Id = 'MarkMichaelis/GitConfigVSCode' }
     [Package]@{
         Name        = 'Visual Studio Code'
         Installer   = 'winget'
         Id          = 'Microsoft.VisualStudioCode'
+        Companions  = @('Git settings for VS Code')
         CliCommands = @('code')
         Completion  = 'auto'
         Notes       = '`code --help` lists CLI switches but `code` has no completion subcommand and no PSCompletions catalog entry. Hand-curated flag list (mirrors OSBasePackages).'
@@ -312,6 +320,23 @@ Register-ArgumentCompleter -Native -CommandName playwright -ScriptBlock {
 "@
         }
     }
+    # Node.js is a developer tool in its own right and a dependency of the AI
+    # agents (#559). AIAgents keeps its own copy (DependsOn is same-bundle
+    # only), shows it under the agents that need it, and stays the ONE source
+    # of node/npm/npx completion (#222), so this copy registers none. Installer
+    # and Id must match AIAgents' (the engine ruling in
+    # PackageEngineRulings.Tests.ps1 explains why it stays on choco).
+    [Package]@{
+        Name        = 'Node.js'
+        Installer   = 'choco'
+        Id          = 'nodejs'
+        # No CliCommands: the commands, and their completion, belong to AIAgents' entry.
+        Completion  = 'none'
+        Notes       = 'Same package as AIAgents'' Node.js; completion is registered by that entry only (#222, #559).'
+    }
+    # Adds this repository as a second scoop bucket named LocalRepo; off by
+    # default (#559, owner's N9).
+    [Package]@{ Name = 'AddLocalRepoBucket'; Installer = 'scoop'; Id = 'MarkMichaelis/AddLocalRepoBucket'; Default = $false }
     [Package]@{
         Name        = 'GoDaddy CLI'
         Installer   = 'custom'
