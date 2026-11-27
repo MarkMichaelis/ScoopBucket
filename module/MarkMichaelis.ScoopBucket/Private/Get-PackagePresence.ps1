@@ -35,8 +35,7 @@ function Get-PackagePresence {
             'winget' {
                 # Exact match first, for Store ids (#516).
                 $probe = Test-WingetPackageInstalled -Package $Package
-                if ($probe.Installed) { return @{ Present = $true; Reason = "$($probe.Command) returned 0." } }
-                return @{ Present = $false; Reason = "$($probe.Command) did not find it." }
+                return @{ Present = [bool]$probe.Installed; Reason = $probe.Reason }
             }
             'scoop' {
                 # Keyed by app name, without the bucket prefix. Stays in-process:

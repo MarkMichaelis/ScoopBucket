@@ -30,9 +30,9 @@ function Format-VersionCell {
 
 function ConvertFrom-WingetVersionTable {
     # Parse the fixed-width table emitted by `winget list` (and `winget
-    # upgrade`). Returns @{ '<id>' = @{ Installed; Available } } keyed by the
-    # Id column (lower-cased). The Available column is empty when the package
-    # is already current. winget right-pads columns to header width, so we
+    # upgrade`). Returns @{ '<id>' = @{ Id; Installed; Available } } keyed by
+    # the Id column (lower-cased); Id keeps winget's own casing. The Available
+    # column is empty when the package is already current. winget right-pads columns to header width, so we
     # slice by the header's column start offsets rather than splitting on
     # whitespace (Names and versions both contain spaces).
     [OutputType([hashtable])]
@@ -87,7 +87,8 @@ function ConvertFrom-WingetVersionTable {
         $installed = Format-VersionCell (& $slice $colVersion $verEnd)
         $available = if ($colAvailable -ge 0) { Format-VersionCell (& $slice $colAvailable $availEnd) } else { '' }
 
-        $map[(Format-VersionCell $id).ToLowerInvariant()] = @{ Installed = $installed; Available = $available }
+        $id = Format-VersionCell $id
+        $map[$id.ToLowerInvariant()] = @{ Id = $id; Installed = $installed; Available = $available }
     }
     return $map
 }
