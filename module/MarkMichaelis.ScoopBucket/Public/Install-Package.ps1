@@ -217,7 +217,8 @@ function Install-Package {
             return
         }
         foreach ($entry in $plan.ByBundle.Values) { $byBundle[$entry.BundlePath] = $entry }
-        foreach ($m in @($plan.First) + @($plan.Manifests)) { if ($m) { $manifestNames.Add($m) } }
+        # A manifest both needed and checked is dispatched once.
+        foreach ($m in @($plan.First) + @($plan.Manifests)) { if ($m -and -not @($manifestNames | Where-Object { $_ -ieq $m })) { $manifestNames.Add($m) } }
         $firstManifests = @($plan.First | Where-Object { $_ })
     }
 
