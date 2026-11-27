@@ -111,4 +111,9 @@ Describe 'Install-Package -Name <package> and its optional companions (#563)' -T
         $rows = @(Install-Package -Name 'app', 'app opt' -DryRun -SkipCompletion -IncludeUnchanged -BucketPath $script:bucket 3>$null 6>$null)
         $rows.Name | Should -Contain 'app opt'
     }
+
+    It 'installs a bundle named in full with every package it declares, companions included' {
+        $rows = @(Install-Package -Name 'Comp' -DryRun -SkipCompletion -IncludeUnchanged -BucketPath $script:bucket 3>$null 6>$null)
+        foreach ($n in 'app opt', 'ide', 'ide cfg') { $rows.Name | Should -Contain $n }
+    }
 }

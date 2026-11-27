@@ -488,8 +488,10 @@ function Install-Package {
         # packages leave out the optional companions nobody asked for (#563).
         $skip = if ($entry.PSObject.Properties['Skip'] -or ($entry -is [hashtable] -and $entry.ContainsKey('Skip'))) {
             @($entry.Skip | Where-Object { $_ })
-        } else {
+        } elseif (@($entry.Names | Where-Object { $_ }).Count -gt 0) {
             @(Get-OptionalCompanionSkip -Packages $pkgObjects -Name @($entry.Names))
+        } else {
+            @()   # a whole bundle installs everything it declares
         }
         # -ErrorAction/-ErrorVariable only tame the driver's NON-terminating
         # PackageInstallFailed records. A *terminating* error raised inside the
