@@ -108,6 +108,26 @@ function Get-PackageCatalog {
         }
     }
 
+    # A top-level bundle that another top-level bundle installs is shown only
+    # inside it (#559: AIAgents inside ClientBasePackages), so toggling the
+    # parent changes only its own children. Only a parent nothing else
+    # installs counts: two bundles that install each other both stay on top.
+    $rootLinkedBy = @{}
+    foreach ($b in @($bundles.Values | Where-Object IsRoot)) {
+        $targets = @($b.Packages | ForEach-Object { Get-PickerLinkTarget -Package $_ } | Where-Object { $_ }) + @($b.Depends)
+        foreach ($t in $targets) {
+            if ($t -ine $b.Bundle -and $bundles.ContainsKey($t) -and $bundles[$t].IsRoot) {
+                if (-not $rootLinkedBy.ContainsKey($t)) { $rootLinkedBy[$t] = [System.Collections.Generic.List[string]]::new() }
+                $rootLinkedBy[$t].Add($b.Bundle)
+            }
+        }
+    }
+    $nestedRoots = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
+    foreach ($t in $rootLinkedBy.Keys) {
+        if (@($rootLinkedBy[$t] | Where-Object { -not $rootLinkedBy.ContainsKey($_) }).Count -gt 0) { [void]$nestedRoots.Add($t) }
+    }
+    $showsOnTop = { param([string]$Name) $bundles[$Name].IsRoot -and -not $nestedRoots.Contains($Name) }
+
     # What the bundles use: linked or depended-on bundles, and bare manifests
     # that packages install through.
     $usedBundles   = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
@@ -223,7 +243,7 @@ function Get-PackageCatalog {
                 if ($sub.Companions.Contains($p.Name)) { continue }
                 if ($sub.Dependencies.Contains($p.Name) -and $ownedBy.ContainsKey("bundle|$target") -and @($ownedBy["bundle|$target"] | Where-Object { $_ -ne $Name }).Count -gt 0) { continue }
                 # A top-level bundle is shown once, at the top.
-                if (-not $bundles[$target].IsRoot) { $node.Children.Add((Get-NestedNode $target)) }
+                if (-not (& $showsOnTop $target)) { $node.Children.Add((Get-NestedNode $target)) }
                 continue
             }
             # A companion is shown only under its package; a dependency only
@@ -237,7 +257,7 @@ function Get-PackageCatalog {
             $node.Children.Add((New-PackageNode $p $Name $null @()))
         }
         foreach ($d in $info.Depends) {
-            if ($bundles.ContainsKey($d)) { if (-not $bundles[$d].IsRoot) { $node.Children.Add((Get-NestedNode $d)) } }
+            if ($bundles.ContainsKey($d)) { if (-not (& $showsOnTop $d)) { $node.Children.Add((Get-NestedNode $d)) } }
             elseif ($manifests.ContainsKey($d)) { $node.Children.Add((New-ManifestNode $manifests[$d])) }
         }
         [void]$building.Remove($Name)
@@ -255,7 +275,7 @@ function Get-PackageCatalog {
     }
 
     $roots = [System.Collections.Generic.List[object]]::new()
-    foreach ($b in @($bundles.Values | Where-Object IsRoot)) { $roots.Add((Get-BundleNode $b.Bundle)) }
+    foreach ($b in @($bundles.Values | Where-Object { & $showsOnTop $_.Bundle } | Sort-Object Bundle)) { $roots.Add((Get-BundleNode $b.Bundle)) }
 
     $byFolder = [System.Collections.Generic.SortedDictionary[string, object]]::new($ignoreCase)
     $addStandalone = {

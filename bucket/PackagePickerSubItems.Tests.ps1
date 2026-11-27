@@ -75,6 +75,12 @@ Invoke-PackageInstall -Packages `$Packages -Bundle '$Bundle'
     [Package]@{ Name = 'runtime'; Installer = 'choco';  Id = 'test-runtime' }
     [Package]@{ Name = 'Kit bundle';  Installer = 'scoop';  Id = 'MarkMichaelis/Kit' }
 '@
+    # Outer installs Inner, both bundles at the bucket root: Inner is shown
+    # only inside Outer. Ping and Pong install each other: both stay on top.
+    New-FixtureBundle -Dir $script:bucket -Bundle 'Outer' -PackagesText "    [Package]@{ Name = 'o1'; Installer = 'winget'; Id = 'Test.O1' }`n    [Package]@{ Name = 'Inner bundle'; Installer = 'scoop'; Id = 'MarkMichaelis/Inner' }"
+    New-FixtureBundle -Dir $script:bucket -Bundle 'Inner' -PackagesText "    [Package]@{ Name = 'i1'; Installer = 'winget'; Id = 'Test.I1' }`n    [Package]@{ Name = 'i2'; Installer = 'winget'; Id = 'Test.I2' }"
+    New-FixtureBundle -Dir $script:bucket -Bundle 'Ping' -PackagesText "    [Package]@{ Name = 'p1'; Installer = 'winget'; Id = 'Test.P1' }`n    [Package]@{ Name = 'Pong bundle'; Installer = 'scoop'; Id = 'MarkMichaelis/Pong' }"
+    New-FixtureBundle -Dir $script:bucket -Bundle 'Pong' -PackagesText "    [Package]@{ Name = 'q1'; Installer = 'winget'; Id = 'Test.Q1' }`n    [Package]@{ Name = 'Ping bundle'; Installer = 'scoop'; Id = 'MarkMichaelis/Ping' }"
     $dev = Join-Path $script:bucket 'dev'
     New-Item -ItemType Directory -Path $dev | Out-Null
     New-FixtureManifest -Dir $dev -Name 'Chocolatey' -Script "Write-Host 'choco'"
@@ -91,6 +97,21 @@ Invoke-PackageInstall -Packages `$Packages -Bundle '$Bundle'
 
 AfterAll {
     if ($script:bucket -and (Test-Path $script:bucket)) { Remove-Item -LiteralPath $script:bucket -Recurse -Force -ErrorAction Ignore }
+}
+
+Describe 'A top-level bundle another one installs (#559)' -Tag 'Light', 'Module' {
+    It 'is shown only inside the bundle that installs it' {
+        $script:catalog.Roots.Name | Should -Not -Contain 'Inner'
+        $inner = ($script:catalog.Roots | Where-Object Name -eq 'Outer').Children | Where-Object Name -eq 'Inner'
+        $inner.Kind | Should -Be 'Group'
+        $inner.Children.Name | Should -Be @('i1', 'i2')
+    }
+
+    It 'stays on top when two bundles install each other, so neither disappears' {
+        $script:catalog.Roots.Name | Should -Contain 'Ping'
+        $script:catalog.Roots.Name | Should -Contain 'Pong'
+        ($script:catalog.Roots | Where-Object Name -eq 'Ping').Children.Name | Should -Not -Contain 'Pong'
+    }
 }
 
 Describe 'Picker sub-items in the tree (#559)' -Tag 'Light', 'Module' {
