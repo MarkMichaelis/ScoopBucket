@@ -560,6 +560,150 @@ args = ["-y", "@upstash/context7-mcp"]
         }
     }
 
+    Context 'Add-McpServerToTomlConfig: Codex per-tool approval (#527)' {
+        BeforeEach {
+            $script:TmpDir = New-TempDir
+            $script:TempRoots.Add($script:TmpDir)
+            $script:CodexPath = Join-Path $script:TmpDir 'config.toml'
+            $script:Server = @{
+                Name = 'godaddy'; Command = 'C:\Program Files\PowerShell\7\pwsh.exe'; Arguments = @('-File', 'C:\x\GoDaddyDnsMcp.ps1')
+                CodexToolApproval = [ordered]@{ godaddy_list_domains = 'approve'; godaddy_delete_dns_record = 'prompt' }
+            }
+        }
+
+        It 'emits one approval_mode table per tool' {
+            Add-McpServerToTomlConfig -Path $script:CodexPath -AgentLabel 'Codex CLI' -Server $script:Server
+            $content = Get-Content -Path $script:CodexPath -Raw
+            $content | Should -Match '(?m)^\[mcp_servers\.godaddy\.tools\.godaddy_list_domains\]\r?\napproval_mode = "approve"'
+            $content | Should -Match '(?m)^\[mcp_servers\.godaddy\.tools\.godaddy_delete_dns_record\]\r?\napproval_mode = "prompt"'
+        }
+
+        It 'rewrites the tool tables on a re-run instead of duplicating them, and keeps other servers' {
+            Set-Content -Path $script:CodexPath -Value "[mcp_servers.other]`r`ncommand = `"x`"`r`n" -Encoding UTF8
+            Add-McpServerToTomlConfig -Path $script:CodexPath -AgentLabel 'Codex CLI' -Server $script:Server
+            Add-McpServerToTomlConfig -Path $script:CodexPath -AgentLabel 'Codex CLI' -Server $script:Server
+            $content = Get-Content -Path $script:CodexPath -Raw
+            ([regex]::Matches($content, '\[mcp_servers\.godaddy\.tools\.godaddy_list_domains\]')).Count | Should -Be 1
+            ([regex]::Matches($content, '(?m)^\[mcp_servers\.godaddy\]')).Count | Should -Be 1
+            $content | Should -Match '\[mcp_servers\.other\]'
+        }
+
+        It 'removes the server and all its sub-tables, leaving a similarly named server alone' {
+            Add-McpServerToTomlConfig -Path $script:CodexPath -AgentLabel 'Codex CLI' -Server $script:Server
+            Add-McpServerToTomlConfig -Path $script:CodexPath -AgentLabel 'Codex CLI' -Server @{ Name = 'godaddy2'; Command = 'y'; Arguments = @() }
+            Remove-McpServerFromTomlConfig -Path $script:CodexPath -AgentLabel 'Codex CLI' -ServerName 'godaddy'
+            $content = Get-Content -Path $script:CodexPath -Raw
+            $content | Should -Not -Match '\[mcp_servers\.godaddy[\].]'
+            $content | Should -Match '\[mcp_servers\.godaddy2\]'
+        }
+
+        It 'writes approval tables only for Codex, not for other TOML agents such as Grok' {
+            $grok = Join-Path $script:TmpDir 'grok.toml'
+            Add-McpServerToTomlConfig -Path $grok -AgentLabel 'Grok CLI' -Server $script:Server
+            $content = Get-Content -Path $grok -Raw
+            $content | Should -Match '(?m)^\[mcp_servers\.godaddy\]'
+            $content | Should -Not -Match 'approval_mode' -Because 'only the Codex schema is known to accept per-tool approval'
+        }
+    }
+
+    Context 'GoDaddy DNS MCP wiring (#527)' {
+        BeforeEach {
+            $script:TmpDir = New-TempDir
+            $script:TempRoots.Add($script:TmpDir)
+        }
+
+        It 'builds a pwsh stdio entry where reads run unattended and writes always prompt in Codex' {
+            $e = Get-GoDaddyMcpServerEntry -ScriptPath 'C:\x\GoDaddyDnsMcp.ps1' -PwshPath 'C:\pwsh.exe'
+            $e.Name | Should -Be 'godaddy'
+            $e.Command | Should -Be 'C:\pwsh.exe'
+            $e.Arguments | Should -Be @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', 'C:\x\GoDaddyDnsMcp.ps1')
+            foreach ($t in (Get-GoDaddyMcpToolName).Read) { $e.CodexToolApproval[$t] | Should -Be 'approve' }
+            foreach ($t in (Get-GoDaddyMcpToolName).Write) { $e.CodexToolApproval[$t] | Should -Be 'prompt' }
+        }
+
+        It 'skips agents with no verified per-call approval (Grok CLI, Antigravity), naming why' {
+            $e = Get-GoDaddyMcpServerEntry -ScriptPath 'C:\x\GoDaddyDnsMcp.ps1' -PwshPath 'C:\pwsh.exe'
+            $e.SkipAgents | Should -Be @('Grok CLI', 'Antigravity')
+            $e.SkipReason | Should -Match 'approval'
+            $labels = @((Get-AIAgentsMcpJsonAgent) + (Get-AIAgentsMcpTomlAgent) | ForEach-Object Label)
+            foreach ($skip in $e.SkipAgents) { $labels | Should -Contain $skip -Because 'a skip must name a real wired agent' }
+        }
+
+        It 'lists the same tool names the server exposes' {
+            Import-Module (Join-Path $PSScriptRoot 'ai\GoDaddyDnsMcp.psm1') -Force
+            try {
+                $served = @(Get-GoDaddyMcpToolDefinitions | ForEach-Object { $_.name }) | Sort-Object
+                $wired = @((Get-GoDaddyMcpToolName).Read + (Get-GoDaddyMcpToolName).Write) | Sort-Object
+                $wired | Should -Be $served
+            }
+            finally { Remove-Module GoDaddyDnsMcp -Force -ErrorAction SilentlyContinue }
+        }
+
+        It 'finds the server files under ai\ (repo) and flat (scoop app folder)' {
+            $repo = Join-Path $script:TmpDir 'repo'; New-Item -ItemType Directory -Path (Join-Path $repo 'ai') -Force | Out-Null
+            'x' | Set-Content (Join-Path $repo 'ai\GoDaddyDnsMcp.ps1'); 'x' | Set-Content (Join-Path $repo 'ai\GoDaddyDnsMcp.psm1')
+            Find-GoDaddyMcpSource -BaseDirectory $repo | Should -Be (Join-Path $repo 'ai')
+            $flat = Join-Path $script:TmpDir 'flat'; New-Item -ItemType Directory -Path $flat -Force | Out-Null
+            'x' | Set-Content (Join-Path $flat 'GoDaddyDnsMcp.ps1'); 'x' | Set-Content (Join-Path $flat 'GoDaddyDnsMcp.psm1')
+            Find-GoDaddyMcpSource -BaseDirectory $flat | Should -Be $flat
+            Find-GoDaddyMcpSource -BaseDirectory $script:TmpDir | Should -BeNullOrEmpty
+        }
+
+        It 'deploys the server files to a stable folder and returns an entry pointing there' {
+            Mock Test-GoDaddyCliPresent { $true }
+            $dest = Join-Path $script:TmpDir 'deployed'
+            $e = Install-GoDaddyMcpServer -BaseDirectory $PSScriptRoot -DestinationDirectory $dest 6>$null
+            $e.Arguments[-1] | Should -Be (Join-Path $dest 'GoDaddyDnsMcp.ps1')
+            (Get-FileHash (Join-Path $dest 'GoDaddyDnsMcp.psm1')).Hash | Should -Be (Get-FileHash (Join-Path $PSScriptRoot 'ai\GoDaddyDnsMcp.psm1')).Hash
+            { Install-GoDaddyMcpServer -BaseDirectory $PSScriptRoot -DestinationDirectory $dest 6>$null } | Should -Not -Throw -Because 'a re-run must be safe'
+        }
+
+        It 'returns nothing and deploys nothing when gddy is not installed' {
+            Mock Test-GoDaddyCliPresent { $false }
+            $dest = Join-Path $script:TmpDir 'never'
+            Install-GoDaddyMcpServer -BaseDirectory $PSScriptRoot -DestinationDirectory $dest 6>$null | Should -BeNullOrEmpty
+            Test-Path $dest | Should -BeFalse
+        }
+
+        It 'adds Claude Code rules once, keeping existing settings and rules' {
+            $settings = Join-Path $script:TmpDir 'settings.json'
+            '{ "theme": "dark", "permissions": { "allow": ["Bash(git status)"], "deny": ["Read(./.env)"] } }' | Set-Content $settings
+            Set-GoDaddyMcpClaudePermission -SettingsPath $settings | Should -BeTrue
+            Set-GoDaddyMcpClaudePermission -SettingsPath $settings | Should -BeFalse -Because 'a second run changes nothing'
+            $s = Get-Content $settings -Raw | ConvertFrom-Json
+            $s.theme | Should -Be 'dark'
+            $s.permissions.deny | Should -Be @('Read(./.env)')
+            $s.permissions.allow | Should -Contain 'Bash(git status)'
+            $s.permissions.allow | Should -Contain 'mcp__godaddy__godaddy_list_dns_records'
+            $s.permissions.allow | Should -Not -Contain 'mcp__godaddy__godaddy_update_dns_record'
+            $s.permissions.ask | Should -Contain 'mcp__godaddy__godaddy_update_dns_record'
+            foreach ($rule in 'Bash(gddy dns set:*)', 'Bash(*gddy* dns delete *)', 'PowerShell(gddy dns set *)', 'PowerShell(*gddy* api call *)') {
+                $s.permissions.ask | Should -Contain $rule -Because 'raw gddy writes must prompt from either shell tool'
+            }
+            @($s.permissions.allow | Where-Object { $_ -eq 'mcp__godaddy__godaddy_verify_dns' }).Count | Should -Be 1
+        }
+
+        It 'keeps a one-time backup of the original and leaves date-like values untouched' {
+            $settings = Join-Path $script:TmpDir 'settings.json'
+            $original = '{ "note": "2024-01-15T10:00:00Z", "permissions": { "allow": [] } }'
+            $original | Set-Content $settings -NoNewline
+            Set-GoDaddyMcpClaudePermission -SettingsPath $settings | Out-Null
+            Get-Content "$settings.pre-godaddy.bak" -Raw | Should -Be $original
+            (Get-Content $settings -Raw) | Should -Match '"note": "2024-01-15T10:00:00Z"'
+            @(Get-ChildItem $script:TmpDir -Filter '*.tmp') | Should -BeNullOrEmpty
+        }
+
+        It 'creates Claude Code settings when none exist, and leaves invalid JSON untouched' {
+            $fresh = Join-Path $script:TmpDir 'new\settings.json'
+            Set-GoDaddyMcpClaudePermission -SettingsPath $fresh | Should -BeTrue
+            (Get-Content $fresh -Raw | ConvertFrom-Json).permissions.ask | Should -Contain 'mcp__godaddy__godaddy_create_dns_record'
+            $bad = Join-Path $script:TmpDir 'bad.json'
+            '{ not json' | Set-Content $bad
+            Set-GoDaddyMcpClaudePermission -SettingsPath $bad 3>$null | Should -BeFalse
+            Get-Content $bad -Raw | Should -Match 'not json'
+        }
+    }
+
     Context 'Install-AIAgentsMcpConfiguration (orchestration)' {
         BeforeEach {
             # Force npm/npx/dotnet/gh/playwright "absent" so the real package
@@ -574,6 +718,29 @@ args = ["-y", "@upstash/context7-mcp"]
             Mock Set-PersistedGitHubToken { }
             Mock Get-McpProfileTargets { @() }
             Mock Add-McpProfileSentinel { $false }
+            # Whether gddy is installed is machine state; pin it absent here.
+            Mock Install-GoDaddyMcpServer { $null }
+            Mock Set-GoDaddyMcpClaudePermission { $false }
+        }
+
+        It 'writes the godaddy server into Claude Code, Claude Desktop, Copilot CLI and Codex -- not Grok or Antigravity -- with Claude Code permissions, when gddy is present' {
+            Mock Install-GoDaddyMcpServer { Get-GoDaddyMcpServerEntry -ScriptPath 'C:\x\GoDaddyDnsMcp.ps1' -PwshPath 'pwsh' }
+            $env:GITHUB_PERSONAL_ACCESS_TOKEN = ''
+            Install-AIAgentsMcpConfiguration 6>$null
+            foreach ($label in 'Claude Code CLI', 'Claude Desktop', 'GitHub Copilot CLI') {
+                Should -Invoke Add-McpServerToJsonConfig -Times 1 -Exactly -ParameterFilter { $Server.Name -eq 'godaddy' -and $AgentLabel -eq $label }
+            }
+            Should -Invoke Add-McpServerToJsonConfig -Times 0 -Exactly -ParameterFilter { $Server.Name -eq 'godaddy' -and $AgentLabel -eq 'Antigravity' }
+            Should -Invoke Add-McpServerToTomlConfig -Times 1 -Exactly -ParameterFilter { $Server.Name -eq 'godaddy' -and $AgentLabel -eq 'Codex CLI' }
+            Should -Invoke Add-McpServerToTomlConfig -Times 0 -Exactly -ParameterFilter { $Server.Name -eq 'godaddy' -and $AgentLabel -eq 'Grok CLI' }
+            Should -Invoke Set-GoDaddyMcpClaudePermission -Times 1 -Exactly
+        }
+
+        It 'skips the godaddy server and its permissions when gddy is absent' {
+            $env:GITHUB_PERSONAL_ACCESS_TOKEN = ''
+            Install-AIAgentsMcpConfiguration 6>$null
+            Should -Invoke Add-McpServerToJsonConfig -Times 0 -Exactly -ParameterFilter { $Server.Name -eq 'godaddy' }
+            Should -Invoke Set-GoDaddyMcpClaudePermission -Times 0 -Exactly
         }
 
         It 'writes every MCP server into every non-skipped JSON agent' {
