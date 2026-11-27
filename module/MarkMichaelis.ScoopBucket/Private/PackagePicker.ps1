@@ -491,6 +491,7 @@ function Format-PickerScreen {
             $row = $rows[$i]
             $box = Get-PickerBox -State $State -Node $row.Node
             $suffix = ''
+            $note = ''
             if ($row.Node.Kind -eq 'Group') {
                 $ids = @((Get-PickerLeaves -Node $row.Node) | ForEach-Object { $_.Identity })
                 $on = @($ids | Where-Object { $State.Selected.Contains($_) -or $State.Required.Contains($_) }).Count
@@ -503,11 +504,19 @@ function Format-PickerScreen {
                 # The same package under another top-level group shares this checkbox.
                 $homeGroup = $State.RootNames[($row.Path -split '/')[1]]
                 $elsewhere = @($State.TopGroups[$row.Node.Identity] | Where-Object { $_ -ne $homeGroup })
-                if ($elsewhere.Count -gt 0) { $suffix += "  also in $($elsewhere -join ', ')" }
+                if ($elsewhere.Count -gt 0) { $note = "  (also in $($elsewhere -join ', '))" }
             }
             $color = Get-PickerBoxColor -Box $box
             $marker = if ($i -eq $State.Cursor) { '>' } else { ' ' }
-            & $add ("{0} {1}{2} {3}{4}" -f $marker, ('  ' * $row.Depth), $box, $row.Node.Name, $suffix) $color ($i -eq $State.Cursor)
+            $text = "{0} {1}{2} {3}{4}" -f $marker, ('  ' * $row.Depth), $box, $row.Node.Name, $suffix
+            & $add ($text + $note) $color ($i -eq $State.Cursor)
+            # The "also in" note is a side remark: dimmed, unless the cursor
+            # row's highlight already draws the whole line in one color.
+            if ($note -and $i -ne $State.Cursor) {
+                $lines[$lines.Count - 1] | Add-Member -NotePropertyName Segments -NotePropertyValue @(
+                    [pscustomobject]@{ Text = $text; Color = $color }
+                    [pscustomobject]@{ Text = $note; Color = 'DarkGray' })
+            }
         }
         while ($lines.Count -lt $treeHeight + 2) { & $add '' }
         $plan = Get-PickerPlan -State $State

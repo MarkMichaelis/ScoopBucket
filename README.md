@@ -239,7 +239,7 @@ Space toggle  Right/Left open/close  / filter  d defaults  a all  n none  ? deta
 > [~] Client Base Packages  - 30/35
     [*] exiftool  installed
     [x] Notion
-    [*] ChatGPT (Store)  installed  also in AI Agents
+    [*] ChatGPT  installed  (also in AI Agents)
     [x] Microsoft Office 365  + 5/5
     [ ] Also available  + 0/5
   [~] Developer Base Packages  + 10/23
@@ -266,7 +266,7 @@ Space toggle  Right/Left open/close  / filter  d defaults  a all  n none  ? deta
   everything in it, then only what is installed (so you can add new installs
   one by one), then back to how it was. The footer says which comes next.
 - A package declared in two top-level groups is one checkbox, so the row says
-  where else it appears (`also in AI Agents`).
+  where else it appears, dimmed: `(also in AI Agents)`.
 - Keys: arrows move, Right/Left open and close a group, `/` filters by name
   (a group whose name matches shows all of its items), `?` shows an item's
   engine, id and notes, `d` / `a` / `n` select the defaults, everything, or

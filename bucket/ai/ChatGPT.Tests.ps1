@@ -39,7 +39,7 @@ Describe 'ChatGPT: installs the current app, not ChatGPT Classic (#511)' -Tag 'L
 
     It 'declares the current ChatGPT Store app in <Bundle>' -ForEach @(
         @{ Bundle = 'ChatGPT';            Name = 'ChatGPT' }
-        @{ Bundle = 'ClientBasePackages'; Name = 'ChatGPT (Store)' }
+        @{ Bundle = 'ClientBasePackages'; Name = 'ChatGPT' }
     ) {
         $pkg = @($script:pkgs | Where-Object { $_.Bundle -eq $Bundle -and $_.Name -eq $Name })
         $pkg.Count        | Should -Be 1
