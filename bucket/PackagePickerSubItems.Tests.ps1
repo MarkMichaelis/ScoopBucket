@@ -79,6 +79,8 @@ Invoke-PackageInstall -Packages `$Packages -Bundle '$Bundle'
     New-Item -ItemType Directory -Path $dev | Out-Null
     New-FixtureManifest -Dir $dev -Name 'Chocolatey' -Script "Write-Host 'choco'"
     New-FixtureManifest -Dir $dev -Name 'SvcCfg' -Script "Write-Host 'svc cfg'"
+    # Unused, but the same package RootC already lists: not offered again.
+    New-FixtureBundle -Dir $dev -Bundle 'ZAppAgain' -PackagesText "    [Package]@{ Name = 'app again'; Installer = 'winget'; Id = 'Test.App' }"
     New-FixtureBundle -Dir $dev -Bundle 'Kit' -PackagesText "    [Package]@{ Name = 'k1'; Installer = 'winget'; Id = 'Test.K1' }"
 
     $script:catalog = & $script:M { param($b) Get-PackageCatalog -BucketPath $b } $script:bucket
@@ -130,6 +132,13 @@ Describe 'Picker sub-items in the tree (#559)' -Tag 'Light', 'Module' {
         $choco = & $script:child $runtime 'Chocolatey'
         $choco.Role | Should -Be 'Dependency'
         $choco.Kind | Should -Be 'Manifest'
+    }
+
+    It 'does not offer an unused bundle again when its package is already listed' {
+        $all = [System.Collections.Generic.List[string]]::new()
+        $walk = { param($n) $all.Add($n.Name); foreach ($c in @($n.Children)) { if ($c) { & $walk $c } } }
+        foreach ($r in $script:catalog.Roots) { & $walk $r }
+        $all | Should -Not -Contain 'app again'
     }
 
     It 'does not offer Chocolatey again under "Also available"' {

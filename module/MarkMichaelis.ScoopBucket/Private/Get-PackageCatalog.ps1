@@ -264,8 +264,22 @@ function Get-PackageCatalog {
         if (-not $byFolder.ContainsKey($key)) { $byFolder[$key] = [System.Collections.Generic.List[object]]::new() }
         $byFolder[$key].Add($Node)
     }
+    # An unused bundle whose one package the tree already lists is the same
+    # checkbox; it is not offered again under "Also available".
+    $listed = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
+    $seenKeys = [System.Collections.Generic.HashSet[string]]::new($ignoreCase)
+    $collect = {
+        param($n)
+        if (-not $seenKeys.Add($n.Key)) { return }
+        if ($n.Kind -ne 'Group' -and $n.Identity) { [void]$listed.Add($n.Identity) }
+        foreach ($c in @($n.Children)) { if ($c) { & $collect $c } }
+    }
+    foreach ($r in $roots) { & $collect $r }
     foreach ($b in $bundles.Values) {
-        if (-not $b.IsRoot -and -not $usedBundles.Contains($b.Bundle)) { & $addStandalone $b.Folder (Get-NestedNode $b.Bundle) }
+        if ($b.IsRoot -or $usedBundles.Contains($b.Bundle)) { continue }
+        $standalone = Get-NestedNode $b.Bundle
+        if ($standalone.Kind -ne 'Group' -and $listed.Contains($standalone.Identity)) { continue }
+        & $addStandalone $b.Folder $standalone
     }
     foreach ($m in $manifests.Values) {
         if (-not $bundles.ContainsKey($m.Name) -and -not $usedManifests.Contains($m.Name)) { & $addStandalone $m.Folder (New-ManifestNode $m) }
