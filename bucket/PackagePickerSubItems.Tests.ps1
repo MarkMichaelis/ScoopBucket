@@ -350,15 +350,15 @@ Describe 'Picker sub-item behaviour (#559)' -Tag 'Light', 'Module' {
         ($rows | Where-Object { $_.Node.Name -eq 'app cfg' }).Depth | Should -Be ($appRow.Depth + 1)
     }
 
-    # The fold marker leads the row, as in a tree view: after the name, a '+'
+    # The fold marker sits against the box, +[x]: after the name, a '+'
     # or '-' next to "installed" read as add / remove (#563).
     It 'marks a package row that unfolds, the way a group row is marked, before its box' {
         $rows = & $script:M { param($s) Get-PickerRows -State $s } $script:state
         [void]$script:state.Expanded.Add(($rows | Where-Object { $_.Node.Name -eq 'Root C' }).Path)
         $lines = (& $script:M { param($s) Format-PickerScreen -State $s -Width 100 -Height 30 } $script:state).Text
-        # fold marker, then the installed-checkmark column, then the box
-        ($lines | Where-Object { $_ -match '\] Root C\b' }) | Should -Match '- . \[.\] Root C'
-        ($lines | Where-Object { $_ -match '\] app\b' }) | Should -Match '\+ . \[.\] app\b'
+        # the installed-checkmark column, then the fold marker against the box: +[x] (#563)
+        ($lines | Where-Object { $_ -match '\] Root C\b' }) | Should -Match ' -\[.\] Root C'
+        ($lines | Where-Object { $_ -match '\] app\b' }) | Should -Match ' \+\[.\] app\b'
         ($lines | Where-Object { $_ -match '\] core\b' }) | Should -Not -Match '[+-]'
         foreach ($l in @($lines | Where-Object { $_ -match '\] (app|core|Root C)\b' })) {
             ($l -replace '\s+$', '') | Should -Not -Match '\]\s.*\s[+-](\s|$)' -Because 'nothing after the name looks like a sign'
@@ -369,7 +369,7 @@ Describe 'Picker sub-item behaviour (#559)' -Tag 'Light', 'Module' {
         $script:state.Filter = 'app'
         try {
             $lines = (& $script:M { param($s) Format-PickerScreen -State $s -Width 100 -Height 30 } $script:state).Text
-            ($lines | Where-Object { $_ -match '\] app\b' } | Select-Object -First 1) | Should -Match '- . \[.\] app\b'
+            ($lines | Where-Object { $_ -match '\] app\b' } | Select-Object -First 1) | Should -Match ' -\[.\] app\b'
         } finally { $script:state.Filter = '' }
     }
 

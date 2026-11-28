@@ -625,7 +625,7 @@ function Format-PickerScreen {
             $box = Get-PickerBox -State $State -Node $row.Node
             $suffix = ''
             $note = ''
-            # The fold marker leads the row, as in a tree view: '+' folded,
+            # The fold marker sits against the box: '+' folded,
             # '-' open, blank for a row with nothing under it. After the name
             # it read as add / remove next to "installed" (#563). A package
             # with sub-items unfolds like a group (#559).
@@ -648,7 +648,9 @@ function Format-PickerScreen {
             $color = Get-PickerBoxColor -Box $box
             $marker = if ($i -eq $State.Cursor) { '>' } else { ' ' }
             $mark = if ($row.Node.Kind -ne 'Group' -and (Test-PickerInstalled -State $State -Identity $row.Node.Identity)) { $check } else { ' ' }
-            $text = "{0} {1}{2} {3} {4} {5}{6}" -f $marker, ('  ' * $row.Depth), $fold, $mark, $box, $row.Node.Name, $suffix
+            # The installed checkmark, then the fold marker against the box:
+            # "✓ +[*] name" (#563).
+            $text = "{0} {1}{2} {3}{4} {5}{6}" -f $marker, ('  ' * $row.Depth), $mark, $fold, $box, $row.Node.Name, $suffix
             # The "also in" note is a side remark: dimmed, unless the cursor
             # row's highlight already draws the whole line in one color.
             $segments = $null
