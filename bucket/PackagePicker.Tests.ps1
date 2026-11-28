@@ -306,7 +306,24 @@ Describe 'The picker''s screen and keys (#543)' -Tag 'Light', 'Module' {
         $null = & $script:press (Key -Key RightArrow)
         $lines = & $script:screen
         $lines | Where-Object { $_ -match '\[x\] a1\b' } | Should -Not -BeNullOrEmpty
-        $lines | Where-Object { $_ -match '\[\*\] a2\b.*installed' } | Should -Not -BeNullOrEmpty
+        $lines | Where-Object { $_ -match "$([char]0x2713) \[\*\] a2\b" } | Should -Not -BeNullOrEmpty
+    }
+
+    # "installed" after the name read as part of it; a checkmark in its own
+    # column says the same thing (#563).
+    It 'marks an installed package with a checkmark, not a word after its name' {
+        $null = & $script:press (Key -Key RightArrow)
+        $lines = & $script:screen
+        $a1 = @($lines | Where-Object { $_ -match '\] a1\b' })[0]
+        $a2 = @($lines | Where-Object { $_ -match '\] a2\b' })[0]
+        $a2 | Should -Match "$([char]0x2713) \["
+        $a1 | Should -Not -Match "$([char]0x2713)"
+        $a2 | Should -Not -Match 'installed'
+        $a1.IndexOf('[') | Should -Be $a2.IndexOf('[') -Because 'the checkmark column keeps the boxes in line'
+    }
+
+    It 'explains the checkmark in the legend' {
+        (& $script:screen)[1] | Should -Match "$([char]0x2713) installed"
     }
 
     It 'filters to matching items as you type after /' {
@@ -337,6 +354,7 @@ Describe 'The picker''s screen and keys (#543)' -Tag 'Light', 'Module' {
         $lines = (& $script:M { param($s) Format-PickerScreen -State $s -Width 80 -Height 30 } $script:state).Text
         $lines[0] | Should -Not -Match '~\s*$' -Because 'a cut line ends in ~'
         $lines[1] | Should -Match '\[ \] skip'
+        $lines[1] | Should -Match "$([char]0x2713) installed" -Because 'the whole legend fits'
     }
 
     It 'marks an item that also sits in another top-level group' {
