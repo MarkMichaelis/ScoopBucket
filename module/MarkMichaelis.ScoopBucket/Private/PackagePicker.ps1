@@ -605,11 +605,12 @@ function Format-PickerScreen {
         # sit on the bottom line.
         & $add 'Space check  Left/Right fold  / filter  d/a/n defaults/all/none  Enter review' 'White'
         # The legend: every box, drawn in the color its rows use.
-        $legend = foreach ($entry in @(
-                @('[x]', 'install'), @('[*]', 'upgrade'), @('[=]', 'keep as is'),
+        $check = [char]0x2713
+        $legend = @(foreach ($entry in @(
+                @('[x]', 'install'), @('[*]', 'upgrade'), @('[=]', 'keep'),
                 @('[!]', 'needed'), @('[~]', 'some'), @('[ ]', 'skip'))) {
             [pscustomobject]@{ Text = "$($entry[0]) $($entry[1])  "; Color = Get-PickerBoxColor -Box $entry[0] }
-        }
+        }) + [pscustomobject]@{ Text = "$check installed"; Color = 'Gray' }
         $legendText = -join @($legend | ForEach-Object { $_.Text })
         $lines.Add([pscustomobject]@{ Text = $legendText.PadRight($Width).Substring(0, $Width); Color = 'Gray'; Highlight = $false; Segments = @($legend) })
         $rows = Get-PickerRows -State $State
@@ -624,19 +625,20 @@ function Format-PickerScreen {
             $box = Get-PickerBox -State $State -Node $row.Node
             $suffix = ''
             $note = ''
+            # The fold marker leads the row, as in a tree view: '+' folded,
+            # '-' open, blank for a row with nothing under it. After the name
+            # it read as add / remove next to "installed" (#563). A package
+            # with sub-items unfolds like a group (#559).
+            $fold = if (-not (Test-PickerOpenable -Node $row.Node)) { ' ' }
+                    elseif ($State.Filter -or $State.Expanded.Contains($row.Path)) { '-' } else { '+' }
             if ($row.Node.Kind -eq 'Group') {
                 $ids = @((Get-PickerLeaves -Node $row.Node) | ForEach-Object { $_.Identity })
                 $on = @($ids | Where-Object { $State.Selected.Contains($_) -or $State.Required.Contains($_) }).Count
-                $sign = if ($row.Node.Kind -eq 'Group' -and -not ($State.Filter -or $State.Expanded.Contains($row.Path))) { '+' } else { '-' }
-                $suffix = "  $sign $on/$($ids.Count)"
+                $suffix = "  $on/$($ids.Count)"
             } else {
-                # A package with sub-items unfolds like a group (#559).
-                if (Test-PickerOpenable -Node $row.Node) {
-                    $suffix = if ($State.Filter -or $State.Expanded.Contains($row.Path)) { '  -' } else { '  +' }
-                }
-                if ($box -in '[*]', '[=]') { $suffix += '  installed' }
-                elseif ($box -eq '[!]' -and -not $State.Always.Contains($row.Node.Identity)) { $suffix += '  needed' }
-                if ($State.Always.Contains($row.Node.Identity)) { $suffix += '  required' }
+                # Installed is the checkmark column, and needed is the [!] box:
+                # a word after the name read as part of it (#563).
+                if ($State.Always.Contains($row.Node.Identity)) { $suffix += '  (required)' }
                 if ($row.Node.Kind -eq 'Manifest') { $suffix += '  (manifest)' }
                 # The same package under another top-level group shares this checkbox.
                 $homeGroup = $State.RootNames[($row.Path -split '/')[1]]
@@ -645,7 +647,8 @@ function Format-PickerScreen {
             }
             $color = Get-PickerBoxColor -Box $box
             $marker = if ($i -eq $State.Cursor) { '>' } else { ' ' }
-            $text = "{0} {1}{2} {3}{4}" -f $marker, ('  ' * $row.Depth), $box, $row.Node.Name, $suffix
+            $mark = if ($row.Node.Kind -ne 'Group' -and (Test-PickerInstalled -State $State -Identity $row.Node.Identity)) { $check } else { ' ' }
+            $text = "{0} {1}{2} {3} {4} {5}{6}" -f $marker, ('  ' * $row.Depth), $fold, $mark, $box, $row.Node.Name, $suffix
             # The "also in" note is a side remark: dimmed, unless the cursor
             # row's highlight already draws the whole line in one color.
             $segments = $null
