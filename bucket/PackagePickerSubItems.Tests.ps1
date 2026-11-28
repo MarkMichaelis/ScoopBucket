@@ -365,6 +365,14 @@ Describe 'Picker sub-item behaviour (#559)' -Tag 'Light', 'Module' {
         }
     }
 
+    It 'shows a row with sub-items as open while a filter is on' {
+        $script:state.Filter = 'app'
+        try {
+            $lines = (& $script:M { param($s) Format-PickerScreen -State $s -Width 100 -Height 30 } $script:state).Text
+            ($lines | Where-Object { $_ -match '\] app\b' } | Select-Object -First 1) | Should -Match '- . \[.\] app\b'
+        } finally { $script:state.Filter = '' }
+    }
+
     It 'lines up the boxes of rows that fold and rows that do not' {
         $rows = & $script:M { param($s) Get-PickerRows -State $s } $script:state
         [void]$script:state.Expanded.Add(($rows | Where-Object { $_.Node.Name -eq 'Root C' }).Path)
