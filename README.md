@@ -241,18 +241,18 @@ Run `Install-Package` with no arguments in a console to choose from every
 installable item in the bucket, shown as a tree:
 
 ```
-Space toggle  Right/Left open/close  / filter  d defaults  a all  n none  ? details  Enter review  Esc cancel
-[x] install  [*] installed, upgrade  [=] installed, leave as is  [!] needed by a choice  [~] partly checked  [ ] skip
-  [~] AI Agents  + 14/16
-> [~] Client Base Packages  - 30/35
-    [*] exiftool  installed
-    [x] Notion
-    [*] ChatGPT  installed  (also in AI Agents)
-    [x] Microsoft Office 365  + 5/5
-    [ ] Also available  + 0/5
-  [~] Developer Base Packages  + 10/23
-  [~] OS Base Packages  + 19/26
-  [ ] Admin  + 0/3
+Space check  Left/Right fold  / filter  d/a/n defaults/all/none  Enter review
+[x] install  [*] upgrade  [=] keep  [!] needed  [~] some  [ ] skip  ✓ installed
+  +   [~] AI Agents  14/16
+> -   [~] Client Base Packages  30/35
+        ✓ [*] exiftool
+          [x] Notion
+        ✓ [*] ChatGPT  (also in AI Agents)
+      +   [x] Microsoft Office 365  5/5
+      +   [ ] Also available  0/5
+  +   [~] Developer Base Packages  10/23
+  +   [~] OS Base Packages  19/26
+  +   [ ] Admin  0/3
 20 new   50 upgrades   0 needed     Space: check all
 ```
 
@@ -267,15 +267,17 @@ Space toggle  Right/Left open/close  / filter  d defaults  a all  n none  ? deta
     AI Agents, ...); a folder no group matches (`admin`) is a group of its own.
 - It starts with the default set (see `Default` below) plus everything already
   installed, so `d` (defaults) selects what `Install-Package -Name '*'` installs.
-- The legend under the keys explains every box. `[*]` and `[=]` are both
-  installed items: `[*]` is checked and will be upgraded, `[=]` is unchecked and
+- The legend under the keys explains every box. A `✓` before the box marks an
+  installed item: `[*]` is checked and will be upgraded, `[=]` is unchecked and
   is left exactly as it is.
+- A `+` at the start of a row means it is folded and has more under it; `-`
+  means it is open. Right and Left open and close it.
 - Space on an item toggles it. Space on a group steps through three states:
   everything in it, then only what is installed (so you can add new installs
   one by one), then back to how it was. The footer says which comes next.
 - A package declared in two top-level groups is one checkbox, so the row says
   where else it appears, dimmed: `(also in AI Agents)`.
-- A package unfolds (`+`) to show its sub-items, taken from its declaration:
+- A package unfolds (a `+` before its row) to show its sub-items, taken from its declaration:
   - **companions** (`Companions`), such as Git settings for Beyond Compare or
     DbxCli for Dropbox, are on by their own default, go off and back on with
     their package, and can each be turned off; the install then skips them.
@@ -285,7 +287,7 @@ Space toggle  Right/Left open/close  / filter  d defaults  a all  n none  ? deta
     Base) is shown only as a sub-item here.
   - **Chocolatey**, under every package installed with choco.
 - A package declared `Required` (Git) is always installed and says
-  `required`.
+  `(required)`.
 - Keys: arrows move, Right/Left open and close a group, `/` filters by name
   (a group whose name matches shows all of its items), `?` shows an item's
   engine, id and notes, `d` / `a` / `n` select the defaults, everything, or
