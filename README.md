@@ -243,16 +243,15 @@ installable item in the bucket, shown as a tree:
 ```
 Space check  Left/Right fold  / filter  d/a/n defaults/all/none  Enter review
 [x] install  [*] upgrade  [=] keep  [!] needed  [~] some  [ ] skip  ✓ installed
-  +   [~] AI Agents  14/16
-> -   [~] Client Base Packages  30/35
-        ✓ [*] exiftool
-          [x] Notion
-        ✓ [*] ChatGPT  (also in AI Agents)
-      +   [x] Microsoft Office 365  5/5
-      +   [ ] Also available  0/5
-  +   [~] Developer Base Packages  10/23
-  +   [~] OS Base Packages  19/26
-  +   [ ] Admin  0/3
+>   -[~] Client Base Packages  30/35
+    ✓  [*] exiftool
+      +[x] AI Agents  14/14
+       [x] Notion
+      +[x] Microsoft Office 365  5/5
+      +[ ] Also available  0/5
+    +[~] Developer Base Packages  10/23
+    +[~] OS Base Packages  19/26
+    +[ ] Admin  0/3
 20 new   50 upgrades   0 needed     Space: check all
 ```
 
@@ -270,14 +269,14 @@ Space check  Left/Right fold  / filter  d/a/n defaults/all/none  Enter review
 - The legend under the keys explains every box. A `✓` before the box marks an
   installed item: `[*]` is checked and will be upgraded, `[=]` is unchecked and
   is left exactly as it is.
-- A `+` at the start of a row means it is folded and has more under it; `-`
-  means it is open. Right and Left open and close it.
+- A `+` against the box (`+[x]`) means the row is folded and has more under
+  it; `-` means it is open. Right and Left open and close it.
 - Space on an item toggles it. Space on a group steps through three states:
   everything in it, then only what is installed (so you can add new installs
   one by one), then back to how it was. The footer says which comes next.
 - A package declared in two top-level groups is one checkbox, so the row says
-  where else it appears, dimmed: `(also in AI Agents)`.
-- A package unfolds (a `+` before its row) to show its sub-items, taken from its declaration:
+  where else it appears, dimmed: `(also in Developer Base Packages)`.
+- A package unfolds (`+[x]`) to show its sub-items, taken from its declaration:
   - **companions** (`Companions`), such as Git settings for Beyond Compare or
     DbxCli for Dropbox, are on by their own default, go off and back on with
     their package, and can each be turned off; the install then skips them.
